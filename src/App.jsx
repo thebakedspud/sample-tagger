@@ -26,15 +26,17 @@ export default function App() {
   const liveRef = useRef(null)
   const announce = (msg) => {
     if (!liveRef.current) return
-    liveRef.current.textContent = ''          // clear
+    liveRef.current.textContent = '' // clear
     // tiny delay helps some SRs pick up consecutive messages
-    setTimeout(() => { liveRef.current.textContent = msg }, 30)
+    setTimeout(() => {
+      liveRef.current.textContent = msg
+    }, 30)
   }
 
   // DUMMY DATA (in-memory)
   const [tracks, setTracks] = useState([
     { id: 1, title: 'Nautilus', artist: 'Bob James', notes: [] },
-    { id: 2, title: 'Electric Relaxation', artist: "A Tribe Called Quest", notes: [] },
+    { id: 2, title: 'Electric Relaxation', artist: 'A Tribe Called Quest', notes: [] },
     { id: 3, title: 'The Champ', artist: 'The Mohawks', notes: [] },
   ])
 
@@ -74,11 +76,26 @@ export default function App() {
     btn?.focus()
   }
 
+  const onCancelNote = (trackId) => {
+    setEditingId(null)
+    setDraft('')
+    announce('Note cancelled.')
+    // Return focus to the Add note button
+    const btn = document.getElementById(`add-note-btn-${trackId}`)
+    btn?.focus()
+  }
+
   return (
     // LANDMARKS + LIVE REGION
     <>
       <header style={{ maxWidth: 880, margin: '20px auto 0', padding: '0 16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
           <h1 style={{ margin: 0 }}>Sample Tagger</h1>
           <button
             className="button"
@@ -96,20 +113,25 @@ export default function App() {
         ref={liveRef}
         role="status"
         aria-live="polite"
-        style={{ position: 'absolute', left: -9999, width: 1, height: 1, overflow: 'hidden' }}
+        style={{
+          position: 'absolute',
+          left: -9999,
+          width: 1,
+          height: 1,
+          overflow: 'hidden',
+        }}
       />
 
       <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px' }}>
         {screen === 'landing' && (
           <section aria-labelledby="landing-title">
-            <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
+            <h2 id="landing-title" style={{ marginTop: 0 }}>
+              Get started
+            </h2>
             <p style={{ color: 'var(--muted)' }}>
               Load a Spotify / YouTube / SoundCloud playlist to start adding notes.
             </p>
-            <button
-              className="button primary"
-              onClick={onImportClick}
-            >
+            <button className="button primary" onClick={onImportClick}>
               Import playlist
             </button>
           </section>
@@ -117,8 +139,16 @@ export default function App() {
 
         {screen === 'playlist' && (
           <section aria-labelledby="playlist-title">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 id="playlist-title" style={{ marginTop: 0 }}>My Playlist</h2>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <h2 id="playlist-title" style={{ marginTop: 0 }}>
+                My Playlist
+              </h2>
               <button className="button" onClick={() => setScreen('landing')}>
                 ← Back
               </button>
@@ -138,7 +168,13 @@ export default function App() {
                     marginBottom: 12,
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
                     <span>
                       <strong>{i + 1}.</strong> {t.title} — {t.artist}
                       {t.notes.length > 0 && (
@@ -162,7 +198,10 @@ export default function App() {
 
                   {/* Existing notes */}
                   {t.notes.length > 0 && (
-                    <ul role="list" style={{ marginTop: 8, marginBottom: 0, paddingLeft: 16 }}>
+                    <ul
+                      role="list"
+                      style={{ marginTop: 8, marginBottom: 0, paddingLeft: 16 }}
+                    >
                       {t.notes.map((n, idx) => (
                         <li key={idx} style={{ color: 'var(--fg)' }}>
                           – {n}
@@ -174,7 +213,10 @@ export default function App() {
                   {/* Inline note editor */}
                   {editingId === t.id && (
                     <div style={{ marginTop: 10 }}>
-                      <label htmlFor={`note-input-${t.id}`} style={{ display: 'block', marginBottom: 6 }}>
+                      <label
+                        htmlFor={`note-input-${t.id}`}
+                        style={{ display: 'block', marginBottom: 6 }}
+                      >
                         Note for “{t.title}”
                       </label>
                       <textarea
@@ -192,10 +234,16 @@ export default function App() {
                         }}
                       />
                       <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                        <button className="button primary" onClick={() => onSaveNote(t.id)}>
+                        <button
+                          className="button primary"
+                          onClick={() => onSaveNote(t.id)}
+                        >
                           Save note
                         </button>
-                        <button className="button" onClick={() => setEditingId(null)}>
+                        <button
+                          className="button"
+                          onClick={() => onCancelNote(t.id)}
+                        >
                           Cancel
                         </button>
                       </div>
@@ -208,7 +256,14 @@ export default function App() {
         )}
       </main>
 
-      <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)' }}>
+      <footer
+        style={{
+          maxWidth: 880,
+          margin: '0 auto 24px',
+          padding: '0 16px',
+          color: 'var(--muted)',
+        }}
+      >
         <small>Prototype · Keyboard-first, accessible-by-default</small>
       </footer>
     </>
