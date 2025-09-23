@@ -41,16 +41,17 @@ export default function App() {
 
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
+  const [error, setError] = useState(null) // error message for note editor
 
   // Remember which button opened the editor
   const editorInvokerRef = useRef(null)
 
   // UNDO state
-  const [undo, setUndo] = useState(null) // { trackId, note, index, timerId }
+  const [undo, setUndo] = useState(null)
   const [undoSecondsLeft, setUndoSecondsLeft] = useState(0)
   const undoBtnRef = useRef(null)
   const countdownRef = useRef(null)
-  const lastFocusOnUndoRef = useRef(null) // { trackId, noteIndex }
+  const lastFocusOnUndoRef = useRef(null)
 
   // Cleanup timers
   useEffect(() => {
@@ -93,7 +94,7 @@ export default function App() {
   const onAddNote = (trackId) => {
     setEditingId(trackId)
     setDraft('')
-    // remember the button that opened the editor
+    setError(null)
     editorInvokerRef.current = document.getElementById(`add-note-btn-${trackId}`)
     setTimeout(() => {
       const textarea = document.getElementById(`note-input-${trackId}`)
@@ -104,6 +105,7 @@ export default function App() {
   const onSaveNote = (trackId) => {
     if (!draft.trim()) {
       announce('Note not saved. The note is empty.')
+      setError('Note cannot be empty.')
       return
     }
     setTracks((prev) =>
@@ -113,16 +115,16 @@ export default function App() {
     )
     setEditingId(null)
     setDraft('')
+    setError(null)
     announce('Note added.')
-    // return focus to whoever opened editor
     editorInvokerRef.current?.focus()
   }
 
   const onCancelNote = (trackId) => {
     setEditingId(null)
     setDraft('')
+    setError(null)
     announce('Note cancelled.')
-    // return focus to whoever opened editor
     editorInvokerRef.current?.focus()
   }
 
@@ -150,7 +152,6 @@ export default function App() {
     setUndo({ trackId, note: noteToDelete, index: noteIndex, timerId })
     announce('Note deleted. Undo available for 5 seconds.')
 
-    // stability: focus back to Add note after delete
     setTimeout(() => {
       const btn = document.getElementById(`add-note-btn-${trackId}`)
       btn?.focus()
@@ -198,6 +199,7 @@ export default function App() {
           .toast-exit { opacity: 1; transform: translateY(0); }
           .toast-exit-active { opacity: 0; transform: translateY(8px); transition: opacity 140ms ease, transform 140ms ease; }
         }
+        .error-text { color: #d9534f; font-size: 0.9em; margin-top: 4px; }
       `}</style>
 
       <header style={{ maxWidth: 880, margin: '20px auto 0', padding: '0 16px' }}>
@@ -221,6 +223,7 @@ export default function App() {
         style={{ position: 'absolute', left: -9999, width: 1, height: 1, overflow: 'hidden' }}
       />
 
+      {/* Undo Toast */}
       <Toast
         show={!!undo}
         onClose={() => {
@@ -351,16 +354,22 @@ export default function App() {
                         id={`note-input-${t.id}`}
                         rows={3}
                         value={draft}
+                        aria-describedby={error ? `note-error-${t.id}` : undefined}
                         onChange={(e) => setDraft(e.target.value)}
                         style={{
                           width: '100%',
                           padding: 8,
                           borderRadius: 6,
-                          border: '1px solid var(--border)',
+                          border: `1px solid ${error ? '#d9534f' : 'var(--border)'}`,
                           background: 'var(--card)',
                           color: 'var(--fg)',
                         }}
                       />
+                      {error && (
+                        <div id={`note-error-${t.id}`} className="error-text">
+                          {error}
+                        </div>
+                      )}
                       <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
                         <button className="button primary" onClick={() => onSaveNote(t.id)}>
                           Save note
