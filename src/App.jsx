@@ -9,6 +9,63 @@ function getInitialTheme() {
     : 'light'
 }
 
+// Level-1 provider detection
+function detectProvider(url) {
+  try {
+    const u = new URL(url)
+    if (/youtube\.com|youtu\.be/.test(u.host) && (u.searchParams.get('list') || u.pathname.includes('/playlist'))) return 'youtube'
+    if (/open\.spotify\.com/.test(u.host) && u.pathname.startsWith('/playlist')) return 'spotify'
+    if (/soundcloud\.com/.test(u.host)) return 'soundcloud'
+  } catch {}
+  return null
+}
+
+// Mock importer for MVP (replace with real proxy fetch later)
+async function mockImport(url) {
+  const provider = detectProvider(url)
+  if (!provider) {
+    const err = new Error('UNSUPPORTED_OR_INVALID_URL')
+    err.code = 'UNSUPPORTED_OR_INVALID_URL'
+    throw err
+  }
+  // Simulate network/processing delay
+  await new Promise(r => setTimeout(r, 700))
+
+  // Simple demo payload based on provider
+  if (provider === 'spotify') {
+    return {
+      provider,
+      title: 'Imported from Spotify',
+      tracks: [
+        { id: 'sp-1', title: 'Nautilus', artist: 'Bob James' },
+        { id: 'sp-2', title: 'The Champ', artist: 'The Mohawks' },
+        { id: 'sp-3', title: 'Electric Relaxation', artist: 'A Tribe Called Quest' },
+      ]
+    }
+  }
+  if (provider === 'youtube') {
+    return {
+      provider,
+      title: 'Imported from YouTube',
+      tracks: [
+        { id: 'yt-1', title: 'Amen Break (Full)', artist: 'The Winstons' },
+        { id: 'yt-2', title: 'Cissy Strut', artist: 'The Meters' },
+        { id: 'yt-3', title: 'Apache', artist: 'Incredible Bongo Band' },
+      ]
+    }
+  }
+  // soundcloud
+  return {
+    provider,
+    title: 'Imported from SoundCloud',
+    tracks: [
+      { id: 'sc-1', title: 'Soulful Loop 92bpm', artist: 'crate_digger' },
+      { id: 'sc-2', title: 'Dusty Rhodes 84bpm', artist: 'vinyl_junkie' },
+      { id: 'sc-3', title: 'Blue Smoke 78bpm', artist: 'midnight_sampler' },
+    ]
+  }
+}
+
 export default function App() {
   // THEME
   const [theme, setTheme] = useState(getInitialTheme)
@@ -32,8 +89,21 @@ export default function App() {
     }, 30)
   }
 
+  // IMPORT state
+  const [importUrl, setImportUrl] = useState('')
+  const provider = detectProvider(importUrl || '')
+  const [importLoading, setImportLoading] = useState(false)
+  const [importError, setImportError] = useState(null)
+  const importInputRef = useRef(null)
+
+  // PLAYLIST META
+  const [playlistTitle, setPlaylistTitle] = useState('My Playlist')
+  const [importedAt, setImportedAt] = useState(null) // ISO string
+  const [lastImportUrl, setLastImportUrl] = useState('')
+
   // DATA
   const [tracks, setTracks] = useState([
+    // Existing demo data remains; it will be replaced on successful import
     { id: 1, title: 'Nautilus', artist: 'Bob James', notes: [] },
     { id: 2, title: 'Electric Relaxation', artist: 'A Tribe Called Quest', notes: [] },
     { id: 3, title: 'The Champ', artist: 'The Mohawks', notes: [] },
@@ -86,9 +156,64 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [undo])
 
-  const onImportClick = () => {
-    setScreen('playlist')
-    announce('Imported 3 tracks. Playlist view loaded.')
+  // IMPORT handlers
+  const handleImport = async (e) => {
+    e?.preventDefault?.()
+    setImportError(null)
+    if (!importUrl.trim()) {
+      setImportError('Paste a playlist URL to import.')
+      announce('Import failed. URL missing.')
+      importInputRef.current?.focus()
+      return
+    }
+    if (!provider) {
+      setImportError('That URL doesn’t look like a Spotify, YouTube, or SoundCloud playlist.')
+      announce('Import failed. Unsupported URL.')
+      importInputRef.current?.focus()
+      return
+    }
+    try {
+      setImportLoading(true)
+      announce('Import started.')
+      const res = await mockImport(importUrl.trim())
+      // Map to your track shape, preserving notes array
+      const mapped = res.tracks.map((t, idx) => ({
+        id: t.id || `${res.provider}-${idx}`,
+        title: t.title,
+        artist: t.artist || '',
+        notes: [],
+      }))
+      setTracks(mapped)
+      setPlaylistTitle(res.title || 'Imported Playlist')
+      const now = new Date().toISOString()
+      setImportedAt(now)
+      setLastImportUrl(importUrl.trim())
+      setScreen('playlist')
+      announce(`Playlist imported. ${mapped.length} tracks.`)
+
+      // Move focus to first "Add note" button when ready
+      setTimeout(() => {
+        if (mapped.length > 0) {
+          const btn = document.getElementById(`add-note-btn-${mapped[0].id}`)
+          btn?.focus()
+        }
+      }, 0)
+    } catch (err) {
+      const msg = err?.code === 'UNSUPPORTED_OR_INVALID_URL'
+        ? 'That link is not a supported playlist URL.'
+        : 'Couldn’t import right now. Check the link or try again.'
+      setImportError(msg)
+      announce(`Import failed. ${msg}`)
+      importInputRef.current?.focus()
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
+  const handleReimport = async () => {
+    if (!lastImportUrl) return
+    setImportUrl(lastImportUrl)
+    await handleImport()
   }
 
   const onAddNote = (trackId) => {
@@ -200,6 +325,8 @@ export default function App() {
           .toast-exit-active { opacity: 0; transform: translateY(8px); transition: opacity 140ms ease, transform 140ms ease; }
         }
         .error-text { color: #d9534f; font-size: 0.9em; margin-top: 4px; }
+        .chip { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:var(--card); }
+        .chip-dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
       `}</style>
 
       <header style={{ maxWidth: 880, margin: '20px auto 0', padding: '0 16px' }}>
@@ -267,21 +394,74 @@ export default function App() {
           <section aria-labelledby="landing-title">
             <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
             <p style={{ color: 'var(--muted)' }}>
-              Load a Spotify / YouTube / SoundCloud playlist to start adding notes.
+              Paste a Spotify / YouTube / SoundCloud <strong>playlist</strong> URL to import a snapshot and start adding notes.
             </p>
-            <button className="button primary" onClick={onImportClick}>
-              Import playlist
-            </button>
+
+            <form onSubmit={handleImport} aria-describedby={importError ? 'import-error' : undefined}>
+              <div style={{ display: 'grid', gap: 8, alignItems: 'start', gridTemplateColumns: '1fr auto' }}>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label htmlFor="playlist-url" style={{ display: 'block', marginBottom: 6 }}>Playlist URL</label>
+                  <input
+                    id="playlist-url"
+                    ref={importInputRef}
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://open.spotify.com/playlist/…"
+                    value={importUrl}
+                    onChange={(e) => { setImportUrl(e.target.value); setImportError(null) }}
+                    style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
+                    aria-invalid={!!importError}
+                  />
+                  {importError && (
+                    <div id="import-error" className="error-text" style={{ marginTop: 6 }}>
+                      {importError}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="chip" aria-live="polite" aria-atomic="true" title={provider ? `Detected ${provider}` : 'No provider detected yet'}>
+                    <span className="chip-dot" style={{ background: provider ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
+                    {provider ? provider : 'no match'}
+                  </span>
+                </div>
+
+                <div style={{ justifySelf: 'end' }}>
+                  <button
+                    type="submit"
+                    className="button primary"
+                    disabled={!provider || importLoading}
+                    aria-busy={importLoading ? 'true' : 'false'}
+                  >
+                    {importLoading ? 'Importing…' : 'Import playlist'}
+                  </button>
+                </div>
+              </div>
+            </form>
           </section>
         )}
 
         {screen === 'playlist' && (
           <section aria-labelledby="playlist-title">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 id="playlist-title" style={{ marginTop: 0 }}>My Playlist</h2>
-              <button className="button" onClick={() => setScreen('landing')}>
-                ← Back
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h2 id="playlist-title" style={{ marginTop: 0, marginBottom: 0 }}>{playlistTitle}</h2>
+                {importedAt && (
+                  <span className="chip" title="Snapshot info">
+                    {tracks.length} tracks • imported {new Date(importedAt).toLocaleDateString()} {new Date(importedAt).toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {lastImportUrl && (
+                  <button className="button" onClick={handleReimport} aria-label="Re-import this playlist">
+                    Re-import
+                  </button>
+                )}
+                <button className="button" onClick={() => setScreen('landing')}>
+                  ← Back
+                </button>
+              </div>
             </div>
 
             <ul role="list" style={{ padding: 0, listStyle: 'none' }}>
