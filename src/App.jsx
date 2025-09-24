@@ -133,6 +133,10 @@ export default function App() {
   const countdownRef = useRef(null)
   const lastFocusOnUndoRef = useRef(null)
 
+  // REIMPORT focus pattern
+  const reimportBtnRef = useRef(null)
+  const [reimportLoading, setReimportLoading] = useState(false)
+
   // Cleanup timers
   useEffect(() => {
     return () => {
@@ -201,7 +205,7 @@ export default function App() {
       setScreen('playlist')
       announce(`Playlist imported. ${mapped.length} tracks.`)
 
-      // Move focus to first "Add note" button when ready
+      // Move focus to first "Add note" button when ready (first-time import UX)
       setTimeout(() => {
         if (mapped.length > 0) {
           const btn = document.getElementById(`add-note-btn-${mapped[0].id}`)
@@ -220,10 +224,37 @@ export default function App() {
     }
   }
 
+  // Re-import keeps focus on the same button and announces results
   const handleReimport = async () => {
     if (!lastImportUrl) return
-    setImportUrl(lastImportUrl)
-    await handleImport()
+
+    const wasActive = document.activeElement === reimportBtnRef.current
+    try {
+      setReimportLoading(true)
+      announce('Re-importing playlist…')
+
+      const res = await mockImport(lastImportUrl)
+      const mapped = res.tracks.map((t, idx) => ({
+        id: t.id || `${res.provider}-${idx}`,
+        title: t.title,
+        artist: t.artist || '',
+        notes: [],
+      }))
+      setTracks(mapped)
+      setPlaylistTitle(res.title || 'Imported Playlist')
+      setImportedAt(new Date().toISOString())
+
+      announce(`Playlist re-imported. ${mapped.length} tracks available.`)
+
+      if (wasActive) {
+        // wait a frame in case the list rerender affected focus
+        requestAnimationFrame(() => reimportBtnRef.current?.focus())
+      }
+    } catch (err) {
+      announce('Re-import failed. Try again.')
+    } finally {
+      setReimportLoading(false)
+    }
   }
 
   const onAddNote = (trackId) => {
@@ -464,8 +495,15 @@ export default function App() {
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 {lastImportUrl && (
-                  <button className="button" onClick={handleReimport} aria-label="Re-import this playlist">
-                    Re-import
+                  <button
+                    ref={reimportBtnRef}
+                    className="button"
+                    onClick={handleReimport}
+                    aria-label="Re-import this playlist"
+                    disabled={reimportLoading}
+                    aria-busy={reimportLoading ? 'true' : 'false'}
+                  >
+                    {reimportLoading ? 'Re-importing…' : 'Re-import'}
                   </button>
                 )}
                 <button className="button" onClick={() => setScreen('landing')}>
