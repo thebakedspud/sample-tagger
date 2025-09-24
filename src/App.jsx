@@ -13,10 +13,20 @@ function getInitialTheme() {
 function detectProvider(url) {
   try {
     const u = new URL(url)
-    if (/youtube\.com|youtu\.be/.test(u.host) && (u.searchParams.get('list') || u.pathname.includes('/playlist'))) return 'youtube'
-    if (/open\.spotify\.com/.test(u.host) && u.pathname.startsWith('/playlist')) return 'spotify'
-    if (/soundcloud\.com/.test(u.host)) return 'soundcloud'
-  } catch {}
+    const host = u.hostname // slightly safer than .host (ignores port)
+
+    if ((/youtube\.com|youtu\.be/).test(host) && (u.searchParams.get('list') || u.pathname.includes('/playlist'))) {
+      return 'youtube'
+    }
+    if ((/open\.spotify\.com/).test(host) && u.pathname.startsWith('/playlist')) {
+      return 'spotify'
+    }
+    if ((/soundcloud\.com/).test(host)) {
+      return 'soundcloud'
+    }
+  } catch (e) {
+    // Invalid URL or parsing failed
+  }
   return null
 }
 
