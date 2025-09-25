@@ -1,14 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
-
-function getInitialTheme() {
-  const saved = localStorage.getItem('theme')
-  if (saved === 'light' || saved === 'dark') return saved
-  return window.matchMedia &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light'
-}
+import ThemeToggle from './components/ThemeToggle.jsx'
 
 // Level-1 provider detection
 function detectProvider(url) {
@@ -78,15 +70,6 @@ async function mockImport(url) {
 }
 
 export default function App() {
-  // THEME
-  const [theme, setTheme] = useState(getInitialTheme)
-  useEffect(() => {
-    const root = document.documentElement
-    root.classList.remove('theme-light', 'theme-dark')
-    root.classList.add(theme === 'dark' ? 'theme-dark' : 'theme-light')
-    localStorage.setItem('theme', theme)
-  }, [theme])
-
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState('landing')
 
@@ -373,14 +356,7 @@ export default function App() {
       <header style={{ maxWidth: 880, margin: '20px auto 0', padding: '0 16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1 style={{ margin: 0 }}>Sample Tagger</h1>
-          <button
-            className="button"
-            aria-label="Toggle dark mode"
-            aria-pressed={theme === 'dark'}
-            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-          >
-            {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
-          </button>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -673,7 +649,7 @@ function Toast({ show, onClose, children }) {
         width: 'calc(100% - 32px)',
         zIndex: 1000,
         pointerEvents: 'none',
-      }}
+        }}
     >
       <div
         role="group"
