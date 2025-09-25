@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import LiveRegion from './components/LiveRegion.jsx'
 
 function getInitialTheme() {
   const saved = localStorage.getItem('theme')
@@ -24,7 +25,7 @@ function detectProvider(url) {
     if ((/soundcloud\.com/).test(host)) {
       return 'soundcloud'
     }
-  } catch (_e) {
+  } catch {
     // Invalid URL or parsing failed
   }
   return null
@@ -90,13 +91,9 @@ export default function App() {
   const [screen, setScreen] = useState('landing')
 
   // ANNOUNCEMENTS (for screen readers)
-  const liveRef = useRef(null)
-  const announce = (msg) => {
-    if (!liveRef.current) return
-    liveRef.current.textContent = ''
-    setTimeout(() => {
-      liveRef.current.textContent = msg
-    }, 30)
+  const [announceMsg, setAnnounceMsg] = useState('')
+  function announce(msg) {
+    setAnnounceMsg(msg)
   }
 
   // IMPORT state
@@ -250,7 +247,7 @@ export default function App() {
         // wait a frame in case the list rerender affected focus
         requestAnimationFrame(() => reimportBtnRef.current?.focus())
       }
-    } catch (_err) {
+    } catch {
       announce('Re-import failed. Try again.')
     } finally {
       setReimportLoading(false)
@@ -370,6 +367,9 @@ export default function App() {
         .chip-dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
       `}</style>
 
+      {/* Screen reader announcements */}
+      <LiveRegion message={announceMsg} />
+
       <header style={{ maxWidth: 880, margin: '20px auto 0', padding: '0 16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1 style={{ margin: 0 }}>Sample Tagger</h1>
@@ -383,13 +383,6 @@ export default function App() {
           </button>
         </div>
       </header>
-
-      <div
-        ref={liveRef}
-        role="status"
-        aria-live="polite"
-        style={{ position: 'absolute', left: -9999, width: 1, height: 1, overflow: 'hidden' }}
-      />
 
       {/* Undo Toast */}
       <Toast
