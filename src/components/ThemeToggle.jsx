@@ -1,6 +1,6 @@
-import { useTheme } from '../theme/ThemeContext'
+import { useTheme } from '../theme/ThemeContext.jsx'
 
-export default function ThemeToggle({ className }) {
+export default function ThemeToggle({ className = 'button' }) {  // default
   const { theme, toggleTheme } = useTheme()
   const isDark = theme === 'dark'
 
@@ -12,7 +12,7 @@ export default function ThemeToggle({ className }) {
       className={className}
       title={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
     >
-      {isDark ? '🌙 Dark' : '☀️ Light'}
+      {isDark ? '☀️ Light' : '🌙 Dark'}
     </button>
   )
 }
