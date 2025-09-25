@@ -24,7 +24,7 @@ function detectProvider(url) {
     if ((/soundcloud\.com/).test(host)) {
       return 'soundcloud'
     }
-  } catch (e) {
+  } catch (_e) {
     // Invalid URL or parsing failed
   }
   return null
@@ -250,7 +250,7 @@ export default function App() {
         // wait a frame in case the list rerender affected focus
         requestAnimationFrame(() => reimportBtnRef.current?.focus())
       }
-    } catch (err) {
+    } catch (_err) {
       announce('Re-import failed. Try again.')
     } finally {
       setReimportLoading(false)
@@ -286,7 +286,7 @@ export default function App() {
     editorInvokerRef.current?.focus()
   }
 
-  const onCancelNote = (trackId) => {
+  const onCancelNote = (_trackId) => {
     setEditingId(null)
     setDraft('')
     setError(null)
@@ -624,10 +624,17 @@ export default function App() {
 
 function Toast({ show, onClose, children }) {
   const [phase, setPhase] = useState('idle')
+  const phaseRef = useRef(phase)
   const nodeRef = useRef(null)
+
+  // keep ref synced so we can read phase without adding it to deps
+  useEffect(() => {
+    phaseRef.current = phase
+  }, [phase])
 
   useEffect(() => {
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
     if (show) {
       if (reduceMotion) {
         setPhase('enter-active')
@@ -636,7 +643,7 @@ function Toast({ show, onClose, children }) {
       setPhase('enter')
       const id = requestAnimationFrame(() => setPhase('enter-active'))
       return () => cancelAnimationFrame(id)
-    } else if (phase !== 'idle') {
+    } else if (phaseRef.current !== 'idle') {
       if (reduceMotion) {
         setPhase('idle')
         return
@@ -646,8 +653,6 @@ function Toast({ show, onClose, children }) {
       return () => clearTimeout(t)
     }
   }, [show])
-
-  if (!show && phase === 'idle') return null
 
   const className =
     phase === 'enter'
@@ -659,6 +664,8 @@ function Toast({ show, onClose, children }) {
       : phase === 'exit-active'
       ? 'toast-exit-active'
       : ''
+
+  if (!show && phase === 'idle') return null
 
   return (
     <div
@@ -694,9 +701,7 @@ function Toast({ show, onClose, children }) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{children}</div>
-        <button className="button" onClick={onClose} aria-label="Close undo">
-          ✕
-        </button>
+        <button className="button" onClick={onClose} aria-label="Close undo">✕</button>
       </div>
     </div>
   )
