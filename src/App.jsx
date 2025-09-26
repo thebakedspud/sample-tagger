@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
+import { loadAppState, saveAppState, clearAppState } from './utils/storage.js'
 
 // Level-1 provider detection
 function detectProvider(url) {
@@ -116,6 +117,40 @@ export default function App() {
   // REIMPORT focus pattern
   const reimportBtnRef = useRef(null)
   const [reimportLoading, setReimportLoading] = useState(false)
+
+  // —— PERSISTENCE: load-once from localStorage
+  useEffect(() => {
+    const saved = loadAppState()
+    if (!saved) return
+
+    if (Array.isArray(saved.tracks)) setTracks(saved.tracks)
+    if (typeof saved.playlistTitle === 'string') setPlaylistTitle(saved.playlistTitle)
+    if (typeof saved.importedAt === 'string') setImportedAt(saved.importedAt)
+    if (typeof saved.lastImportUrl === 'string') setLastImportUrl(saved.lastImportUrl)
+
+    if (Array.isArray(saved.tracks) && saved.tracks.length) setScreen('playlist')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // —— PERSISTENCE: save whenever core state changes
+  useEffect(() => {
+    saveAppState({
+      tracks,
+      playlistTitle,
+      importedAt,
+      lastImportUrl,
+    })
+  }, [tracks, playlistTitle, importedAt, lastImportUrl])
+
+  // Safety: close editor if its track disappears or changes
+  useEffect(() => {
+    if (editingId == null) return
+    if (!tracks.some(t => t.id === editingId)) {
+      setEditingId(null)
+      setDraft('')
+      setError(null)
+    }
+  }, [tracks, editingId])
 
   // Cleanup timers
   useEffect(() => {
@@ -235,6 +270,31 @@ export default function App() {
     } finally {
       setReimportLoading(false)
     }
+  }
+
+  // —— Clear-all handler (full reset)
+  const handleClearAll = () => {
+    if (undo?.timerId) clearTimeout(undo.timerId)
+    setUndo(null)
+
+    clearAppState() // wipe localStorage
+
+    // reset in-memory state
+    setTracks([
+      { id: 1, title: 'Nautilus', artist: 'Bob James', notes: [] },
+      { id: 2, title: 'Electric Relaxation', artist: 'A Tribe Called Quest', notes: [] },
+      { id: 3, title: 'The Champ', artist: 'The Mohawks', notes: [] },
+    ])
+    setPlaylistTitle('My Playlist')
+    setImportedAt(null)
+    setLastImportUrl('')
+    setEditingId(null)
+    setDraft('')
+    setError(null)
+
+    setScreen('landing')
+    announce('All saved data cleared. You’re back at the start.')
+    setTimeout(() => importInputRef.current?.focus(), 0)
   }
 
   const onAddNote = (trackId) => {
@@ -378,6 +438,7 @@ export default function App() {
         </span>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
+            type="button"
             ref={undoBtnRef}
             className="button primary"
             onClick={onUndoDelete}
@@ -386,6 +447,7 @@ export default function App() {
             Undo
           </button>
           <button
+            type="button"
             className="button"
             onClick={() => {
               if (undo?.timerId) clearTimeout(undo.timerId)
@@ -465,17 +527,27 @@ export default function App() {
               <div style={{ display: 'flex', gap: 8 }}>
                 {lastImportUrl && (
                   <button
+                    type="button"
                     ref={reimportBtnRef}
                     className="button"
                     onClick={handleReimport}
                     aria-label="Re-import this playlist"
+                    title="Fetch a fresh snapshot of this playlist"
                     disabled={reimportLoading}
                     aria-busy={reimportLoading ? 'true' : 'false'}
                   >
                     {reimportLoading ? 'Re-importing…' : 'Re-import'}
                   </button>
                 )}
-                <button className="button" onClick={() => setScreen('landing')}>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={handleClearAll}
+                  title="Remove saved playlist and notes from this device"
+                >
+                  Clear
+                </button>
+                <button type="button" className="button" onClick={() => setScreen('landing')}>
                   ← Back
                 </button>
               </div>
@@ -505,6 +577,7 @@ export default function App() {
                     </span>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button
+                        type="button"
                         id={`add-note-btn-${t.id}`}
                         className="button"
                         aria-label={`Add note to ${t.title}`}
@@ -530,6 +603,7 @@ export default function App() {
                         >
                           <span>– {n}</span>
                           <button
+                            type="button"
                             id={`del-btn-${t.id}-${idx}`}
                             className="button"
                             aria-label={`Delete note ${idx + 1} for ${t.title}`}
@@ -568,10 +642,10 @@ export default function App() {
                         </div>
                       )}
                       <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                        <button className="button primary" onClick={() => onSaveNote(t.id)}>
+                        <button type="button" className="button primary" onClick={() => onSaveNote(t.id)}>
                           Save note
                         </button>
-                        <button className="button" onClick={() => onCancelNote(t.id)}>
+                        <button type="button" className="button" onClick={() => onCancelNote(t.id)}>
                           Cancel
                         </button>
                       </div>
@@ -670,7 +744,7 @@ function Toast({ show, onClose, children }) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{children}</div>
-        <button className="button" onClick={onClose} aria-label="Close undo">✕</button>
+        <button type="button" className="button" onClick={onClose} aria-label="Close undo" title="Close">✕</button>
       </div>
     </div>
   )
