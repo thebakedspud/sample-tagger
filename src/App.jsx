@@ -3,6 +3,10 @@ import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
 import { loadAppState, saveAppState, clearAppState } from './utils/storage.js'
 
+// NEW: inline undo
+import { usePendingDelete } from './features/undo/usePendingDelete'
+import UndoPlaceholder from './components/UndoPlaceholder.jsx'
+
 // Level-1 provider detection
 function detectProvider(url) {
   try {
@@ -107,12 +111,24 @@ export default function App() {
   // Remember which button opened the editor
   const editorInvokerRef = useRef(null)
 
-  // UNDO state
-  const [undo, setUndo] = useState(null)
-  const [undoSecondsLeft, setUndoSecondsLeft] = useState(0)
-  const undoBtnRef = useRef(null)
-  const countdownRef = useRef(null)
-  const lastFocusOnUndoRef = useRef(null)
+  // NEW — inline undo bookkeeping:
+  // pending map: id -> { trackId, note, index }
+  const [pending, setPending] = useState(new Map())
+  const lastPendingIdRef = useRef(null)
+
+  const { start: startPendingDelete, undo: undoPending, isPending } = usePendingDelete({
+    timeoutMs: 5000,
+    onAnnounce: announce,
+    onFinalize: (id) => {
+      // We already removed the note at delete time; finalization just clears placeholder.
+      setPending(prev => {
+        const next = new Map(prev)
+        next.delete(id)
+        return next
+      })
+      announce('Note deleted')
+    }
+  })
 
   // REIMPORT focus pattern
   const reimportBtnRef = useRef(null)
@@ -152,38 +168,21 @@ export default function App() {
     }
   }, [tracks, editingId])
 
-  // Cleanup timers
-  useEffect(() => {
-    return () => {
-      if (undo?.timerId) clearTimeout(undo.timerId)
-    }
-  }, [undo])
-
-  // Countdown display
-  useEffect(() => {
-    if (!undo) return
-    setUndoSecondsLeft(5)
-    let ticks = 5
-    const id = setInterval(() => {
-      ticks -= 1
-      setUndoSecondsLeft(ticks)
-      if (ticks <= 0) clearInterval(id)
-    }, 1000)
-    return () => clearInterval(id)
-  }, [undo])
-
-  // Ctrl+Z undo
+  // Ctrl+Z undo (for the most recent pending delete)
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (undo && e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        onUndoDelete()
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
+        const id = lastPendingIdRef.current
+        if (id && isPending(id)) {
+          e.preventDefault()
+          handleUndoInline(id)
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [undo])
+  }, [isPending])
 
   // IMPORT handlers
   const handleImport = async (e) => {
@@ -274,8 +273,8 @@ export default function App() {
 
   // —— Clear-all handler (full reset)
   const handleClearAll = () => {
-    if (undo?.timerId) clearTimeout(undo.timerId)
-    setUndo(null)
+    // Cancel any pending placeholders
+    setPending(new Map())
 
     clearAppState() // wipe localStorage
 
@@ -334,12 +333,17 @@ export default function App() {
     editorInvokerRef.current?.focus()
   }
 
+  // Create a unique pending id for a deletion (per note)
+  function makePendingId(trackId, index) {
+    // Include time to avoid collisions when deleting the same index repeatedly
+    return `${trackId}::${index}::${Date.now()}`
+  }
+
   const onDeleteNote = (trackId, noteIndex) => {
     const noteToDelete = tracks.find(t => t.id === trackId)?.notes[noteIndex]
     if (noteToDelete == null) return
 
-    lastFocusOnUndoRef.current = { trackId, noteIndex }
-
+    // Remove the note now…
     setTracks(prev =>
       prev.map(t =>
         t.id === trackId
@@ -348,27 +352,31 @@ export default function App() {
       )
     )
 
-    if (undo?.timerId) clearTimeout(undo.timerId)
+    // …and insert a placeholder record to render inline at the same index.
+    const id = makePendingId(trackId, noteIndex)
+    lastPendingIdRef.current = id
+    setPending(prev => {
+      const next = new Map(prev)
+      next.set(id, { trackId, note: noteToDelete, index: noteIndex })
+      return next
+    })
 
-    const timerId = setTimeout(() => {
-      setUndo(null)
-      announce('Delete finalized.')
-    }, 5000)
+    // Start timer via hook (handles announcements)
+    startPendingDelete(id)
+    announce('Note deleted. Press Undo to restore')
 
-    setUndo({ trackId, note: noteToDelete, index: noteIndex, timerId })
-    announce('Note deleted. Undo available for 5 seconds.')
-
-    setTimeout(() => {
-      const btn = document.getElementById(`add-note-btn-${trackId}`)
-      btn?.focus()
-    }, 0)
+    // Focus will move into the inline Undo button when the placeholder mounts.
   }
 
-  const onUndoDelete = () => {
-    if (!undo) return
-    const { trackId, note, index, timerId } = undo
-    clearTimeout(timerId)
+  function handleUndoInline(id) {
+    const meta = pending.get(id)
+    if (!meta) return
+    const { trackId, note, index } = meta
 
+    // Cancel timer
+    undoPending(id)
+
+    // Restore note at its original index (clamped to current length)
     setTracks(prev =>
       prev.map(t => {
         if (t.id !== trackId) return t
@@ -379,32 +387,19 @@ export default function App() {
       })
     )
 
-    setUndo(null)
-    announce('Note restored.')
+    // Remove placeholder
+    setPending(prev => {
+      const next = new Map(prev)
+      next.delete(id)
+      return next
+    })
 
-    setTimeout(() => {
-      const target = lastFocusOnUndoRef.current
-      if (target && target.trackId === trackId) {
-        const btn = document.getElementById(`del-btn-${trackId}-${index}`)
-        if (btn) {
-          btn.focus()
-          return
-        }
-      }
-      const addBtn = document.getElementById(`add-note-btn-${trackId}`)
-      addBtn?.focus()
-    }, 0)
+    announce('Note restored')
   }
 
   return (
     <>
       <style>{`
-        @media (prefers-reduced-motion: no-preference) {
-          .toast-enter { opacity: 0; transform: translateY(8px); }
-          .toast-enter-active { opacity: 1; transform: translateY(0); transition: opacity 160ms ease, transform 160ms ease; }
-          .toast-exit { opacity: 1; transform: translateY(0); }
-          .toast-exit-active { opacity: 0; transform: translateY(8px); transition: opacity 140ms ease, transform 140ms ease; }
-        }
         .error-text { color: #d9534f; font-size: 0.9em; margin-top: 4px; }
         .chip { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:var(--card); }
         .chip-dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
@@ -419,47 +414,6 @@ export default function App() {
           <ThemeToggle />
         </div>
       </header>
-
-      {/* Undo Toast */}
-      <Toast
-        show={!!undo}
-        onClose={() => {
-          if (undo?.timerId) clearTimeout(undo.timerId)
-          setUndo(null)
-          announce('Undo dismissed.')
-        }}
-      >
-        <span>
-          Note deleted —{' '}
-          <span id="undo-countdown" ref={countdownRef}>
-            {undoSecondsLeft > 0 ? `${undoSecondsLeft}s` : ''}
-          </span>
-          {' '}to undo.
-        </span>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            type="button"
-            ref={undoBtnRef}
-            className="button primary"
-            onClick={onUndoDelete}
-            aria-describedby="undo-countdown"
-          >
-            Undo
-          </button>
-          <button
-            type="button"
-            className="button"
-            onClick={() => {
-              if (undo?.timerId) clearTimeout(undo.timerId)
-              setUndo(null)
-              announce('Undo dismissed.')
-            }}
-            aria-label="Dismiss undo"
-          >
-            Dismiss
-          </button>
-        </div>
-      </Toast>
 
       <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px' }}>
         {screen === 'landing' && (
@@ -554,105 +508,144 @@ export default function App() {
             </div>
 
             <ul role="list" style={{ padding: 0, listStyle: 'none' }}>
-              {tracks.map((t, i) => (
-                <li
-                  key={t.id}
-                  style={{
-                    border: '1px solid var(--border)',
-                    background: 'var(--card)',
-                    boxShadow: 'var(--shadow)',
-                    borderRadius: 8,
-                    padding: 12,
-                    marginBottom: 12,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>
-                      <strong>{i + 1}.</strong> {t.title} — {t.artist}
-                      {t.notes.length > 0 && (
-                        <span style={{ marginLeft: 8, color: 'var(--muted)' }}>
-                          · {t.notes.length} note{t.notes.length > 1 ? 's' : ''}
-                        </span>
-                      )}
-                    </span>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        type="button"
-                        id={`add-note-btn-${t.id}`}
-                        className="button"
-                        aria-label={`Add note to ${t.title}`}
-                        onClick={() => onAddNote(t.id)}
-                      >
-                        Add note
-                      </button>
-                    </div>
-                  </div>
+              {tracks.map((t, i) => {
+                // Build a quick lookup of pending placeholders for this track by index
+                const placeholders = []
+                for (const [pid, meta] of pending.entries()) {
+                  if (meta.trackId === t.id) {
+                    placeholders.push({ pid, index: meta.index })
+                  }
+                }
+                // Sort placeholders by index so they appear in the right order
+                placeholders.sort((a, b) => a.index - b.index)
 
-                  {t.notes.length > 0 && (
-                    <ul role="list" style={{ marginTop: 8, marginBottom: 0, paddingLeft: 16 }}>
-                      {t.notes.map((n, idx) => (
-                        <li
-                          key={idx}
-                          style={{
-                            color: 'var(--fg)',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            gap: 8,
-                          }}
-                        >
-                          <span>– {n}</span>
-                          <button
-                            type="button"
-                            id={`del-btn-${t.id}-${idx}`}
-                            className="button"
-                            aria-label={`Delete note ${idx + 1} for ${t.title}`}
-                            onClick={() => onDeleteNote(t.id, idx)}
-                          >
-                            Delete
-                          </button>
+                // Render notes with inline placeholders at original indices.
+                // We iterate from 0..notes.length and insert any placeholders that belong at each index.
+                const rows = []
+                const noteCount = t.notes.length
+                for (let idx = 0; idx <= noteCount; idx++) {
+                  // Insert placeholder(s) that target this index
+                  placeholders
+                    .filter(ph => ph.index === idx && isPending(ph.pid))
+                    .forEach(ph => {
+                      rows.push(
+                        <li key={`ph-${ph.pid}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                          <UndoPlaceholder
+                            idForA11y={`undo-msg-${ph.pid}`}
+                            onUndo={() => handleUndoInline(ph.pid)}
+                            announceRefocus={() => announce('Undo available')}
+                          />
                         </li>
-                      ))}
-                    </ul>
-                  )}
+                      )
+                    })
 
-                  {editingId === t.id && (
-                    <div style={{ marginTop: 10 }}>
-                      <label htmlFor={`note-input-${t.id}`} style={{ display: 'block', marginBottom: 6 }}>
-                        Note for “{t.title}”
-                      </label>
-                      <textarea
-                        id={`note-input-${t.id}`}
-                        rows={3}
-                        value={draft}
-                        aria-describedby={error ? `note-error-${t.id}` : undefined}
-                        onChange={(e) => setDraft(e.target.value)}
+                  // Insert the real note if exists at this index
+                  if (idx < noteCount) {
+                    const n = t.notes[idx]
+                    rows.push(
+                      <li
+                        key={`n-${t.id}-${idx}`}
                         style={{
-                          width: '100%',
-                          padding: 8,
-                          borderRadius: 6,
-                          border: `1px solid ${error ? '#d9534f' : 'var(--border)'}`,
-                          background: 'var(--card)',
                           color: 'var(--fg)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 8,
                         }}
-                      />
-                      {error && (
-                        <div id={`note-error-${t.id}`} className="error-text">
-                          {error}
-                        </div>
-                      )}
-                      <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                        <button type="button" className="button primary" onClick={() => onSaveNote(t.id)}>
-                          Save note
+                      >
+                        <span>– {n}</span>
+                        <button
+                          type="button"
+                          id={`del-btn-${t.id}-${idx}`}
+                          className="button"
+                          aria-label={`Delete note ${idx + 1} for ${t.title}`}
+                          onClick={() => onDeleteNote(t.id, idx)}
+                        >
+                          Delete
                         </button>
-                        <button type="button" className="button" onClick={() => onCancelNote(t.id)}>
-                          Cancel
+                      </li>
+                    )
+                  }
+                }
+
+                return (
+                  <li
+                    key={t.id}
+                    style={{
+                      border: '1px solid var(--border)',
+                      background: 'var(--card)',
+                      boxShadow: 'var(--shadow)',
+                      borderRadius: 8,
+                      padding: 12,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>
+                        <strong>{i + 1}.</strong> {t.title} — {t.artist}
+                        {t.notes.length > 0 && (
+                          <span style={{ marginLeft: 8, color: 'var(--muted)' }}>
+                            · {t.notes.length} note{t.notes.length > 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </span>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          type="button"
+                          id={`add-note-btn-${t.id}`}
+                          className="button"
+                          aria-label={`Add note to ${t.title}`}
+                          onClick={() => onAddNote(t.id)}
+                        >
+                          Add note
                         </button>
                       </div>
                     </div>
-                  )}
-                </li>
-              ))}
+
+                    {(t.notes.length > 0 || placeholders.length > 0) && (
+                      <ul role="list" style={{ marginTop: 8, marginBottom: 0, paddingLeft: 16 }}>
+                        {rows}
+                      </ul>
+                    )}
+
+                    {editingId === t.id && (
+                      <div style={{ marginTop: 10 }}>
+                        <label htmlFor={`note-input-${t.id}`} style={{ display: 'block', marginBottom: 6 }}>
+                          Note for “{t.title}”
+                        </label>
+                        <textarea
+                          id={`note-input-${t.id}`}
+                          rows={3}
+                          value={draft}
+                          aria-describedby={error ? `note-error-${t.id}` : undefined}
+                          onChange={(e) => setDraft(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: 8,
+                            borderRadius: 6,
+                            border: `1px solid ${error ? '#d9534f' : 'var(--border)'}`,
+                            background: 'var(--card)',
+                            color: 'var(--fg)',
+                          }}
+                        />
+                        {error && (
+                          <div id={`note-error-${t.id}`} className="error-text">
+                            {error}
+                          </div>
+                        )}
+                        <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                          <button type="button" className="button primary" onClick={() => onSaveNote(t.id)}>
+                            Save note
+                          </button>
+                          <button type="button" className="button" onClick={() => onCancelNote(t.id)}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           </section>
         )}
@@ -662,90 +655,5 @@ export default function App() {
         <small>Prototype · Keyboard-first, accessible-by-default</small>
       </footer>
     </>
-  )
-}
-
-function Toast({ show, onClose, children }) {
-  const [phase, setPhase] = useState('idle')
-  const phaseRef = useRef(phase)
-  const nodeRef = useRef(null)
-
-  // keep ref synced so we can read phase without adding it to deps
-  useEffect(() => {
-    phaseRef.current = phase
-  }, [phase])
-
-  useEffect(() => {
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-
-    if (show) {
-      if (reduceMotion) {
-        setPhase('enter-active')
-        return
-      }
-      setPhase('enter')
-      const id = requestAnimationFrame(() => setPhase('enter-active'))
-      return () => cancelAnimationFrame(id)
-    } else if (phaseRef.current !== 'idle') {
-      if (reduceMotion) {
-        setPhase('idle')
-        return
-      }
-      setPhase('exit')
-      const t = setTimeout(() => setPhase('idle'), 150)
-      return () => clearTimeout(t)
-    }
-  }, [show])
-
-  const className =
-    phase === 'enter'
-      ? 'toast-enter'
-      : phase === 'enter-active'
-      ? 'toast-enter-active'
-      : phase === 'exit'
-      ? 'toast-exit'
-      : phase === 'exit-active'
-      ? 'toast-exit-active'
-      : ''
-
-  if (!show && phase === 'idle') return null
-
-  return (
-    <div
-      ref={nodeRef}
-      className={className}
-      style={{
-        position: 'fixed',
-        left: '50%',
-        bottom: 16,
-        transform: 'translateX(-50%)',
-        maxWidth: 880,
-        width: 'calc(100% - 32px)',
-        zIndex: 1000,
-        pointerEvents: 'none',
-        }}
-    >
-      <div
-        role="group"
-        aria-label="Undo delete"
-        style={{
-          pointerEvents: 'auto',
-          margin: '0 auto',
-          padding: '10px 12px',
-          borderRadius: 8,
-          border: '1px solid var(--border)',
-          background: 'var(--card)',
-          color: 'var(--fg)',
-          boxShadow: 'var(--shadow)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{children}</div>
-        <button type="button" className="button" onClick={onClose} aria-label="Close undo" title="Close">✕</button>
-      </div>
-    </div>
   )
 }
