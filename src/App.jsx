@@ -168,17 +168,23 @@ export default function App() {
     }
   }, [tracks, editingId])
 
-  // Ctrl+Z undo (for the most recent pending delete)
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
-        const id = lastPendingIdRef.current
-        if (id && isPending(id)) {
-          e.preventDefault()
-          handleUndoInline(id)
-        }
+    // Ctrl/Cmd+Z undo (for the most recent pending delete)
+useEffect(() => {
+  const onKeyDown = (e) => {
+    if (
+      (e.ctrlKey || e.metaKey) &&   // allow Ctrl (Win/Linux) or Cmd (Mac)
+      !e.shiftKey &&
+      !e.altKey &&
+      e.key.toLowerCase() === 'z'
+    ) {
+      const id = lastPendingIdRef.current
+      if (id && isPending(id)) {
+        e.preventDefault()
+        handleUndoInline(id)
       }
     }
+  }
+
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
