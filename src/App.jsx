@@ -369,7 +369,6 @@ useEffect(() => {
 
     // Start timer via hook (handles announcements)
     startPendingDelete(id)
-    announce('Note deleted. Press Undo to restore')
 
     // Focus will move into the inline Undo button when the placeholder mounts.
   }
