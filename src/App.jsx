@@ -7,72 +7,9 @@ import { loadAppState, saveAppState, clearAppState } from './utils/storage.js'
 import { usePendingDelete } from './features/undo/usePendingDelete'
 import UndoPlaceholder from './components/UndoPlaceholder.jsx'
 
-// Level-1 provider detection
-function detectProvider(url) {
-  try {
-    const u = new URL(url)
-    const host = u.hostname // slightly safer than .host (ignores port)
-
-    if ((/youtube\.com|youtu\.be/).test(host) && (u.searchParams.get('list') || u.pathname.includes('/playlist'))) {
-      return 'youtube'
-    }
-    if ((/open\.spotify\.com/).test(host) && u.pathname.startsWith('/playlist')) {
-      return 'spotify'
-    }
-    if ((/soundcloud\.com/).test(host)) {
-      return 'soundcloud'
-    }
-  } catch {
-    // Invalid URL or parsing failed
-  }
-  return null
-}
-
-// Mock importer for MVP (replace with real proxy fetch later)
-async function mockImport(url) {
-  const provider = detectProvider(url)
-  if (!provider) {
-    const err = new Error('UNSUPPORTED_OR_INVALID_URL')
-    err.code = 'UNSUPPORTED_OR_INVALID_URL'
-    throw err
-  }
-  // Simulate network/processing delay
-  await new Promise(r => setTimeout(r, 700))
-
-  // Simple demo payload based on provider
-  if (provider === 'spotify') {
-    return {
-      provider,
-      title: 'Imported from Spotify',
-      tracks: [
-        { id: 'sp-1', title: 'Nautilus', artist: 'Bob James' },
-        { id: 'sp-2', title: 'The Champ', artist: 'The Mohawks' },
-        { id: 'sp-3', title: 'Electric Relaxation', artist: 'A Tribe Called Quest' },
-      ]
-    }
-  }
-  if (provider === 'youtube') {
-    return {
-      provider,
-      title: 'Imported from YouTube',
-      tracks: [
-        { id: 'yt-1', title: 'Amen Break (Full)', artist: 'The Winstons' },
-        { id: 'yt-2', title: 'Cissy Strut', artist: 'The Meters' },
-        { id: 'yt-3', title: 'Apache', artist: 'Incredible Bongo Band' },
-      ]
-    }
-  }
-  // soundcloud
-  return {
-    provider,
-    title: 'Imported from SoundCloud',
-    tracks: [
-      { id: 'sc-1', title: 'Soulful Loop 92bpm', artist: 'crate_digger' },
-      { id: 'sc-2', title: 'Dusty Rhodes 84bpm', artist: 'vinyl_junkie' },
-      { id: 'sc-3', title: 'Blue Smoke 78bpm', artist: 'midnight_sampler' },
-    ]
-  }
-}
+// ✅ Extracted helpers
+import detectProvider from './features/import/detectProvider'
+import importPlaylist from './features/import/mockImporter'
 
 export default function App() {
   // SIMPLE "ROUTING"
@@ -168,22 +105,22 @@ export default function App() {
     }
   }, [tracks, editingId])
 
-    // Ctrl/Cmd+Z undo (for the most recent pending delete)
-useEffect(() => {
-  const onKeyDown = (e) => {
-    if (
-      (e.ctrlKey || e.metaKey) &&   // allow Ctrl (Win/Linux) or Cmd (Mac)
-      !e.shiftKey &&
-      !e.altKey &&
-      e.key.toLowerCase() === 'z'
-    ) {
-      const id = lastPendingIdRef.current
-      if (id && isPending(id)) {
-        e.preventDefault()
-        handleUndoInline(id)
+  // Ctrl/Cmd+Z undo (for the most recent pending delete)
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === 'z'
+      ) {
+        const id = lastPendingIdRef.current
+        if (id && isPending(id)) {
+          e.preventDefault()
+          handleUndoInline(id)
+        }
       }
     }
-  }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -209,7 +146,7 @@ useEffect(() => {
     try {
       setImportLoading(true)
       announce('Import started.')
-      const res = await mockImport(importUrl.trim())
+      const res = await importPlaylist(importUrl.trim())
       // Map to your track shape, preserving notes array
       const mapped = res.tracks.map((t, idx) => ({
         id: t.id || `${res.provider}-${idx}`,
@@ -253,7 +190,7 @@ useEffect(() => {
       setReimportLoading(true)
       announce('Re-importing playlist…')
 
-      const res = await mockImport(lastImportUrl)
+      const res = await importPlaylist(lastImportUrl)
       const mapped = res.tracks.map((t, idx) => ({
         id: t.id || `${res.provider}-${idx}`,
         title: t.title,
