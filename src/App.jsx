@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
 import { loadAppState, saveAppState, clearAppState } from './utils/storage.js'
+import { focusById } from './utils/focusById.js'
 
 // NEW: inline undo
 import { usePendingDelete } from './features/undo/usePendingDelete'
@@ -49,7 +50,7 @@ export default function App() {
   const editorInvokerRef = useRef(null)
 
   // NEW — inline undo bookkeeping:
-  // pending map: id -> { trackId, note, index }
+  // pending map: id -> { trackId, note, index, restoreFocusId, fallbackFocusId }
   const [pending, setPending] = useState(new Map())
   const lastPendingIdRef = useRef(null)
 
@@ -57,13 +58,24 @@ export default function App() {
     timeoutMs: 5000,
     onAnnounce: announce,
     onFinalize: (id) => {
+      // Look up focus targets before we delete the placeholder
+      const meta = pending.get(id)
+
       // We already removed the note at delete time; finalization just clears placeholder.
       setPending(prev => {
         const next = new Map(prev)
         next.delete(id)
         return next
       })
+
       announce('Note deleted')
+
+      // After the placeholder disappears, move focus to a safe fallback
+      if (meta?.fallbackFocusId) {
+        requestAnimationFrame(() => {
+          focusById(meta.fallbackFocusId)
+        })
+      }
     }
   })
 
@@ -300,7 +312,15 @@ export default function App() {
     lastPendingIdRef.current = id
     setPending(prev => {
       const next = new Map(prev)
-      next.set(id, { trackId, note: noteToDelete, index: noteIndex })
+      next.set(id, {
+        trackId,
+        note: noteToDelete,
+        index: noteIndex,
+
+        // NEW: where to send focus after Undo/dismiss
+        restoreFocusId: `del-btn-${trackId}-${noteIndex}`,
+        fallbackFocusId: `add-note-btn-${trackId}`,
+      })
       return next
     })
 
@@ -313,7 +333,13 @@ export default function App() {
   function handleUndoInline(id) {
     const meta = pending.get(id)
     if (!meta) return
-    const { trackId, note, index } = meta
+    const {
+      trackId,
+      note,
+      index,
+      restoreFocusId,
+      fallbackFocusId
+    } = meta
 
     // Cancel timer
     undoPending(id)
@@ -337,6 +363,15 @@ export default function App() {
     })
 
     announce('Note restored')
+
+    // After re-render, move focus to the restored Delete (fallback to Add note)
+    requestAnimationFrame(() => {
+      if (restoreFocusId && document.getElementById(restoreFocusId)) {
+        focusById(restoreFocusId)
+      } else if (fallbackFocusId) {
+        focusById(fallbackFocusId)
+      }
+    })
   }
 
   return (
@@ -455,7 +490,12 @@ export default function App() {
                 const placeholders = []
                 for (const [pid, meta] of pending.entries()) {
                   if (meta.trackId === t.id) {
-                    placeholders.push({ pid, index: meta.index })
+                    placeholders.push({
+                      pid,
+                      index: meta.index,
+                      restoreFocusId: meta.restoreFocusId,   // NEW
+                      fallbackFocusId: meta.fallbackFocusId, // NEW
+                    })
                   }
                 }
                 // Sort placeholders by index so they appear in the right order
@@ -474,8 +514,14 @@ export default function App() {
                         <li key={`ph-${ph.pid}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                           <UndoPlaceholder
                             idForA11y={`undo-msg-${ph.pid}`}
-                            onUndo={() => handleUndoInline(ph.pid)}
+                            pendingId={ph.pid}
+                            label="Note deleted."
+                            onUndo={handleUndoInline}                  // pass directly so it receives pendingId
                             announceRefocus={() => announce('Undo available')}
+
+                            // NEW: give the component the focus targets
+                            restoreFocusId={ph.restoreFocusId}
+                            fallbackFocusId={ph.fallbackFocusId}
                           />
                         </li>
                       )
