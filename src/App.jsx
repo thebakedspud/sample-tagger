@@ -423,7 +423,7 @@ export default function App() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="chip" aria-live="polite" aria-atomic="true" title={provider ? `Detected ${provider}` : 'No provider detected yet'}>
+                  <span className="chip" title={provider ? `Detected ${provider}` : 'No provider detected yet'}>
                     <span className="chip-dot" style={{ background: provider ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
                     {provider ? provider : 'no match'}
                   </span>
