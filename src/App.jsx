@@ -183,8 +183,7 @@ export default function App() {
       // Move focus to first "Add note" button when ready (first-time import UX)
       setTimeout(() => {
         if (mapped.length > 0) {
-          const btn = document.getElementById(`add-note-btn-${mapped[0].id}`)
-          btn?.focus()
+          focusById(`add-note-btn-${mapped[0].id}`)
         }
       }, 0)
     } catch (err) {
@@ -266,8 +265,7 @@ export default function App() {
     setError(null)
     editorInvokerRef.current = document.getElementById(`add-note-btn-${trackId}`)
     setTimeout(() => {
-      const textarea = document.getElementById(`note-input-${trackId}`)
-      textarea?.focus()
+      focusById(`note-input-${trackId}`)
     }, 0)
   }
 
