@@ -52,14 +52,17 @@ export default function App() {
   // NEW — inline undo bookkeeping:
   // pending map: id -> { trackId, note, index, restoreFocusId, fallbackFocusId }
   const [pending, setPending] = useState(new Map())
+  const pendingRef = useRef(pending)              // <-- keep latest pending in a ref
+  useEffect(() => { pendingRef.current = pending }, [pending])
+
   const lastPendingIdRef = useRef(null)
 
   const { start: startPendingDelete, undo: undoPending, isPending } = usePendingDelete({
     timeoutMs: 5000,
     onAnnounce: announce,
     onFinalize: (id) => {
-      // Look up focus targets before we delete the placeholder
-      const meta = pending.get(id)
+      // Read from the up-to-date ref to avoid stale-closure bugs
+      const meta = pendingRef.current.get(id)
 
       // We already removed the note at delete time; finalization just clears placeholder.
       setPending(prev => {
@@ -331,7 +334,7 @@ export default function App() {
       return next
     })
 
-    // Start timer via hook (handles announcements)
+    // Start timer via hook (handles announcements + timeout focus via onFinalize)
     startPendingDelete(id)
 
     // Focus will move into the inline Undo button when the placeholder mounts.
@@ -525,9 +528,8 @@ export default function App() {
                             idForA11y={`undo-msg-${ph.pid}`}
                             pendingId={ph.pid}
                             label="Note deleted."
-                            onUndo={handleUndoInline}                  // pass directly so it receives pendingId
+                            onUndo={handleUndoInline}                  // receives pendingId
                             announceRefocus={() => announce('Undo available')}
-
                             // NEW: give the component the focus targets
                             restoreFocusId={ph.restoreFocusId}
                             fallbackFocusId={ph.fallbackFocusId}
