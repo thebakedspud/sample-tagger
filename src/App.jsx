@@ -484,7 +484,8 @@ export default function App() {
               </div>
             </div>
 
-            <ul role="list" style={{ padding: 0, listStyle: 'none' }}>
+            {/* CHANGED: removed role="list" */}
+            <ul style={{ padding: 0, listStyle: 'none' }}>
               {tracks.map((t, i) => {
                 // Build a quick lookup of pending placeholders for this track by index
                 const placeholders = []
@@ -591,7 +592,8 @@ export default function App() {
                     </div>
 
                     {(t.notes.length > 0 || placeholders.length > 0) && (
-                      <ul role="list" style={{ marginTop: 8, marginBottom: 0, paddingLeft: 16 }}>
+                      /* CHANGED: removed role="list" */
+                      <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 16 }}>
                         {rows}
                       </ul>
                     )}
