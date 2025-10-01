@@ -442,8 +442,10 @@ export default function App() {
                   <button
                     type="submit"
                     className="button primary"
-                    disabled={!provider || importLoading}
+                    // Keep focusable/clickable; validate in handleImport
+                    disabled={importLoading}
                     aria-busy={importLoading ? 'true' : 'false'}
+                    title={!provider ? 'Paste a Spotify/YouTube/SoundCloud playlist URL' : undefined}
                   >
                     {importLoading ? 'Importing…' : 'Import playlist'}
                   </button>
