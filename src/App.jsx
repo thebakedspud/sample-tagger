@@ -146,13 +146,19 @@ export default function App() {
     if (!importUrl.trim()) {
       setImportError('Paste a playlist URL to import.')
       announce('Import failed. URL missing.')
-      importInputRef.current?.focus()
+      if (importInputRef.current) {
+        importInputRef.current.focus()
+        importInputRef.current.select()
+      }
       return
     }
     if (!provider) {
       setImportError('That URL doesn’t look like a Spotify, YouTube, or SoundCloud playlist.')
       announce('Import failed. Unsupported URL.')
-      importInputRef.current?.focus()
+      if (importInputRef.current) {
+        importInputRef.current.focus()
+        importInputRef.current.select()
+      }
       return
     }
     try {
@@ -187,7 +193,10 @@ export default function App() {
         : 'Couldn’t import right now. Check the link or try again.'
       setImportError(msg)
       announce(`Import failed. ${msg}`)
-      importInputRef.current?.focus()
+      if (importInputRef.current) {
+        importInputRef.current.focus()
+        importInputRef.current.select()
+      }
     } finally {
       setImportLoading(false)
     }
@@ -484,7 +493,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* CHANGED: removed role="list" */}
             <ul style={{ padding: 0, listStyle: 'none' }}>
               {tracks.map((t, i) => {
                 // Build a quick lookup of pending placeholders for this track by index
@@ -592,7 +600,6 @@ export default function App() {
                     </div>
 
                     {(t.notes.length > 0 || placeholders.length > 0) && (
-                      /* CHANGED: removed role="list" */
                       <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 16 }}>
                         {rows}
                       </ul>
