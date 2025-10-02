@@ -142,6 +142,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPending])
 
+  // ===== NEW: tiny extracted handlers (stay inside App.jsx) =====
+  function handleImportUrlChange(e) {
+    setImportUrl(e.target.value)
+    setImportError(null)
+  }
+
+  function handleDraftChange(e) {
+    setDraft(e.target.value)
+  }
+  // ==============================================================
+
   // IMPORT handlers
   const handleImport = async (e) => {
     e?.preventDefault?.()
@@ -421,7 +432,7 @@ export default function App() {
                     inputMode="url"
                     placeholder="https://open.spotify.com/playlist/…"
                     value={importUrl}
-                    onChange={(e) => { setImportUrl(e.target.value); setImportError(null) }}
+                    onChange={handleImportUrlChange}
                     style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
                     aria-invalid={!!importError}
                   />
@@ -617,7 +628,7 @@ export default function App() {
                           rows={3}
                           value={draft}
                           aria-describedby={error ? `note-error-${t.id}` : undefined}
-                          onChange={(e) => setDraft(e.target.value)}
+                          onChange={handleDraftChange}
                           style={{
                             width: '100%',
                             padding: 8,
