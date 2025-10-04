@@ -1,50 +1,66 @@
 // src/components/UndoPlaceholder.jsx
-import { useEffect, useRef } from 'react';
-import { focusById } from '../utils/focusById.js'; // ensure this exists
+import { useEffect, useRef, useState } from 'react'
+import { focusById } from '../utils/focusById.js'
 
 export default function UndoPlaceholder({
-  onUndo,               // function (pendingId?) -> void
-  onDismiss,            // optional function (pendingId?) -> void
-  label = 'Note deleted.',
-  announceRefocus,      // optional function
-  idForA11y,            // string used by aria-labelledby
-  restoreFocusId,       // e.g. "note-del-<trackId>-<noteId>"
-  fallbackFocusId,      // e.g. "add-note-<trackId>"
-  pendingId             // optional, pass-through to callbacks
+  onUndo,            // (pendingId?) -> void
+  onDismiss,         // optional (pendingId?) -> void
+  restoreFocusId,    // e.g. "note-del-<trackId>-<noteId>"
+  fallbackFocusId,   // e.g. "add-note-<trackId>"
+  pendingId,         // optional passthrough
+  windowMs = 8000    // can tweak if you want more/less time
 }) {
-  const btnRef = useRef(null);
+  const btnRef = useRef(null)
+  const rafRef = useRef(null)
+  const remainingRef = useRef(windowMs)
+  const lastTickRef = useRef(0)
+  const [hovered, setHovered] = useState(false)
 
-  // Auto-focus the Undo button when this placeholder mounts
   useEffect(() => {
-    btnRef.current?.focus();
-    // If you want this to announce when focus changes to the Undo button
-    announceRefocus?.();
-  }, [announceRefocus]);
-
-  function restoreFocus() {
-    if (restoreFocusId) {
-      focusById(restoreFocusId);
-    } else if (fallbackFocusId) {
-      focusById(fallbackFocusId);
+    btnRef.current?.focus()
+    lastTickRef.current = performance.now()
+    rafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
+  }, [])
+
+  function isDomFocused() {
+    return document.activeElement === btnRef.current
+  }
+
+  function tick(now) {
+    const elapsed = now - lastTickRef.current
+    lastTickRef.current = now
+
+    // Pause if the Undo button is actually focused in the DOM, or hovered
+    if (!isDomFocused() && !hovered) {
+      remainingRef.current -= elapsed
+      if (remainingRef.current <= 0) {
+        handleExpire()
+        return
+      }
+    }
+
+    rafRef.current = requestAnimationFrame(tick)
+  }
+
+  function handleExpire() {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    focusById(fallbackFocusId)
+    onDismiss?.(pendingId)
   }
 
   function handleUndo() {
-    // Execute parent undo (restores the note in state)
-    onUndo?.(pendingId);
-    // Give React one paint so the restored button exists in the DOM
-    requestAnimationFrame(restoreFocus);
-  }
-
-  function handleDismiss() {
-    onDismiss?.(pendingId);
-    requestAnimationFrame(restoreFocus);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    onUndo?.(pendingId)
+    requestAnimationFrame(() => {
+      focusById(restoreFocusId || fallbackFocusId)
+    })
   }
 
   return (
     <div
-      role="group"
-      aria-labelledby={idForA11y}
       className="undo-inline"
       style={{
         display: 'flex',
@@ -55,7 +71,9 @@ export default function UndoPlaceholder({
         background: 'var(--card)',
       }}
     >
-      <span id={idForA11y}>{label}</span>
+      {/* Visual label for sighted users; hidden from SR to avoid duplicate reads */}
+      <span aria-hidden="true">Note deleted.</span>
+
       <button
         ref={btnRef}
         type="button"
@@ -63,23 +81,28 @@ export default function UndoPlaceholder({
         onClick={handleUndo}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            handleUndo();
+            e.preventDefault()
+            handleUndo()
           }
         }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
         Undo
       </button>
+
       {onDismiss && (
         <button
           type="button"
           className="btn-link"
           aria-label="Dismiss undo"
-          onClick={handleDismiss}
+          onClick={handleExpire}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
         >
           ×
         </button>
       )}
     </div>
-  );
+  )
 }

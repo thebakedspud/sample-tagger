@@ -57,14 +57,13 @@ export default function App() {
 
   const lastPendingIdRef = useRef(null)
 
+  // IMPORTANT: make hook timer inert; let the component own expiry (so it can pause on focus/hover)
   const { start: startPendingDelete, undo: undoPending, isPending } = usePendingDelete({
-    timeoutMs: 5000,
+    timeoutMs: 600000, // 10 minutes — effectively disables auto-finalize from the hook
     onAnnounce: announce,
     onFinalize: (id) => {
-      // Read from the up-to-date ref to avoid stale-closure bugs
+      // Safety net only; should rarely/never fire now
       const meta = pendingRef.current.get(id)
-
-      // We already removed the note at delete time; finalization just clears placeholder.
       setPending(prev => {
         const next = new Map(prev)
         next.delete(id)
@@ -73,7 +72,6 @@ export default function App() {
 
       announce('Note deleted')
 
-      // After the placeholder disappears, move focus to a safe fallback
       if (meta?.fallbackFocusId) {
         requestAnimationFrame(() => {
           focusById(meta.fallbackFocusId)
@@ -345,7 +343,7 @@ export default function App() {
       return next
     })
 
-    // Start timer via hook (handles announcements + timeout focus via onFinalize)
+    // Start timer via hook (announces initial delete; expiry will be owned by component)
     startPendingDelete(id)
 
     // Focus will move into the inline Undo button when the placeholder mounts.
@@ -362,7 +360,7 @@ export default function App() {
       fallbackFocusId
     } = meta
 
-    // Cancel timer
+    // Cancel hook timer
     undoPending(id)
 
     // Restore note at its original index (clamped to current length)
@@ -393,6 +391,28 @@ export default function App() {
         focusById(fallbackFocusId)
       }
     })
+  }
+
+  // NEW: component-owned expiry handler (called by UndoPlaceholder onDismiss)
+  function handleExpireInline(id) {
+    const meta = pendingRef.current.get(id)
+
+    // Remove placeholder
+    setPending(prev => {
+      const next = new Map(prev)
+      next.delete(id)
+      return next
+    })
+
+    // Announce final state distinctly from initial delete
+    announce('Undo expired. Note deleted')
+
+    // Focus to safe fallback
+    if (meta?.fallbackFocusId) {
+      requestAnimationFrame(() => {
+        focusById(meta.fallbackFocusId)
+      })
+    }
   }
 
   return (
@@ -431,6 +451,7 @@ export default function App() {
                     type="url"
                     inputMode="url"
                     placeholder="https://open.spotify.com/playlist/…"
+                    autoComplete="off"
                     value={importUrl}
                     onChange={handleImportUrlChange}
                     style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
@@ -516,8 +537,8 @@ export default function App() {
                     placeholders.push({
                       pid,
                       index: meta.index,
-                      restoreFocusId: meta.restoreFocusId,   // NEW
-                      fallbackFocusId: meta.fallbackFocusId, // NEW
+                      restoreFocusId: meta.restoreFocusId,
+                      fallbackFocusId: meta.fallbackFocusId,
                     })
                   }
                 }
@@ -536,12 +557,9 @@ export default function App() {
                       rows.push(
                         <li key={`ph-${ph.pid}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                           <UndoPlaceholder
-                            idForA11y={`undo-msg-${ph.pid}`}
                             pendingId={ph.pid}
-                            label="Note deleted."
-                            onUndo={handleUndoInline}                  // receives pendingId
-                            announceRefocus={() => announce('Undo available')}
-                            // NEW: give the component the focus targets
+                            onUndo={handleUndoInline}             // receives pendingId
+                            onDismiss={handleExpireInline}        // component-owned expiry
                             restoreFocusId={ph.restoreFocusId}
                             fallbackFocusId={ph.fallbackFocusId}
                           />
