@@ -3,6 +3,9 @@ import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
 import { loadAppState, saveAppState, clearAppState } from './utils/storage.js'
 import { focusById } from './utils/focusById.js'
+import './styles/tokens.css';
+import './styles/primitives.css';
+
 
 // NEW: inline undo
 import { usePendingDelete } from './features/undo/usePendingDelete'
@@ -416,7 +419,7 @@ export default function App() {
   }
 
   return (
-    <>
+    <div className="app">
       <style>{`
         .error-text { color: #d9534f; font-size: 0.9em; margin-top: 4px; }
         .chip { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:var(--card); }
@@ -474,7 +477,7 @@ export default function App() {
                 <div style={{ justifySelf: 'end' }}>
                   <button
                     type="submit"
-                    className="button primary"
+                    className="btn primary"
                     // Keep focusable/clickable; validate in handleImport
                     disabled={importLoading}
                     aria-busy={importLoading ? 'true' : 'false'}
@@ -504,7 +507,7 @@ export default function App() {
                   <button
                     type="button"
                     ref={reimportBtnRef}
-                    className="button"
+                    className="btn"
                     onClick={handleReimport}
                     aria-label="Re-import this playlist"
                     title="Fetch a fresh snapshot of this playlist"
@@ -516,13 +519,13 @@ export default function App() {
                 )}
                 <button
                   type="button"
-                  className="button"
+                  className="btn"
                   onClick={handleClearAll}
                   title="Remove saved playlist and notes from this device"
                 >
                   Clear
                 </button>
-                <button type="button" className="button" onClick={() => setScreen('landing')}>
+                <button type="button" className="btn" onClick={() => setScreen('landing')}>
                   ← Back
                 </button>
               </div>
@@ -585,7 +588,7 @@ export default function App() {
                         <button
                           type="button"
                           id={`del-btn-${t.id}-${idx}`}
-                          className="button"
+                          className="btn"
                           aria-label={`Delete note ${idx + 1} for ${t.title}`}
                           onClick={() => onDeleteNote(t.id, idx)}
                         >
@@ -621,7 +624,7 @@ export default function App() {
                         <button
                           type="button"
                           id={`add-note-btn-${t.id}`}
-                          className="button"
+                          className="btn"
                           aria-label={`Add note to ${t.title}`}
                           onClick={() => onAddNote(t.id)}
                         >
@@ -662,10 +665,10 @@ export default function App() {
                           </div>
                         )}
                         <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                          <button type="button" className="button primary" onClick={() => onSaveNote(t.id)}>
+                          <button type="button" className="btn primary" onClick={() => onSaveNote(t.id)}>
                             Save note
                           </button>
-                          <button type="button" className="button" onClick={() => onCancelNote(t.id)}>
+                          <button type="button" className="btn" onClick={() => onCancelNote(t.id)}>
                             Cancel
                           </button>
                         </div>
@@ -682,6 +685,6 @@ export default function App() {
       <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)' }}>
         <small>Prototype · Keyboard-first, accessible-by-default</small>
       </footer>
-    </>
+    </div>
   )
 }

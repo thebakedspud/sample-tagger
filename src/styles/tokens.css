@@ -1,0 +1,7 @@
+:root {
+  --radius: 10px;
+  --space-1: 8px;
+  --space-2: 12px;
+  --space-3: 16px;
+  /* Reuse existing theme vars like --bg, --fg, --card, --border */
+}
