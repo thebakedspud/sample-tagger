@@ -65,9 +65,12 @@ export function usePendingDelete({ timeoutMs = 5000, onAnnounce, onFinalize }) {
 
   // Cleanup all timers on unmount
   useEffect(() => {
+    // Snapshot the ref once so cleanup uses a stable reference
+    const timersAtMount = timersRef.current;
+
     return () => {
-      for (const tid of timersRef.current.values()) clearTimeout(tid);
-      timersRef.current.clear();
+      for (const tid of timersAtMount.values()) clearTimeout(tid);
+      timersAtMount.clear();
     };
   }, []);
 

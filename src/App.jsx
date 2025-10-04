@@ -97,7 +97,7 @@ export default function App() {
     if (typeof saved.lastImportUrl === 'string') setLastImportUrl(saved.lastImportUrl)
 
     if (Array.isArray(saved.tracks) && saved.tracks.length) setScreen('playlist')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   // —— PERSISTENCE: save whenever core state changes

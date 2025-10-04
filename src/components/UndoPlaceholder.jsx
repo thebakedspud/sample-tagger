@@ -1,5 +1,5 @@
 // src/components/UndoPlaceholder.jsx
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { focusById } from '../utils/focusById.js'
 
 export default function UndoPlaceholder({
@@ -14,36 +14,47 @@ export default function UndoPlaceholder({
   const rafRef = useRef(null)
   const remainingRef = useRef(windowMs)
   const lastTickRef = useRef(0)
-  const [hovered, setHovered] = useState(false)
+  const hoveredRef = useRef(false) // ref so RAF loop reads the current value
 
+  // Start/stop the countdown, pausing while focused or hovered
   useEffect(() => {
     btnRef.current?.focus()
     lastTickRef.current = performance.now()
+
+    function isDomFocused() {
+      return document.activeElement === btnRef.current
+    }
+
+    function expireNow() {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      // Return focus first (safe target)
+      focusById(fallbackFocusId)
+      onDismiss?.(pendingId)
+    }
+
+    function tick(now) {
+      const elapsed = now - lastTickRef.current
+      lastTickRef.current = now
+
+      // Pause if the Undo button is focused or hovered
+      if (!isDomFocused() && !hoveredRef.current) {
+        remainingRef.current -= elapsed
+        if (remainingRef.current <= 0) {
+          expireNow()
+          return
+        }
+      }
+
+      rafRef.current = requestAnimationFrame(tick)
+    }
+
     rafRef.current = requestAnimationFrame(tick)
+
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
-  }, [])
-
-  function isDomFocused() {
-    return document.activeElement === btnRef.current
-  }
-
-  function tick(now) {
-    const elapsed = now - lastTickRef.current
-    lastTickRef.current = now
-
-    // Pause if the Undo button is actually focused in the DOM, or hovered
-    if (!isDomFocused() && !hovered) {
-      remainingRef.current -= elapsed
-      if (remainingRef.current <= 0) {
-        handleExpire()
-        return
-      }
-    }
-
-    rafRef.current = requestAnimationFrame(tick)
-  }
+    // deps: we reference only stable refs + props used in expire
+  }, [fallbackFocusId, onDismiss, pendingId])
 
   function handleExpire() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -54,6 +65,7 @@ export default function UndoPlaceholder({
   function handleUndo() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     onUndo?.(pendingId)
+    // restore focus to a sensible control on next frame
     requestAnimationFrame(() => {
       focusById(restoreFocusId || fallbackFocusId)
     })
@@ -85,8 +97,8 @@ export default function UndoPlaceholder({
             handleUndo()
           }
         }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
+        onMouseEnter={() => { hoveredRef.current = true }}
+        onMouseLeave={() => { hoveredRef.current = false }}
       >
         Undo
       </button>
@@ -97,8 +109,8 @@ export default function UndoPlaceholder({
           className="btn-link"
           aria-label="Dismiss undo"
           onClick={handleExpire}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
+          onMouseEnter={() => { hoveredRef.current = true }}
+          onMouseLeave={() => { hoveredRef.current = false }}
         >
           ×
         </button>

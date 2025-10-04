@@ -7,6 +7,7 @@ export function loadAppState() {
     if (!raw) return null;
     return JSON.parse(raw);
   } catch {
+    // Intentionally ignore read/parse errors (e.g. private mode, corrupted JSON)
     return null;
   }
 }
@@ -14,11 +15,16 @@ export function loadAppState() {
 export function saveAppState(state) {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(state));
-  } catch {}
+  } catch {
+    // Intentionally ignore write errors (quota exceeded, private mode)
+    // console.warn('Storage save failed', e); // enable during dev if needed
+  }
 }
 
 export function clearAppState() {
   try {
     localStorage.removeItem(LS_KEY);
-  } catch {}
+  } catch {
+    // Intentionally ignore clear errors (non-blocking)
+  }
 }
