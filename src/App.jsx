@@ -6,7 +6,6 @@ import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
 
-
 // NEW: inline undo
 import { usePendingDelete } from './features/undo/usePendingDelete'
 import UndoPlaceholder from './components/UndoPlaceholder.jsx'
@@ -151,6 +150,43 @@ export default function App() {
 
   function handleDraftChange(e) {
     setDraft(e.target.value)
+  }
+  // ==============================================================
+
+  // ===== NEW: normalization helper for IDs used via data-* =====
+  function normalizeTrackId(raw) {
+    // If purely digits, convert to number to match demo IDs; otherwise leave as string
+    return /^\d+$/.test(String(raw)) ? Number(raw) : raw;
+  }
+
+  // ===== NEW: top-level named handlers (replace inline lambdas) =====
+  function handleAddNoteClick(e) {
+    const btn = e.currentTarget;
+    const trackId = normalizeTrackId(btn.dataset.trackId);
+    onAddNote(trackId);
+  }
+
+  function handleDeleteNoteClick(e) {
+    const btn = e.currentTarget;
+    const trackId = normalizeTrackId(btn.dataset.trackId);
+    const noteIndex = Number(btn.dataset.noteIndex);
+    onDeleteNote(trackId, noteIndex);
+  }
+
+  function handleSaveNoteClick(e) {
+    const btn = e.currentTarget;
+    const trackId = normalizeTrackId(btn.dataset.trackId);
+    onSaveNote(trackId);
+  }
+
+  function handleCancelNoteClick(e) {
+    const btn = e.currentTarget;
+    const trackId = normalizeTrackId(btn.dataset.trackId);
+    onCancelNote(trackId);
+  }
+
+  function handleBackToLanding() {
+    setScreen('landing');
   }
   // ==============================================================
 
@@ -525,7 +561,7 @@ export default function App() {
                 >
                   Clear
                 </button>
-                <button type="button" className="btn" onClick={() => setScreen('landing')}>
+                <button type="button" className="btn" onClick={handleBackToLanding}>
                   ← Back
                 </button>
               </div>
@@ -590,7 +626,9 @@ export default function App() {
                           id={`del-btn-${t.id}-${idx}`}
                           className="btn"
                           aria-label={`Delete note ${idx + 1} for ${t.title}`}
-                          onClick={() => onDeleteNote(t.id, idx)}
+                          data-track-id={t.id}
+                          data-note-index={idx}
+                          onClick={handleDeleteNoteClick}
                         >
                           Delete
                         </button>
@@ -626,7 +664,8 @@ export default function App() {
                           id={`add-note-btn-${t.id}`}
                           className="btn"
                           aria-label={`Add note to ${t.title}`}
-                          onClick={() => onAddNote(t.id)}
+                          data-track-id={t.id}
+                          onClick={handleAddNoteClick}
                         >
                           Add note
                         </button>
@@ -665,10 +704,20 @@ export default function App() {
                           </div>
                         )}
                         <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                          <button type="button" className="btn primary" onClick={() => onSaveNote(t.id)}>
+                          <button
+                            type="button"
+                            className="btn primary"
+                            data-track-id={t.id}
+                            onClick={handleSaveNoteClick}
+                          >
                             Save note
                           </button>
-                          <button type="button" className="btn" onClick={() => onCancelNote(t.id)}>
+                          <button
+                            type="button"
+                            className="btn"
+                            data-track-id={t.id}
+                            onClick={handleCancelNoteClick}
+                          >
                             Cancel
                           </button>
                         </div>
