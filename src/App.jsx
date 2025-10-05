@@ -12,7 +12,8 @@ import UndoPlaceholder from './components/UndoPlaceholder.jsx'
 
 // ✅ Extracted helpers
 import detectProvider from './features/import/detectProvider'
-import importPlaylist from './features/import/mockImporter'
+// ⬇️ swap direct mockImporter for the hook
+import useImportPlaylist from './features/import/useImportPlaylist.js'
 
 export default function App() {
   // SIMPLE "ROUTING"
@@ -190,6 +191,9 @@ export default function App() {
   }
   // ==============================================================
 
+  // ⬇️ NEW: use the import hook (mock-first)
+  const { importPlaylist: runImport } = useImportPlaylist()
+
   // IMPORT handlers
   const handleImport = async (e) => {
     e?.preventDefault?.()
@@ -215,7 +219,9 @@ export default function App() {
     try {
       setImportLoading(true)
       announce('Import started.')
-      const res = await importPlaylist(importUrl.trim())
+      // 🔁 call the hook instead of mockImporter directly
+      const res = await runImport(importUrl.trim())
+
       // Map to your track shape, preserving notes array
       const mapped = res.tracks.map((t, idx) => ({
         id: t.id || `${res.provider}-${idx}`,
@@ -261,7 +267,8 @@ export default function App() {
       setReimportLoading(true)
       announce('Re-importing playlist…')
 
-      const res = await importPlaylist(lastImportUrl)
+      // 🔁 call the hook here too
+      const res = await runImport(lastImportUrl)
       const mapped = res.tracks.map((t, idx) => ({
         id: t.id || `${res.provider}-${idx}`,
         title: t.title,
