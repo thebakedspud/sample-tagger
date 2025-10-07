@@ -19,10 +19,15 @@ export default function App() {
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState('landing')
 
-  // ANNOUNCEMENTS (for screen readers)
+  // ANNOUNCEMENTS (for screen readers) — light debounce to avoid chatty bursts
   const [announceMsg, setAnnounceMsg] = useState('')
+  const announceTimerRef = useRef(null)
   function announce(msg) {
-    setAnnounceMsg(msg)
+    if (announceTimerRef.current) clearTimeout(announceTimerRef.current)
+    announceTimerRef.current = setTimeout(() => {
+      setAnnounceMsg(msg)
+      announceTimerRef.current = null
+    }, 60)
   }
 
   // IMPORT state
@@ -39,7 +44,6 @@ export default function App() {
 
   // DATA
   const [tracks, setTracks] = useState([
-    // Existing demo data remains; it will be replaced on successful import
     { id: 1, title: 'Nautilus', artist: 'Bob James', notes: [] },
     { id: 2, title: 'Electric Relaxation', artist: 'A Tribe Called Quest', notes: [] },
     { id: 3, title: 'The Champ', artist: 'The Mohawks', notes: [] },
@@ -47,38 +51,32 @@ export default function App() {
 
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
-  const [error, setError] = useState(null) // error message for note editor
+  const [error, setError] = useState(null)
 
   // Remember which button opened the editor
   const editorInvokerRef = useRef(null)
 
   // NEW — inline undo bookkeeping:
-  // pending map: id -> { trackId, note, index, restoreFocusId, fallbackFocusId }
   const [pending, setPending] = useState(new Map())
-  const pendingRef = useRef(pending)              // <-- keep latest pending in a ref
+  const pendingRef = useRef(pending)
   useEffect(() => { pendingRef.current = pending }, [pending])
 
   const lastPendingIdRef = useRef(null)
 
-  // IMPORTANT: make hook timer inert; let the component own expiry (so it can pause on focus/hover)
+  // IMPORTANT: make hook timer inert; let the component own expiry
   const { start: startPendingDelete, undo: undoPending, isPending } = usePendingDelete({
-    timeoutMs: 600000, // 10 minutes — effectively disables auto-finalize from the hook
+    timeoutMs: 600000,
     onAnnounce: announce,
     onFinalize: (id) => {
-      // Safety net only; should rarely/never fire now
       const meta = pendingRef.current.get(id)
       setPending(prev => {
         const next = new Map(prev)
         next.delete(id)
         return next
       })
-
       announce('Note deleted')
-
       if (meta?.fallbackFocusId) {
-        requestAnimationFrame(() => {
-          focusById(meta.fallbackFocusId)
-        })
+        requestAnimationFrame(() => { focusById(meta.fallbackFocusId) })
       }
     }
   })
@@ -98,100 +96,63 @@ export default function App() {
     if (typeof saved.lastImportUrl === 'string') setLastImportUrl(saved.lastImportUrl)
 
     if (Array.isArray(saved.tracks) && saved.tracks.length) setScreen('playlist')
-     
   }, [])
 
   // —— PERSISTENCE: save whenever core state changes
   useEffect(() => {
-    saveAppState({
-      tracks,
-      playlistTitle,
-      importedAt,
-      lastImportUrl,
-    })
+    saveAppState({ tracks, playlistTitle, importedAt, lastImportUrl })
   }, [tracks, playlistTitle, importedAt, lastImportUrl])
 
   // Safety: close editor if its track disappears or changes
   useEffect(() => {
     if (editingId == null) return
     if (!tracks.some(t => t.id === editingId)) {
-      setEditingId(null)
-      setDraft('')
-      setError(null)
+      setEditingId(null); setDraft(''); setError(null)
     }
   }, [tracks, editingId])
 
   // Ctrl/Cmd+Z undo (for the most recent pending delete)
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (
-        (e.ctrlKey || e.metaKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        e.key.toLowerCase() === 'z'
-      ) {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
         const id = lastPendingIdRef.current
-        if (id && isPending(id)) {
-          e.preventDefault()
-          handleUndoInline(id)
-        }
+        if (id && isPending(id)) { e.preventDefault(); handleUndoInline(id) }
       }
     }
-
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPending])
 
-  // ===== NEW: tiny extracted handlers (stay inside App.jsx) =====
-  function handleImportUrlChange(e) {
-    setImportUrl(e.target.value)
-    setImportError(null)
-  }
+  // ===== tiny extracted handlers =====
+  function handleImportUrlChange(e) { setImportUrl(e.target.value); setImportError(null) }
+  function handleDraftChange(e) { setDraft(e.target.value) }
 
-  function handleDraftChange(e) {
-    setDraft(e.target.value)
-  }
-  // ==============================================================
-
-  // ===== NEW: normalization helper for IDs used via data-* =====
   function normalizeTrackId(raw) {
-    // If purely digits, convert to number to match demo IDs; otherwise leave as string
     return /^\d+$/.test(String(raw)) ? Number(raw) : raw;
   }
 
-  // ===== NEW: top-level named handlers (replace inline lambdas) =====
   function handleAddNoteClick(e) {
-    const btn = e.currentTarget;
-    const trackId = normalizeTrackId(btn.dataset.trackId);
-    onAddNote(trackId);
+    const trackId = normalizeTrackId(e.currentTarget.dataset.trackId)
+    onAddNote(trackId)
   }
-
   function handleDeleteNoteClick(e) {
-    const btn = e.currentTarget;
-    const trackId = normalizeTrackId(btn.dataset.trackId);
-    const noteIndex = Number(btn.dataset.noteIndex);
-    onDeleteNote(trackId, noteIndex);
+    const btn = e.currentTarget
+    const trackId = normalizeTrackId(btn.dataset.trackId)
+    const noteIndex = Number(btn.dataset.noteIndex)
+    onDeleteNote(trackId, noteIndex)
   }
-
   function handleSaveNoteClick(e) {
-    const btn = e.currentTarget;
-    const trackId = normalizeTrackId(btn.dataset.trackId);
-    onSaveNote(trackId);
+    const trackId = normalizeTrackId(e.currentTarget.dataset.trackId)
+    onSaveNote(trackId)
   }
-
   function handleCancelNoteClick(e) {
-    const btn = e.currentTarget;
-    const trackId = normalizeTrackId(btn.dataset.trackId);
-    onCancelNote(trackId);
+    const trackId = normalizeTrackId(e.currentTarget.dataset.trackId)
+    onCancelNote(trackId)
   }
+  function handleBackToLanding() { setScreen('landing') }
 
-  function handleBackToLanding() {
-    setScreen('landing');
-  }
-  // ==============================================================
-
-  // ⬇️ NEW: use the import hook (mock-first)
+  // ⬇️ use the import hook (mock-first)
   const { importPlaylist: runImport } = useImportPlaylist()
 
   // IMPORT handlers
@@ -201,28 +162,20 @@ export default function App() {
     if (!importUrl.trim()) {
       setImportError('Paste a playlist URL to import.')
       announce('Import failed. URL missing.')
-      if (importInputRef.current) {
-        importInputRef.current.focus()
-        importInputRef.current.select()
-      }
+      importInputRef.current?.focus(); importInputRef.current?.select()
       return
     }
     if (!provider) {
       setImportError('That URL doesn’t look like a Spotify, YouTube, or SoundCloud playlist.')
       announce('Import failed. Unsupported URL.')
-      if (importInputRef.current) {
-        importInputRef.current.focus()
-        importInputRef.current.select()
-      }
+      importInputRef.current?.focus(); importInputRef.current?.select()
       return
     }
     try {
       setImportLoading(true)
       announce('Import started.')
-      // 🔁 call the hook instead of mockImporter directly
       const res = await runImport(importUrl.trim())
 
-      // Map to your track shape, preserving notes array
       const mapped = res.tracks.map((t, idx) => ({
         id: t.id || `${res.provider}-${idx}`,
         title: t.title,
@@ -237,11 +190,8 @@ export default function App() {
       setScreen('playlist')
       announce(`Playlist imported. ${mapped.length} tracks.`)
 
-      // Move focus to first "Add note" button when ready (first-time import UX)
       setTimeout(() => {
-        if (mapped.length > 0) {
-          focusById(`add-note-btn-${mapped[0].id}`)
-        }
+        if (mapped.length > 0) { focusById(`add-note-btn-${mapped[0].id}`) }
       }, 0)
     } catch (err) {
       const msg = err?.code === 'UNSUPPORTED_OR_INVALID_URL'
@@ -249,25 +199,18 @@ export default function App() {
         : 'Couldn’t import right now. Check the link or try again.'
       setImportError(msg)
       announce(`Import failed. ${msg}`)
-      if (importInputRef.current) {
-        importInputRef.current.focus()
-        importInputRef.current.select()
-      }
+      importInputRef.current?.focus(); importInputRef.current?.select()
     } finally {
       setImportLoading(false)
     }
   }
 
-  // Re-import keeps focus on the same button and announces results
   const handleReimport = async () => {
     if (!lastImportUrl) return
-
     const wasActive = document.activeElement === reimportBtnRef.current
     try {
       setReimportLoading(true)
       announce('Re-importing playlist…')
-
-      // 🔁 call the hook here too
       const res = await runImport(lastImportUrl)
       const mapped = res.tracks.map((t, idx) => ({
         id: t.id || `${res.provider}-${idx}`,
@@ -278,13 +221,8 @@ export default function App() {
       setTracks(mapped)
       setPlaylistTitle(res.title || 'Imported Playlist')
       setImportedAt(new Date().toISOString())
-
       announce(`Playlist re-imported. ${mapped.length} tracks available.`)
-
-      if (wasActive) {
-        // wait a frame in case the list rerender affected focus
-        requestAnimationFrame(() => reimportBtnRef.current?.focus())
-      }
+      if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
     } catch {
       announce('Re-import failed. Try again.')
     } finally {
@@ -294,12 +232,8 @@ export default function App() {
 
   // —— Clear-all handler (full reset)
   const handleClearAll = () => {
-    // Cancel any pending placeholders
     setPending(new Map())
-
-    clearAppState() // wipe localStorage
-
-    // reset in-memory state
+    clearAppState()
     setTracks([
       { id: 1, title: 'Nautilus', artist: 'Bob James', notes: [] },
       { id: 2, title: 'Electric Relaxation', artist: 'A Tribe Called Quest', notes: [] },
@@ -308,23 +242,16 @@ export default function App() {
     setPlaylistTitle('My Playlist')
     setImportedAt(null)
     setLastImportUrl('')
-    setEditingId(null)
-    setDraft('')
-    setError(null)
-
+    setEditingId(null); setDraft(''); setError(null)
     setScreen('landing')
     announce('All saved data cleared. You’re back at the start.')
     setTimeout(() => importInputRef.current?.focus(), 0)
   }
 
   const onAddNote = (trackId) => {
-    setEditingId(trackId)
-    setDraft('')
-    setError(null)
+    setEditingId(trackId); setDraft(''); setError(null)
     editorInvokerRef.current = document.getElementById(`add-note-btn-${trackId}`)
-    setTimeout(() => {
-      focusById(`note-input-${trackId}`)
-    }, 0)
+    setTimeout(() => { focusById(`note-input-${trackId}`) }, 0)
   }
 
   const onSaveNote = (trackId) => {
@@ -333,29 +260,21 @@ export default function App() {
       setError('Note cannot be empty.')
       return
     }
-    setTracks((prev) =>
-      prev.map((t) =>
-        t.id === trackId ? { ...t, notes: [...t.notes, draft.trim()] } : t
-      )
+    setTracks(prev =>
+      prev.map(t => t.id === trackId ? { ...t, notes: [...t.notes, draft.trim()] } : t)
     )
-    setEditingId(null)
-    setDraft('')
-    setError(null)
+    setEditingId(null); setDraft(''); setError(null)
     announce('Note added.')
     editorInvokerRef.current?.focus()
   }
 
-  const onCancelNote = (_trackId) => {
-    setEditingId(null)
-    setDraft('')
-    setError(null)
+  const onCancelNote = () => {
+    setEditingId(null); setDraft(''); setError(null)
     announce('Note cancelled.')
     editorInvokerRef.current?.focus()
   }
 
-  // Create a unique pending id for a deletion (per note)
   function makePendingId(trackId, index) {
-    // Include time to avoid collisions when deleting the same index repeatedly
     return `${trackId}::${index}::${Date.now()}`
   }
 
@@ -363,16 +282,12 @@ export default function App() {
     const noteToDelete = tracks.find(t => t.id === trackId)?.notes[noteIndex]
     if (noteToDelete == null) return
 
-    // Remove the note now…
     setTracks(prev =>
       prev.map(t =>
-        t.id === trackId
-          ? { ...t, notes: t.notes.filter((_, i) => i !== noteIndex) }
-          : t
+        t.id === trackId ? { ...t, notes: t.notes.filter((_, i) => i !== noteIndex) } : t
       )
     )
 
-    // …and insert a placeholder record to render inline at the same index.
     const id = makePendingId(trackId, noteIndex)
     lastPendingIdRef.current = id
     setPending(prev => {
@@ -381,35 +296,22 @@ export default function App() {
         trackId,
         note: noteToDelete,
         index: noteIndex,
-
-        // NEW: where to send focus after Undo/dismiss
         restoreFocusId: `del-btn-${trackId}-${noteIndex}`,
         fallbackFocusId: `add-note-btn-${trackId}`,
       })
       return next
     })
 
-    // Start timer via hook (announces initial delete; expiry will be owned by component)
     startPendingDelete(id)
-
-    // Focus will move into the inline Undo button when the placeholder mounts.
   }
 
   function handleUndoInline(id) {
     const meta = pending.get(id)
     if (!meta) return
-    const {
-      trackId,
-      note,
-      index,
-      restoreFocusId,
-      fallbackFocusId
-    } = meta
+    const { trackId, note, index, restoreFocusId, fallbackFocusId } = meta
 
-    // Cancel hook timer
     undoPending(id)
 
-    // Restore note at its original index (clamped to current length)
     setTracks(prev =>
       prev.map(t => {
         if (t.id !== trackId) return t
@@ -420,7 +322,6 @@ export default function App() {
       })
     )
 
-    // Remove placeholder
     setPending(prev => {
       const next = new Map(prev)
       next.delete(id)
@@ -428,8 +329,6 @@ export default function App() {
     })
 
     announce('Note restored')
-
-    // After re-render, move focus to the restored Delete (fallback to Add note)
     requestAnimationFrame(() => {
       if (restoreFocusId && document.getElementById(restoreFocusId)) {
         focusById(restoreFocusId)
@@ -439,34 +338,37 @@ export default function App() {
     })
   }
 
-  // NEW: component-owned expiry handler (called by UndoPlaceholder onDismiss)
   function handleExpireInline(id) {
     const meta = pendingRef.current.get(id)
-
-    // Remove placeholder
     setPending(prev => {
       const next = new Map(prev)
       next.delete(id)
       return next
     })
-
-    // Announce final state distinctly from initial delete
     announce('Undo expired. Note deleted')
-
-    // Focus to safe fallback
     if (meta?.fallbackFocusId) {
-      requestAnimationFrame(() => {
-        focusById(meta.fallbackFocusId)
-      })
+      requestAnimationFrame(() => { focusById(meta.fallbackFocusId) })
     }
   }
+
+  // Helper to hide the mock prefix from SRs but keep it visible
+  const MOCK_PREFIX = 'MOCK DATA ACTIVE · '
+  const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
+  const cleanTitle = hasMockPrefix ? playlistTitle.slice(MOCK_PREFIX.length) : playlistTitle
 
   return (
     <div className="app">
       <style>{`
         .error-text { color: #d9534f; font-size: 0.9em; margin-top: 4px; }
-        .chip { display:inline-flex, align-items:center; gap:6px; padding:2px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:var(--card); }
+        .chip { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:var(--card); }
         .chip-dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
+        .sr-only {
+          position: absolute !important;
+          width: 1px; height: 1px;
+          padding: 0; margin: -1px;
+          overflow: hidden; clip: rect(0, 0, 1px, 1px);
+          white-space: nowrap; border: 0;
+        }
       `}</style>
 
       {/* Screen reader announcements */}
@@ -511,7 +413,8 @@ export default function App() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="chip" title={provider ? `Detected ${provider}` : 'No provider detected yet'}>
+                  {/* Removed title attr to avoid SR reading it as extra */}
+                  <span className="chip">
                     <span className="chip-dot" style={{ background: provider ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
                     {provider ? provider : 'no match'}
                   </span>
@@ -521,10 +424,8 @@ export default function App() {
                   <button
                     type="submit"
                     className="btn primary"
-                    // Keep focusable/clickable; validate in handleImport
                     disabled={importLoading}
                     aria-busy={importLoading ? 'true' : 'false'}
-                    title={!provider ? 'Paste a Spotify/YouTube/SoundCloud playlist URL' : undefined}
                   >
                     {importLoading ? 'Importing…' : 'Import playlist'}
                   </button>
@@ -538,9 +439,14 @@ export default function App() {
           <section aria-labelledby="playlist-title">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <h2 id="playlist-title" style={{ marginTop: 0, marginBottom: 0 }}>{playlistTitle}</h2>
+                {/* Clean label for SR, hide mock prefix textually */}
+                <h2 id="playlist-title" aria-label={cleanTitle} style={{ marginTop: 0, marginBottom: 0 }}>
+                  {hasMockPrefix && <span aria-hidden="true">{MOCK_PREFIX}</span>}
+                  {cleanTitle}
+                </h2>
                 {importedAt && (
-                  <span className="chip" title="Snapshot info">
+                  // Removed title attr to keep SR quiet
+                  <span className="chip">
                     {tracks.length} tracks • imported {new Date(importedAt).toLocaleDateString()} {new Date(importedAt).toLocaleTimeString()}
                   </span>
                 )}
@@ -553,7 +459,6 @@ export default function App() {
                     className="btn"
                     onClick={handleReimport}
                     aria-label="Re-import this playlist"
-                    title="Fetch a fresh snapshot of this playlist"
                     disabled={reimportLoading}
                     aria-busy={reimportLoading ? 'true' : 'false'}
                   >
@@ -564,7 +469,7 @@ export default function App() {
                   type="button"
                   className="btn"
                   onClick={handleClearAll}
-                  title="Remove saved playlist and notes from this device"
+                  aria-label="Clear all data"
                 >
                   Clear
                 </button>
@@ -576,7 +481,6 @@ export default function App() {
 
             <ul style={{ padding: 0, listStyle: 'none' }}>
               {tracks.map((t, i) => {
-                // Build a quick lookup of pending placeholders for this track by index
                 const placeholders = []
                 for (const [pid, meta] of pending.entries()) {
                   if (meta.trackId === t.id) {
@@ -588,15 +492,11 @@ export default function App() {
                     })
                   }
                 }
-                // Sort placeholders by index so they appear in the right order
                 placeholders.sort((a, b) => a.index - b.index)
 
-                // Render notes with inline placeholders at original indices.
-                // We iterate from 0..notes.length and insert any placeholders that belong at each index.
                 const rows = []
                 const noteCount = t.notes.length
                 for (let idx = 0; idx <= noteCount; idx++) {
-                  // Insert placeholder(s) that target this index
                   placeholders
                     .filter(ph => ph.index === idx && isPending(ph.pid))
                     .forEach(ph => {
@@ -604,8 +504,8 @@ export default function App() {
                         <li key={`ph-${ph.pid}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                           <UndoPlaceholder
                             pendingId={ph.pid}
-                            onUndo={handleUndoInline}             // receives pendingId
-                            onDismiss={handleExpireInline}        // component-owned expiry
+                            onUndo={handleUndoInline}
+                            onDismiss={handleExpireInline}
                             restoreFocusId={ph.restoreFocusId}
                             fallbackFocusId={ph.fallbackFocusId}
                           />
@@ -613,7 +513,6 @@ export default function App() {
                       )
                     })
 
-                  // Insert the real note if exists at this index
                   if (idx < noteCount) {
                     const n = t.notes[idx]
                     rows.push(
@@ -644,6 +543,8 @@ export default function App() {
                   }
                 }
 
+                const isEditing = editingId === t.id
+
                 return (
                   <li
                     key={t.id}
@@ -657,20 +558,26 @@ export default function App() {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>
-                        <strong>{i + 1}.</strong> {t.title} — {t.artist}
+                      {/* Track title as a proper heading; split title/artist for cleaner SR output */}
+                      <h3 id={`t-${t.id}`} style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>
+                        <span aria-hidden="true">{i + 1}. </span>
+                        <span id={`title-${t.id}`}>{t.title}</span>
+                        {' — '}
+                        <span aria-hidden="true">{t.artist}</span>
                         {t.notes.length > 0 && (
-                          <span style={{ marginLeft: 8, color: 'var(--muted)' }}>
+                          <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400 }}>
                             · {t.notes.length} note{t.notes.length > 1 ? 's' : ''}
                           </span>
                         )}
-                      </span>
+                      </h3>
+
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button
                           type="button"
                           id={`add-note-btn-${t.id}`}
                           className="btn"
-                          aria-label={`Add note to ${t.title}`}
+                          aria-label="Add note"
+                          aria-describedby={`title-${t.id}`}   // only the title, not the artist
                           data-track-id={t.id}
                           onClick={handleAddNoteClick}
                         >
@@ -685,10 +592,10 @@ export default function App() {
                       </ul>
                     )}
 
-                    {editingId === t.id && (
-                      <div style={{ marginTop: 10 }}>
-                        <label htmlFor={`note-input-${t.id}`} style={{ display: 'block', marginBottom: 6 }}>
-                          Note for “{t.title}”
+                    {isEditing && (
+                      <section id={`note-${t.id}`} aria-labelledby={`t-${t.id}`} style={{ marginTop: 10 }}>
+                        <label className="sr-only" htmlFor={`note-input-${t.id}`}>
+                          Note text
                         </label>
                         <textarea
                           id={`note-input-${t.id}`}
@@ -728,7 +635,7 @@ export default function App() {
                             Cancel
                           </button>
                         </div>
-                      </div>
+                      </section>
                     )}
                   </li>
                 )
