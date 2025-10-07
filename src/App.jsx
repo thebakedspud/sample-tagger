@@ -15,9 +15,14 @@ import detectProvider from './features/import/detectProvider'
 // ⬇️ swap direct mockImporter for the hook
 import useImportPlaylist from './features/import/useImportPlaylist.js'
 
+// —— Derive initial state from storage (safe: loadAppState normalizes bad/legacy saves)
+const persisted = loadAppState()
+const HAS_VALID_PLAYLIST = !!(persisted && persisted.provider && persisted.tracks?.length)
+const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
+
 export default function App() {
   // SIMPLE "ROUTING"
-  const [screen, setScreen] = useState('landing')
+  const [screen, setScreen] = useState(INITIAL_SCREEN)
 
   // ANNOUNCEMENTS (for screen readers) — light debounce to avoid chatty bursts
   const [announceMsg, setAnnounceMsg] = useState('')
@@ -38,16 +43,12 @@ export default function App() {
   const importInputRef = useRef(null)
 
   // PLAYLIST META
-  const [playlistTitle, setPlaylistTitle] = useState('My Playlist')
-  const [importedAt, setImportedAt] = useState(null) // ISO string
-  const [lastImportUrl, setLastImportUrl] = useState('')
+  const [playlistTitle, setPlaylistTitle] = useState(persisted?.playlistTitle ?? 'My Playlist')
+  const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null) // ISO string
+  const [lastImportUrl, setLastImportUrl] = useState(persisted?.lastImportUrl ?? '')
 
-  // DATA
-  const [tracks, setTracks] = useState([
-    { id: 1, title: 'Nautilus', artist: 'Bob James', notes: [] },
-    { id: 2, title: 'Electric Relaxation', artist: 'A Tribe Called Quest', notes: [] },
-    { id: 3, title: 'The Champ', artist: 'The Mohawks', notes: [] },
-  ])
+  // DATA (no demo seed)
+  const [tracks, setTracks] = useState(persisted?.tracks ?? [])
 
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
@@ -85,22 +86,10 @@ export default function App() {
   const reimportBtnRef = useRef(null)
   const [reimportLoading, setReimportLoading] = useState(false)
 
-  // —— PERSISTENCE: load-once from localStorage
-  useEffect(() => {
-    const saved = loadAppState()
-    if (!saved) return
-
-    if (Array.isArray(saved.tracks)) setTracks(saved.tracks)
-    if (typeof saved.playlistTitle === 'string') setPlaylistTitle(saved.playlistTitle)
-    if (typeof saved.importedAt === 'string') setImportedAt(saved.importedAt)
-    if (typeof saved.lastImportUrl === 'string') setLastImportUrl(saved.lastImportUrl)
-
-    if (Array.isArray(saved.tracks) && saved.tracks.length) setScreen('playlist')
-  }, [])
-
   // —— PERSISTENCE: save whenever core state changes
   useEffect(() => {
-    saveAppState({ tracks, playlistTitle, importedAt, lastImportUrl })
+    saveAppState({ tracks, playlistTitle, importedAt, lastImportUrl, provider: HAS_VALID_PLAYLIST ? persisted.provider : null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tracks, playlistTitle, importedAt, lastImportUrl])
 
   // Safety: close editor if its track disappears or changes
@@ -230,15 +219,11 @@ export default function App() {
     }
   }
 
-  // —— Clear-all handler (full reset)
+  // —— Clear-all handler (full reset; no demo repopulation)
   const handleClearAll = () => {
     setPending(new Map())
-    clearAppState()
-    setTracks([
-      { id: 1, title: 'Nautilus', artist: 'Bob James', notes: [] },
-      { id: 2, title: 'Electric Relaxation', artist: 'A Tribe Called Quest', notes: [] },
-      { id: 3, title: 'The Champ', artist: 'The Mohawks', notes: [] },
-    ])
+    clearAppState() // storage now preserves theme internally if you pass it
+    setTracks([])
     setPlaylistTitle('My Playlist')
     setImportedAt(null)
     setLastImportUrl('')

@@ -1,30 +1,67 @@
 // src/utils/storage.js
-const LS_KEY = 'sta:v1';
 
+// Keep a versioned key so older saves don’t conflict
+const LS_KEY = 'sta:v2';
+const STORAGE_VERSION = 2;
+
+// ✅ Load and normalise any saved data
 export function loadAppState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+
+    const parsed = JSON.parse(raw);
+
+    // Validate: must have provider + track IDs like sp-/yt-/sc-
+    const hasValidPlaylist =
+      parsed.provider &&
+      Array.isArray(parsed.tracks) &&
+      parsed.tracks.length > 0 &&
+      parsed.tracks.every(t => t?.id && /^(sp|yt|sc)-/.test(t.id));
+
+    // If old shape or no provider, reset but keep theme
+    if (!hasValidPlaylist || parsed.version !== STORAGE_VERSION) {
+      return {
+        version: STORAGE_VERSION,
+        theme: parsed?.theme ?? 'dark',
+        provider: null,
+        title: '',
+        tracks: [],
+        notes: [],
+      };
+    }
+
+    return parsed;
   } catch {
-    // Intentionally ignore read/parse errors (e.g. private mode, corrupted JSON)
+    // ignore parse errors (e.g. private mode, corrupted JSON)
     return null;
   }
 }
 
+// ✅ Save current app state
 export function saveAppState(state) {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(state));
+    const next = { version: STORAGE_VERSION, ...state };
+    localStorage.setItem(LS_KEY, JSON.stringify(next));
   } catch {
-    // Intentionally ignore write errors (quota exceeded, private mode)
-    // console.warn('Storage save failed', e); // enable during dev if needed
+    // ignore quota or private-mode errors
   }
 }
 
-export function clearAppState() {
+// ✅ Clear saved state, preserving theme if provided
+export function clearAppState(preserve = {}) {
   try {
-    localStorage.removeItem(LS_KEY);
+    const cleared = {
+      version: STORAGE_VERSION,
+      theme: preserve.theme ?? 'dark',
+      provider: null,
+      title: '',
+      tracks: [],
+      notes: [],
+    };
+    localStorage.setItem(LS_KEY, JSON.stringify(cleared));
+    return cleared;
   } catch {
-    // Intentionally ignore clear errors (non-blocking)
+    return null;
   }
 }
