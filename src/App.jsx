@@ -465,7 +465,7 @@ export default function App() {
     <div className="app">
       <style>{`
         .error-text { color: #d9534f; font-size: 0.9em; margin-top: 4px; }
-        .chip { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:var(--card); }
+        .chip { display:inline-flex, align-items:center; gap:6px; padding:2px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:var(--card); }
         .chip-dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
       `}</style>
 

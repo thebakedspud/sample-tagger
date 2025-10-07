@@ -1,24 +1,22 @@
 // src/features/import/detectProvider.js
+export default function detectProvider(url = '') {
+  const u = url.trim().toLowerCase();
 
-export function detectProvider(url) {
-  try {
-    const u = new URL(url);
-    const host = u.hostname; // safer than .host (ignores port)
+  // Spotify playlists
+  if (u.includes('open.spotify.com/playlist/')) return 'spotify';
 
-    if ((/youtube\.com|youtu\.be/).test(host) && (u.searchParams.get('list') || u.pathname.includes('/playlist'))) {
-      return 'youtube';
-    }
-    if ((/open\.spotify\.com/).test(host) && u.pathname.startsWith('/playlist')) {
-      return 'spotify';
-    }
-    if ((/soundcloud\.com/).test(host)) {
-      return 'soundcloud';
-    }
-  } catch {
-    // Invalid URL or parsing failed
+  // YouTube playlists (youtube or music.youtube)
+  if (
+    (u.includes('youtube.com/playlist?') || u.includes('music.youtube.com/playlist?')) &&
+    u.includes('list=')
+  ) {
+    return 'youtube';
   }
+
+  // SoundCloud sets (playlist-equivalent)
+  if (u.includes('soundcloud.com/') && (u.includes('/sets/') || u.includes('/playlist'))) {
+    return 'soundcloud';
+  }
+
   return null;
 }
-
-// ✅ Provide a default export so `import detectProvider from '...'` works
-export default detectProvider;
