@@ -1,9 +1,11 @@
 // src/features/import/useImportPlaylist.js
-import detectProvider from './detectProvider';
+import detectProvider from './detectProvider.js';
 import { mockPlaylists } from '../../data/mockPlaylists.js';
 
 export default function useImportPlaylist() {
-  async function importPlaylist(url) {
+  async function importPlaylist(rawUrl) {
+    const url = String(rawUrl || '').trim(); // NEW: normalize input
+
     const provider = detectProvider(url);
     if (!provider) {
       const err = new Error('UNSUPPORTED_OR_INVALID_URL');
@@ -18,13 +20,25 @@ export default function useImportPlaylist() {
       throw err;
     }
 
-    // Make it OBVIOUS the new hook is active:
-    const stampedTitle = `MOCK DATA ACTIVE · ${data.title}`;
+    // Soft guard: ensure tracks is an array
+    const rawTracks = Array.isArray(data.tracks) ? data.tracks : [];
+    if (!Array.isArray(data.tracks)) {
+      console.warn('[useImportPlaylist] tracks not array for provider:', provider);
+    }
+
+    // Normalize track fields so downstream is safe
+    const tracks = rawTracks.map((t, i) => ({
+      id: t?.id ?? `${provider}-${i + 1}`,
+      title: t?.title ?? 'Untitled',
+      artist: t?.artist ?? '',
+    }));
+
+    const stampedTitle = `MOCK DATA ACTIVE · ${data.title}`; // keep or remove later
 
     return {
       provider,
       title: stampedTitle,
-      tracks: data.tracks, // should have ids like sp-1 / yt-1 / sc-1
+      tracks,
     };
   }
 
