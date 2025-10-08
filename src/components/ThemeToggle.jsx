@@ -1,17 +1,39 @@
 // src/components/ThemeToggle.jsx
 import { useState, useEffect } from 'react'
 
+function applyTheme(isDark) {
+  const theme = isDark ? 'dark' : 'light'
+
+  // Set data-theme on both <html> and <body> (covers selector differences)
+  const root = document.documentElement
+  const body = document.body
+
+  root.dataset.theme = theme
+  body.dataset.theme = theme
+
+  // Also set explicit classes as a fallback
+  root.classList.toggle('theme-dark', isDark)
+  root.classList.toggle('theme-light', !isDark)
+  body.classList.toggle('theme-dark', isDark)
+  body.classList.toggle('theme-light', !isDark)
+
+  // Persist
+  localStorage.setItem('theme', theme)
+}
+
 export default function ThemeToggle() {
   const [isDark, setIsDark] = useState(() => {
     const saved = localStorage.getItem('theme')
     if (saved === 'dark') return true
     if (saved === 'light') return false
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+    return (
+      window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+    )
   })
 
   useEffect(() => {
-    document.documentElement.dataset.theme = isDark ? 'dark' : 'light'
-    localStorage.setItem('theme', isDark ? 'dark' : 'light')
+    applyTheme(isDark)
   }, [isDark])
 
   function toggleTheme() {
@@ -25,13 +47,12 @@ export default function ThemeToggle() {
       aria-label={isDark ? 'Light mode toggle' : 'Dark mode toggle'}
       aria-pressed={isDark ? 'true' : 'false'}
       className="btn"
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, lineHeight: 1.2 }}
     >
-      {/* keep your emoji visible but hidden from SR */}
+      {/* emoji visible, hidden from SR */}
       <span aria-hidden="true" style={{ fontSize: 16 }}>
-        {isDark ? '🌞' : '🌙'}
+        {isDark ? '☀️' : '🌙'}
       </span>
-      {/* optional: keep the text if you like the visual balance */}
       <span aria-hidden="true">{isDark ? 'Dark' : 'Light'}</span>
     </button>
   )
