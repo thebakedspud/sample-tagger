@@ -29,7 +29,7 @@ export default function useImportPlaylist() {
     // 3) Guard & normalize tracks
     const rawTracks = Array.isArray(data.tracks) ? data.tracks : [];
     if (!Array.isArray(data.tracks)) {
-      // eslint-disable-next-line no-console
+       
       console.warn('[useImportPlaylist] tracks not array for provider:', provider);
     }
 
@@ -50,7 +50,7 @@ export default function useImportPlaylist() {
     const stampedTitle = `MOCK DATA ACTIVE · ${data.title ?? `${provider} playlist`}`;
 
     if (DEBUG) {
-      // eslint-disable-next-line no-console
+       
       console.debug('[importPlaylist]', { provider, title: stampedTitle, count: tracks.length });
     }
 

@@ -89,7 +89,7 @@ export default function App() {
   // —— PERSISTENCE: save whenever core state changes
   useEffect(() => {
     saveAppState({ tracks, playlistTitle, importedAt, lastImportUrl, provider: HAS_VALID_PLAYLIST ? persisted.provider : null })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [tracks, playlistTitle, importedAt, lastImportUrl])
 
   // Safety: close editor if its track disappears or changes
