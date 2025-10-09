@@ -1,9 +1,17 @@
-// Hook: importPlaylist(url) -> { provider, title, tracks[] }
+// src/features/import/useImportPlaylist.js
 import detectProvider from './detectProvider.js';
+import * as spotify from './adapters/spotifyAdapter.js';
+import * as youtube from './adapters/youtubeAdapter.js';
+import * as soundcloud from './adapters/soundcloudAdapter.js';
+import { normalizeTrack } from './normalizeTrack.js';
+
+// NEW: direct fallback import
 import { mockPlaylists } from '../../data/mockPlaylists.js';
 
+const adapters = { spotify, youtube, soundcloud };
+
 export default function useImportPlaylist() {
-  const DEBUG = false; // flip on if you want minimal console diagnostics
+  const DEBUG = false;
 
   async function importPlaylist(rawUrl) {
     const url = String(rawUrl ?? '').trim();
@@ -17,40 +25,41 @@ export default function useImportPlaylist() {
       throw err;
     }
 
-    // 2) Resolve provider mock
-    const data = mockPlaylists?.[provider];
+    // 2) Try adapter, then FALL BACK to mock data
+    let data;
+    const adapter = adapters[provider];
+
+    try {
+      if (!adapter?.importPlaylist) {
+        throw Object.assign(new Error('NO_ADAPTER_FOR_PROVIDER'), {
+          code: 'NO_ADAPTER_FOR_PROVIDER',
+          details: { provider },
+        });
+      }
+      data = await adapter.importPlaylist(url);
+    } catch (e) {
+      if (DEBUG) console.warn('[importPlaylist] adapter failed, using mock fallback', { provider, e });
+      data = mockPlaylists?.[provider];
+    }
+
     if (!data) {
-      const err = new Error('NO_MOCK_DATA_FOR_PROVIDER');
-      err.code = 'NO_MOCK_DATA_FOR_PROVIDER';
+      const err = new Error('ADAPTER_AND_FALLBACK_EMPTY');
+      err.code = 'ADAPTER_AND_FALLBACK_EMPTY';
       err.details = { provider };
       throw err;
     }
 
-    // 3) Guard & normalize tracks
+    // 3) Normalize tracks
     const rawTracks = Array.isArray(data.tracks) ? data.tracks : [];
     if (!Array.isArray(data.tracks)) {
-       
-      console.warn('[useImportPlaylist] tracks not array for provider:', provider);
+      if (DEBUG) console.warn('[useImportPlaylist] tracks not array for provider:', provider);
     }
+    const tracks = rawTracks.map((t, i) => normalizeTrack(t, i, provider));
 
-    const tracks = rawTracks.map((t = {}, i) => {
-      const safeTitle = (t.title ?? '').toString().trim();
-      const safeArtist = (t.artist ?? '').toString().trim();
-
-      // preserve any extra fields but enforce core shape; ensure stable id wins
-      return {
-        ...t,
-        id: t.id ?? `${provider}-${i + 1}`,
-        title: safeTitle || `Untitled Track ${i + 1}`,
-        artist: safeArtist || 'Unknown Artist',
-      };
-    });
-
-    // 4) Stamp title so it's obvious we're in mock mode
+    // 4) Stamp title so it's obvious we’re in mock mode
     const stampedTitle = `MOCK DATA ACTIVE · ${data.title ?? `${provider} playlist`}`;
 
     if (DEBUG) {
-       
       console.debug('[importPlaylist]', { provider, title: stampedTitle, count: tracks.length });
     }
 
