@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useEffect, useState, useRef } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
@@ -12,19 +13,33 @@ import UndoPlaceholder from './components/UndoPlaceholder.jsx'
 
 // ✅ Extracted helpers
 import detectProvider from './features/import/detectProvider'
-// ⬇️ swap direct mockImporter for the hook
 import useImportPlaylist from './features/import/useImportPlaylist.js'
 
-// —— Derive initial state from storage (safe: loadAppState normalizes bad/legacy saves)
+// —— Derive initial state from storage (v3 structured: { importMeta, tracks, ... })
 const persisted = loadAppState()
-const HAS_VALID_PLAYLIST = !!(persisted && persisted.provider && persisted.tracks?.length)
+const HAS_VALID_PLAYLIST = !!(persisted?.importMeta?.provider && persisted?.tracks?.length)
 const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
+
+// Safe default importMeta shape (mirrors storage v3)
+const EMPTY_IMPORT_META = {
+  provider: null,
+  playlistId: null,
+  title: null,
+  snapshotId: null,
+  cursor: null,
+  sourceUrl: null,
+}
+
+// Handy helper so we never explode on undefined notes
+function getNotes(t) {
+  return Array.isArray(t?.notes) ? t.notes : [];
+}
 
 export default function App() {
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState(INITIAL_SCREEN)
 
-  // ANNOUNCEMENTS (for screen readers) — light debounce to avoid chatty bursts
+  // ANNOUNCEMENTS (for screen readers) — light debounce
   const [announceMsg, setAnnounceMsg] = useState('')
   const announceTimerRef = useRef(null)
   function announce(msg) {
@@ -37,18 +52,24 @@ export default function App() {
 
   // IMPORT state
   const [importUrl, setImportUrl] = useState('')
-  const provider = detectProvider(importUrl || '')
+  const providerChip = detectProvider(importUrl || '')
   const [importLoading, setImportLoading] = useState(false)
   const [importError, setImportError] = useState(null)
   const importInputRef = useRef(null)
 
-  // PLAYLIST META
-  const [playlistTitle, setPlaylistTitle] = useState(persisted?.playlistTitle ?? 'My Playlist')
-  const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null) // ISO string
-  const [lastImportUrl, setLastImportUrl] = useState(persisted?.lastImportUrl ?? '')
+  // PLAYLIST META (local state; persisted via storage v3 importMeta)
+  const [importMeta, setImportMeta] = useState(() => ({
+    ...EMPTY_IMPORT_META,
+    ...(persisted?.importMeta ?? {}),
+  }))
+  const [playlistTitle, setPlaylistTitle] = useState(importMeta.title ?? 'My Playlist')
+  const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null) // local-only
+  const lastImportUrl = importMeta.sourceUrl ?? ''
 
-  // DATA (no demo seed)
-  const [tracks, setTracks] = useState(persisted?.tracks ?? [])
+  // DATA — normalize persisted tracks so notes always exist
+  const [tracks, setTracks] = useState(
+    (persisted?.tracks ?? []).map(t => ({ ...t, notes: getNotes(t) }))
+  )
 
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
@@ -86,11 +107,15 @@ export default function App() {
   const reimportBtnRef = useRef(null)
   const [reimportLoading, setReimportLoading] = useState(false)
 
-  // —— PERSISTENCE: save whenever core state changes
+  // —— PERSISTENCE: save whenever core state changes (v3 structured shape)
   useEffect(() => {
-    saveAppState({ tracks, playlistTitle, importedAt, lastImportUrl, provider: HAS_VALID_PLAYLIST ? persisted.provider : null })
-     
-  }, [tracks, playlistTitle, importedAt, lastImportUrl])
+    saveAppState({
+      importMeta,
+      // persist tracks without notes (storage v3 trims to id/title/artist)
+      tracks: tracks.map(t => ({ id: t.id, title: t.title, artist: t.artist })),
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importMeta, tracks])
 
   // Safety: close editor if its track disappears or changes
   useEffect(() => {
@@ -100,7 +125,7 @@ export default function App() {
     }
   }, [tracks, editingId])
 
-  // Ctrl/Cmd+Z undo (for the most recent pending delete)
+  // Ctrl/Cmd+Z undo
   useEffect(() => {
     const onKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
@@ -141,7 +166,7 @@ export default function App() {
   }
   function handleBackToLanding() { setScreen('landing') }
 
-  // ⬇️ use the import hook (mock-first)
+  // ⬇️ import hook (mock-first, async)
   const { importPlaylist: runImport } = useImportPlaylist()
 
   // IMPORT handlers
@@ -154,7 +179,7 @@ export default function App() {
       importInputRef.current?.focus(); importInputRef.current?.select()
       return
     }
-    if (!provider) {
+    if (!providerChip) {
       setImportError('That URL doesn’t look like a Spotify, YouTube, or SoundCloud playlist.')
       announce('Import failed. Unsupported URL.')
       importInputRef.current?.focus(); importInputRef.current?.select()
@@ -169,13 +194,23 @@ export default function App() {
         id: t.id || `${res.provider}-${idx}`,
         title: t.title,
         artist: t.artist || '',
-        notes: [],
+        notes: [], // start empty in-memory
       }))
       setTracks(mapped)
+
+      // Update meta for v3 structured storage
+      setImportMeta(prev => ({
+        ...EMPTY_IMPORT_META,
+        provider: res.provider ?? prev.provider ?? null,
+        playlistId: res.playlistId ?? null,
+        title: res.title || 'Imported Playlist',
+        snapshotId: res.snapshotId ?? null,
+        cursor: res.pageInfo?.cursor ?? null,
+        sourceUrl: res.sourceUrl ?? importUrl.trim(),
+      }))
+
       setPlaylistTitle(res.title || 'Imported Playlist')
-      const now = new Date().toISOString()
-      setImportedAt(now)
-      setLastImportUrl(importUrl.trim())
+      setImportedAt(new Date().toISOString())
       setScreen('playlist')
       announce(`Playlist imported. ${mapped.length} tracks.`)
 
@@ -201,14 +236,27 @@ export default function App() {
       setReimportLoading(true)
       announce('Re-importing playlist…')
       const res = await runImport(lastImportUrl)
+
       const mapped = res.tracks.map((t, idx) => ({
         id: t.id || `${res.provider}-${idx}`,
         title: t.title,
         artist: t.artist || '',
-        notes: [],
+        notes: [], // reset in-memory notes on reimport (MVP behavior)
       }))
       setTracks(mapped)
-      setPlaylistTitle(res.title || 'Imported Playlist')
+
+      // Update meta and title
+      setImportMeta(prev => ({
+        ...prev,
+        provider: res.provider ?? prev.provider ?? null,
+        playlistId: res.playlistId ?? prev.playlistId ?? null,
+        title: res.title || prev.title || 'Imported Playlist',
+        snapshotId: res.snapshotId ?? prev.snapshotId ?? null,
+        cursor: res.pageInfo?.cursor ?? null,
+        sourceUrl: res.sourceUrl ?? prev.sourceUrl ?? lastImportUrl,
+      }))
+
+      setPlaylistTitle(res.title || playlistTitle || 'Imported Playlist')
       setImportedAt(new Date().toISOString())
       announce(`Playlist re-imported. ${mapped.length} tracks available.`)
       if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
@@ -219,14 +267,14 @@ export default function App() {
     }
   }
 
-  // —— Clear-all handler (full reset; no demo repopulation)
+  // —— Clear-all handler
   const handleClearAll = () => {
     setPending(new Map())
-    clearAppState() // storage now preserves theme internally if you pass it
+    clearAppState()
     setTracks([])
+    setImportMeta(EMPTY_IMPORT_META)
     setPlaylistTitle('My Playlist')
     setImportedAt(null)
-    setLastImportUrl('')
     setEditingId(null); setDraft(''); setError(null)
     setScreen('landing')
     announce('All saved data cleared. You’re back at the start.')
@@ -246,7 +294,11 @@ export default function App() {
       return
     }
     setTracks(prev =>
-      prev.map(t => t.id === trackId ? { ...t, notes: [...t.notes, draft.trim()] } : t)
+      prev.map(t => {
+        if (t.id !== trackId) return t
+        const notes = getNotes(t)
+        return { ...t, notes: [...notes, draft.trim()] }
+      })
     )
     setEditingId(null); setDraft(''); setError(null)
     announce('Note added.')
@@ -264,13 +316,17 @@ export default function App() {
   }
 
   const onDeleteNote = (trackId, noteIndex) => {
-    const noteToDelete = tracks.find(t => t.id === trackId)?.notes[noteIndex]
+    const track = tracks.find(t => t.id === trackId)
+    const notes = getNotes(track)
+    const noteToDelete = notes[noteIndex]
     if (noteToDelete == null) return
 
     setTracks(prev =>
-      prev.map(t =>
-        t.id === trackId ? { ...t, notes: t.notes.filter((_, i) => i !== noteIndex) } : t
-      )
+      prev.map(t => {
+        if (t.id !== trackId) return t
+        const n = getNotes(t)
+        return { ...t, notes: n.filter((_, i) => i !== noteIndex) }
+      })
     )
 
     const id = makePendingId(trackId, noteIndex)
@@ -300,7 +356,7 @@ export default function App() {
     setTracks(prev =>
       prev.map(t => {
         if (t.id !== trackId) return t
-        const notes = [...t.notes]
+        const notes = [...getNotes(t)]
         const insertAt = Math.min(Math.max(index, 0), notes.length)
         notes.splice(insertAt, 0, note)
         return { ...t, notes }
@@ -398,10 +454,9 @@ export default function App() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {/* Removed title attr to avoid SR reading it as extra */}
                   <span className="chip">
-                    <span className="chip-dot" style={{ background: provider ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
-                    {provider ? provider : 'no match'}
+                    <span className="chip-dot" style={{ background: providerChip ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
+                    {providerChip ? providerChip : 'no match'}
                   </span>
                 </div>
 
@@ -430,7 +485,6 @@ export default function App() {
                   {cleanTitle}
                 </h2>
                 {importedAt && (
-                  // Removed title attr to keep SR quiet
                   <span className="chip">
                     {tracks.length} tracks • imported {new Date(importedAt).toLocaleDateString()} {new Date(importedAt).toLocaleTimeString()}
                   </span>
@@ -480,7 +534,8 @@ export default function App() {
                 placeholders.sort((a, b) => a.index - b.index)
 
                 const rows = []
-                const noteCount = t.notes.length
+                const noteArr = getNotes(t)
+                const noteCount = noteArr.length
                 for (let idx = 0; idx <= noteCount; idx++) {
                   placeholders
                     .filter(ph => ph.index === idx && isPending(ph.pid))
@@ -499,7 +554,7 @@ export default function App() {
                     })
 
                   if (idx < noteCount) {
-                    const n = t.notes[idx]
+                    const n = noteArr[idx]
                     rows.push(
                       <li
                         key={`n-${t.id}-${idx}`}
@@ -549,9 +604,9 @@ export default function App() {
                         <span id={`title-${t.id}`}>{t.title}</span>
                         {' — '}
                         <span aria-hidden="true">{t.artist}</span>
-                        {t.notes.length > 0 && (
+                        {noteArr.length > 0 && (
                           <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400 }}>
-                            · {t.notes.length} note{t.notes.length > 1 ? 's' : ''}
+                            · {noteArr.length} note{noteArr.length > 1 ? 's' : ''}
                           </span>
                         )}
                       </h3>
@@ -562,7 +617,7 @@ export default function App() {
                           id={`add-note-btn-${t.id}`}
                           className="btn"
                           aria-label="Add note"
-                          aria-describedby={`title-${t.id}`}   // only the title, not the artist
+                          aria-describedby={`title-${t.id}`}
                           data-track-id={t.id}
                           onClick={handleAddNoteClick}
                         >
@@ -571,7 +626,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {(t.notes.length > 0 || placeholders.length > 0) && (
+                    {(noteArr.length > 0 || placeholders.length > 0) && (
                       <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 16 }}>
                         {rows}
                       </ul>
