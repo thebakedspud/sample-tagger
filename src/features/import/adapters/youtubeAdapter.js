@@ -1,11 +1,17 @@
 // src/features/import/adapters/youtubeAdapter.js
+// Mocked YouTube adapter with paginated responses.
+
+// @ts-check
+
 import { mockPlaylists } from '../../../data/mockPlaylists.js';
+import { createPagedMockAdapter } from './mockAdapterUtils.js';
 
-export async function importPlaylist(url) {
-  // For now, this still returns mock data
-  return mockPlaylists.spotify;
-}
+const adapter = createPagedMockAdapter({
+  provider: 'youtube',
+  title: mockPlaylists.youtube?.title || 'Mock YouTube Playlist',
+  tracks: mockPlaylists.youtube?.tracks || [],
+});
 
-export async function refreshToken() {
-  return { ok: true };
-}
+export const importPlaylist = adapter.importPlaylist;
+
+export default adapter;

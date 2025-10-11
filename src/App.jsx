@@ -11,11 +11,11 @@ import './styles/primitives.css';
 import { usePendingDelete } from './features/undo/usePendingDelete'
 import UndoPlaceholder from './components/UndoPlaceholder.jsx'
 
-// ✅ Extracted helpers
+// Extracted helpers
 import detectProvider from './features/import/detectProvider'
 import useImportPlaylist from './features/import/useImportPlaylist.js'
 
-// —— Derive initial state from storage (v3 structured: { importMeta, tracks, ... })
+// -- Derive initial state from storage (v3 structured: { importMeta, tracks, ... })
 const persisted = loadAppState()
 const HAS_VALID_PLAYLIST = !!(persisted?.importMeta?.provider && persisted?.tracks?.length)
 const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
@@ -24,10 +24,11 @@ const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
 const EMPTY_IMPORT_META = {
   provider: null,
   playlistId: null,
-  title: null,
   snapshotId: null,
   cursor: null,
-  sourceUrl: null,
+  hasMore: false,
+  sourceUrl: '',
+  debug: null,
 }
 
 // Handy helper so we never explode on undefined notes
@@ -39,7 +40,7 @@ export default function App() {
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState(INITIAL_SCREEN)
 
-  // ANNOUNCEMENTS (for screen readers) — light debounce
+  // ANNOUNCEMENTS (for screen readers) - light debounce
   const [announceMsg, setAnnounceMsg] = useState('')
   const announceTimerRef = useRef(null)
   function announce(msg) {
@@ -53,20 +54,28 @@ export default function App() {
   // IMPORT state
   const [importUrl, setImportUrl] = useState('')
   const providerChip = detectProvider(importUrl || '')
-  const [importLoading, setImportLoading] = useState(false)
   const [importError, setImportError] = useState(null)
   const importInputRef = useRef(null)
+  const [importBusyKind, setImportBusyKind] = useState(null)
 
   // PLAYLIST META (local state; persisted via storage v3 importMeta)
-  const [importMeta, setImportMeta] = useState(() => ({
-    ...EMPTY_IMPORT_META,
-    ...(persisted?.importMeta ?? {}),
-  }))
-  const [playlistTitle, setPlaylistTitle] = useState(importMeta.title ?? 'My Playlist')
-  const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null) // local-only
-  const lastImportUrl = importMeta.sourceUrl ?? ''
+  const [importMeta, setImportMeta] = useState(() => {
+    const initialMeta = persisted?.importMeta ?? {}
+    const sourceUrl = initialMeta.sourceUrl ?? (persisted?.lastImportUrl ?? '')
+    return {
+      ...EMPTY_IMPORT_META,
+      ...initialMeta,
+      sourceUrl,
+      hasMore: Boolean(initialMeta.cursor || initialMeta.hasMore),
+    }
+  })
+  const [playlistTitle, setPlaylistTitle] = useState(persisted?.playlistTitle ?? 'My Playlist')
+  const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null)
+  const [lastImportUrl, setLastImportUrl] = useState(
+    persisted?.lastImportUrl ?? (persisted?.importMeta?.sourceUrl ?? '')
+  )
 
-  // DATA — normalize persisted tracks so notes always exist
+  // DATA - normalize persisted tracks so notes always exist
   const [tracks, setTracks] = useState(
     (persisted?.tracks ?? []).map(t => ({ ...t, notes: getNotes(t) }))
   )
@@ -78,7 +87,7 @@ export default function App() {
   // Remember which button opened the editor
   const editorInvokerRef = useRef(null)
 
-  // NEW — inline undo bookkeeping:
+  // NEW - inline undo bookkeeping:
   const [pending, setPending] = useState(new Map())
   const pendingRef = useRef(pending)
   useEffect(() => { pendingRef.current = pending }, [pending])
@@ -105,17 +114,17 @@ export default function App() {
 
   // REIMPORT focus pattern
   const reimportBtnRef = useRef(null)
-  const [reimportLoading, setReimportLoading] = useState(false)
 
-  // —— PERSISTENCE: save whenever core state changes (v3 structured shape)
+  // -- PERSISTENCE: save whenever core state changes (v3 structured shape)
   useEffect(() => {
     saveAppState({
+      playlistTitle,
+      importedAt,
+      lastImportUrl,
+      tracks,
       importMeta,
-      // persist tracks without notes (storage v3 trims to id/title/artist)
-      tracks: tracks.map(t => ({ id: t.id, title: t.title, artist: t.artist })),
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [importMeta, tracks])
+  }, [playlistTitle, importedAt, lastImportUrl, tracks, importMeta])
 
   // Safety: close editor if its track disappears or changes
   useEffect(() => {
@@ -166,118 +175,224 @@ export default function App() {
   }
   function handleBackToLanding() { setScreen('landing') }
 
-  // ⬇️ import hook (mock-first, async)
-  const { importPlaylist: runImport } = useImportPlaylist()
+  // import hook (mock-first, async)
+  const { importPlaylist: runImport, importNext, loading: importLoading, reset: resetImportSession } = useImportPlaylist()
+  const isInitialImportBusy = importBusyKind === 'initial'
+  const isReimportBusy = importBusyKind === 'reimport'
+  const isLoadMoreBusy = importBusyKind === 'load-more'
+  const isAnyImportBusy = importLoading || importBusyKind !== null
+  const showInitialSpinner = isInitialImportBusy && importLoading
+  const showReimportSpinner = isReimportBusy && importLoading
+  const showLoadMoreSpinner = isLoadMoreBusy && importLoading
 
   // IMPORT handlers
   const handleImport = async (e) => {
     e?.preventDefault?.()
     setImportError(null)
-    if (!importUrl.trim()) {
+    const trimmedUrl = importUrl.trim()
+
+    if (!trimmedUrl) {
       setImportError('Paste a playlist URL to import.')
       announce('Import failed. URL missing.')
       importInputRef.current?.focus(); importInputRef.current?.select()
       return
     }
+
     if (!providerChip) {
-      setImportError('That URL doesn’t look like a Spotify, YouTube, or SoundCloud playlist.')
+      setImportError("That URL doesn't look like a Spotify, YouTube, or SoundCloud playlist.")
       announce('Import failed. Unsupported URL.')
       importInputRef.current?.focus(); importInputRef.current?.select()
       return
     }
+
+    setImportBusyKind('initial')
+
     try {
-      setImportLoading(true)
       announce('Import started.')
-      const res = await runImport(importUrl.trim())
+      const res = await runImport(trimmedUrl)
 
       const mapped = res.tracks.map((t, idx) => ({
-        id: t.id || `${res.provider}-${idx}`,
+        id: t.id || [(res.provider ?? providerChip), idx + 1].filter(Boolean).join('-'),
         title: t.title,
         artist: t.artist || '',
-        notes: [], // start empty in-memory
+        notes: [],
       }))
       setTracks(mapped)
 
-      // Update meta for v3 structured storage
-      setImportMeta(prev => ({
+      setImportMeta({
         ...EMPTY_IMPORT_META,
-        provider: res.provider ?? prev.provider ?? null,
+        provider: res.provider ?? providerChip ?? null,
         playlistId: res.playlistId ?? null,
-        title: res.title || 'Imported Playlist',
         snapshotId: res.snapshotId ?? null,
         cursor: res.pageInfo?.cursor ?? null,
-        sourceUrl: res.sourceUrl ?? importUrl.trim(),
-      }))
+        hasMore: Boolean(res.pageInfo?.hasMore && res.pageInfo?.cursor),
+        sourceUrl: res.sourceUrl ?? trimmedUrl,
+        debug: res.debug ?? null,
+      })
 
       setPlaylistTitle(res.title || 'Imported Playlist')
-      setImportedAt(new Date().toISOString())
+      const timestamp = new Date().toISOString()
+      setImportedAt(timestamp)
+      setLastImportUrl(trimmedUrl)
       setScreen('playlist')
-      announce(`Playlist imported. ${mapped.length} tracks.`)
+      announce('Playlist imported. ' + mapped.length + ' tracks.')
 
-      setTimeout(() => {
-        if (mapped.length > 0) { focusById(`add-note-btn-${mapped[0].id}`) }
-      }, 0)
+      requestAnimationFrame(() => {
+        if (mapped.length > 0) {
+          focusById('add-note-btn-' + mapped[0].id)
+        }
+      })
     } catch (err) {
-      const msg = err?.code === 'UNSUPPORTED_OR_INVALID_URL'
+      if (err?.name === "AbortError") return
+
+      const code = err?.code
+      const msg = code === 'ERR_UNSUPPORTED_URL'
         ? 'That link is not a supported playlist URL.'
-        : 'Couldn’t import right now. Check the link or try again.'
+        : code === 'ERR_PRIVATE_PLAYLIST'
+          ? 'That playlist looks private or unavailable.'
+          : code === 'ERR_RATE_LIMITED'
+            ? 'Too many requests right now. Try again shortly.'
+            : 'Could not import right now. Check the link or try again.'
       setImportError(msg)
-      announce(`Import failed. ${msg}`)
+      announce('Import failed. ' + msg)
       importInputRef.current?.focus(); importInputRef.current?.select()
     } finally {
-      setImportLoading(false)
+      setImportBusyKind(null)
     }
   }
-
   const handleReimport = async () => {
     if (!lastImportUrl) return
     const wasActive = document.activeElement === reimportBtnRef.current
+    setImportError(null)
+    setImportBusyKind('reimport')
     try {
-      setReimportLoading(true)
-      announce('Re-importing playlist…')
+      announce('Re-importing playlist.')
       const res = await runImport(lastImportUrl)
 
       const mapped = res.tracks.map((t, idx) => ({
-        id: t.id || `${res.provider}-${idx}`,
+        id: t.id || [(res.provider ?? importMeta.provider), idx + 1].filter(Boolean).join('-'),
         title: t.title,
         artist: t.artist || '',
-        notes: [], // reset in-memory notes on reimport (MVP behavior)
+        notes: [],
       }))
       setTracks(mapped)
 
-      // Update meta and title
-      setImportMeta(prev => ({
-        ...prev,
-        provider: res.provider ?? prev.provider ?? null,
-        playlistId: res.playlistId ?? prev.playlistId ?? null,
-        title: res.title || prev.title || 'Imported Playlist',
-        snapshotId: res.snapshotId ?? prev.snapshotId ?? null,
+      setImportMeta({
+        ...EMPTY_IMPORT_META,
+        provider: res.provider ?? importMeta.provider ?? null,
+        playlistId: res.playlistId ?? importMeta.playlistId ?? null,
+        snapshotId: res.snapshotId ?? importMeta.snapshotId ?? null,
         cursor: res.pageInfo?.cursor ?? null,
-        sourceUrl: res.sourceUrl ?? prev.sourceUrl ?? lastImportUrl,
-      }))
+        hasMore: Boolean(res.pageInfo?.hasMore && res.pageInfo?.cursor),
+        sourceUrl: res.sourceUrl ?? lastImportUrl,
+        debug: res.debug ?? null,
+      })
 
       setPlaylistTitle(res.title || playlistTitle || 'Imported Playlist')
       setImportedAt(new Date().toISOString())
-      announce(`Playlist re-imported. ${mapped.length} tracks available.`)
+      announce('Playlist re-imported. ' + mapped.length + ' tracks available.')
       if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
-    } catch {
-      announce('Re-import failed. Try again.')
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        setImportBusyKind(null)
+        return
+      }
+
+      const msg = err?.code === 'ERR_PRIVATE_PLAYLIST'
+        ? 'That playlist looks private or unavailable.'
+        : 'Re-import failed. Try again.'
+      setImportError(msg)
+      announce(msg)
+      if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
     } finally {
-      setReimportLoading(false)
+      setImportBusyKind(null)
+    }
+  }
+  const handleLoadMore = async () => {
+    if (!importMeta.cursor || !importMeta.provider || !lastImportUrl) {
+      return
+    }
+
+    setImportError(null)
+    setImportBusyKind('load-more')
+
+    try {
+      announce('Loading more tracks.')
+      const res = await importNext({
+        cursor: importMeta.cursor,
+        provider: importMeta.provider,
+        url: importMeta.sourceUrl || lastImportUrl,
+      })
+
+      if (!res) {
+        setImportMeta(prev => ({ ...prev, cursor: null, hasMore: false }))
+        announce('No additional tracks available.')
+        return
+      }
+
+      const startIndex = tracks.length
+      const mapped = res.tracks.map((t, idx) => ({
+        id: t.id || [(res.provider ?? importMeta.provider), startIndex + idx + 1].filter(Boolean).join('-'),
+        title: t.title,
+        artist: t.artist || '',
+        notes: [],
+      }))
+      const existingIds = new Set(tracks.map(t => t.id))
+      const unique = mapped.filter(t => !existingIds.has(t.id))
+
+      if (unique.length === 0) {
+        setImportMeta(prev => ({
+          ...prev,
+          cursor: res.pageInfo?.cursor ?? null,
+          hasMore: Boolean(res.pageInfo?.hasMore && res.pageInfo?.cursor),
+          sourceUrl: res.sourceUrl ?? prev.sourceUrl ?? lastImportUrl,
+          debug: res.debug ?? prev.debug,
+        }))
+        announce('No additional tracks available.')
+        return
+      }
+
+      setTracks(prev => [...prev, ...unique])
+      setImportMeta(prev => ({
+        ...prev,
+        playlistId: res.playlistId ?? prev.playlistId ?? null,
+        snapshotId: res.snapshotId ?? prev.snapshotId ?? null,
+        cursor: res.pageInfo?.cursor ?? null,
+        hasMore: Boolean(res.pageInfo?.hasMore && res.pageInfo?.cursor),
+        sourceUrl: res.sourceUrl ?? prev.sourceUrl ?? lastImportUrl,
+        debug: res.debug ?? prev.debug,
+      }))
+      setImportedAt(new Date().toISOString())
+      requestAnimationFrame(() => focusById('add-note-btn-' + unique[0].id))
+      announce(unique.length + ' more tracks loaded.')
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        const msg = err?.code === 'ERR_RATE_LIMITED'
+          ? 'Too many requests right now. Try again shortly.'
+          : 'Could not load more tracks. Try again.'
+        setImportError(msg)
+        announce(msg)
+      }
+    } finally {
+      setImportBusyKind(null)
     }
   }
 
-  // —— Clear-all handler
   const handleClearAll = () => {
     setPending(new Map())
     clearAppState()
     setTracks([])
-    setImportMeta(EMPTY_IMPORT_META)
+    setImportMeta({ ...EMPTY_IMPORT_META })
     setPlaylistTitle('My Playlist')
     setImportedAt(null)
+    setLastImportUrl('')
+    setImportUrl('')
+    setImportError(null)
+    setImportBusyKind(null)
+    resetImportSession()
     setEditingId(null); setDraft(''); setError(null)
     setScreen('landing')
-    announce('All saved data cleared. You’re back at the start.')
+    announce("All saved data cleared. You're back at the start.")
     setTimeout(() => importInputRef.current?.focus(), 0)
   }
 
@@ -393,7 +508,7 @@ export default function App() {
   }
 
   // Helper to hide the mock prefix from SRs but keep it visible
-  const MOCK_PREFIX = 'MOCK DATA ACTIVE · '
+  const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
   const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
   const cleanTitle = hasMockPrefix ? playlistTitle.slice(MOCK_PREFIX.length) : playlistTitle
 
@@ -439,7 +554,7 @@ export default function App() {
                     ref={importInputRef}
                     type="url"
                     inputMode="url"
-                    placeholder="https://open.spotify.com/playlist/…"
+                    placeholder="https://open.spotify.com/playlist/..."
                     autoComplete="off"
                     value={importUrl}
                     onChange={handleImportUrlChange}
@@ -464,10 +579,10 @@ export default function App() {
                   <button
                     type="submit"
                     className="btn primary"
-                    disabled={importLoading}
-                    aria-busy={importLoading ? 'true' : 'false'}
+                    disabled={isAnyImportBusy}
+                    aria-busy={showInitialSpinner ? 'true' : 'false'}
                   >
-                    {importLoading ? 'Importing…' : 'Import playlist'}
+                    {showInitialSpinner ? 'Importing...' : 'Import playlist'}
                   </button>
                 </div>
               </div>
@@ -486,7 +601,7 @@ export default function App() {
                 </h2>
                 {importedAt && (
                   <span className="chip">
-                    {tracks.length} tracks • imported {new Date(importedAt).toLocaleDateString()} {new Date(importedAt).toLocaleTimeString()}
+                    {tracks.length} tracks - imported {new Date(importedAt).toLocaleDateString()} {new Date(importedAt).toLocaleTimeString()}
                   </span>
                 )}
               </div>
@@ -498,10 +613,10 @@ export default function App() {
                     className="btn"
                     onClick={handleReimport}
                     aria-label="Re-import this playlist"
-                    disabled={reimportLoading}
-                    aria-busy={reimportLoading ? 'true' : 'false'}
+                    disabled={isAnyImportBusy}
+                    aria-busy={showReimportSpinner ? 'true' : 'false'}
                   >
-                    {reimportLoading ? 'Re-importing…' : 'Re-import'}
+                    {showReimportSpinner ? 'Re-importing...' : 'Re-import'}
                   </button>
                 )}
                 <button
@@ -513,7 +628,7 @@ export default function App() {
                   Clear
                 </button>
                 <button type="button" className="btn" onClick={handleBackToLanding}>
-                  ← Back
+                  Back
                 </button>
               </div>
             </div>
@@ -566,7 +681,7 @@ export default function App() {
                           gap: 8,
                         }}
                       >
-                        <span>– {n}</span>
+                        <span>- {n}</span>
                         <button
                           type="button"
                           id={`del-btn-${t.id}-${idx}`}
@@ -602,11 +717,11 @@ export default function App() {
                       <h3 id={`t-${t.id}`} style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>
                         <span aria-hidden="true">{i + 1}. </span>
                         <span id={`title-${t.id}`}>{t.title}</span>
-                        {' — '}
+                        {' - '}
                         <span aria-hidden="true">{t.artist}</span>
                         {noteArr.length > 0 && (
                           <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400 }}>
-                            · {noteArr.length} note{noteArr.length > 1 ? 's' : ''}
+                            - {noteArr.length} note{noteArr.length > 1 ? 's' : ''}
                           </span>
                         )}
                       </h3>
@@ -681,12 +796,25 @@ export default function App() {
                 )
               })}
             </ul>
+            {importMeta.hasMore && importMeta.cursor && (
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleLoadMore}
+                  disabled={isAnyImportBusy}
+                  aria-busy={showLoadMoreSpinner ? 'true' : 'false'}
+                >
+                  {showLoadMoreSpinner ? 'Loading more...' : 'Load more'}
+                </button>
+              </div>
+            )}
           </section>
         )}
       </main>
 
       <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)' }}>
-        <small>Prototype · Keyboard-first, accessible-by-default</small>
+        <small>Prototype - Keyboard-first, accessible-by-default</small>
       </footer>
     </div>
   )

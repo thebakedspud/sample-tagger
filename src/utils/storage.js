@@ -1,173 +1,261 @@
 // src/utils/storage.js
+// Provides versioned persistence for the playlist app state.
 
-// 🔐 Versioned storage key (bump when payload shape changes)
+/* eslint-env browser */
+/* global localStorage */
+// @ts-check
+
+/**
+ * @typedef {'dark' | 'light'} Theme
+ *
+ * @typedef {Object} ImportMeta
+ * @property {'spotify' | 'youtube' | 'soundcloud' | null} [provider]
+ * @property {string | null} [playlistId]
+ * @property {string | null} [snapshotId]
+ * @property {string | null} [cursor]
+ * @property {boolean} [hasMore]
+ * @property {string | null} [sourceUrl]
+ * @property {{ isMock?: boolean, lastErrorCode?: string | null } | null} [debug]
+ *
+ * @typedef {Object} PersistedTrack
+ * @property {string} id
+ * @property {string} title
+ * @property {string} artist
+ * @property {string[]} notes
+ *
+ * @typedef {Object} PersistedState
+ * @property {number} version
+ * @property {Theme} theme
+ * @property {string} playlistTitle
+ * @property {string | null} importedAt
+ * @property {string} lastImportUrl
+ * @property {PersistedTrack[]} tracks
+ * @property {ImportMeta} importMeta
+ */
+
 const STORAGE_VERSION = 3;
 const LS_KEY = 'sta:v3';
+const LEGACY_KEYS = ['sta:v2'];
+const VALID_PROVIDERS = new Set(['spotify', 'youtube', 'soundcloud']);
 
-// --- Types (for reference)
-// v3 payload:
-// {
-//   version: 3,
-//   theme: 'dark' | 'light',
-//   importMeta: {
-//     provider: 'spotify' | 'youtube' | 'soundcloud' | null,
-//     playlistId: string | null,
-//     title: string | null,
-//     snapshotId: string | null,
-//     cursor: string | null,
-//     sourceUrl: string | null,
-//   },
-//   tracks: Array<{ id: string, title: string, artist: string }>,
-//   notesByTrack: Record<string, Array<any>>, // keep structure flexible for now
-// }
+const EMPTY_META = Object.freeze({
+  provider: null,
+  playlistId: null,
+  snapshotId: null,
+  cursor: null,
+  hasMore: false,
+  sourceUrl: null,
+  debug: null,
+});
 
-// ✅ Load and normalize any saved data
+/** @returns {PersistedState | null} */
 export function loadAppState() {
   try {
-    const rawV3 = localStorage.getItem(LS_KEY);
-    if (rawV3) {
-      const parsed = JSON.parse(rawV3);
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
       if (parsed?.version === STORAGE_VERSION) {
-        // Basic validation: provider optional; tracks must have stable IDs
-        const isValidTracks =
-          Array.isArray(parsed.tracks) &&
-          parsed.tracks.every(t => t?.id && /^(sp|yt|sc)-/.test(t.id));
-
-        if (!isValidTracks) {
-          return createEmptyState(parsed?.theme);
-        }
-        return parsed;
+        return normalizeState(parsed);
       }
     }
 
-    // 🧯 Try migrating older shapes if present
-    // v2 was stored under 'sta:v2' with flat fields { version: 2, theme, provider, title, tracks, notes }
-    const rawV2 = localStorage.getItem('sta:v2');
-    if (rawV2) {
-      const migrated = migrateV2ToV3(JSON.parse(rawV2));
-      // Save migrated forward so the app uses a single key from now on
-      localStorage.setItem(LS_KEY, JSON.stringify(migrated));
-      return migrated;
+    for (const legacyKey of LEGACY_KEYS) {
+      const legacyRaw = localStorage.getItem(legacyKey);
+      if (!legacyRaw) continue;
+      const migrated = migrateLegacy(JSON.parse(legacyRaw));
+      if (migrated) {
+        localStorage.setItem(LS_KEY, JSON.stringify(migrated));
+        return migrated;
+      }
     }
 
-    // No prior state
     return null;
   } catch {
-    // ignore parse errors (private mode, corrupted JSON, etc.)
+    // ignore malformed or unavailable storage
     return null;
   }
 }
 
-// ✅ Save current app state (only the fields we explicitly support)
+/** @param {Partial<PersistedState>} state */
 export function saveAppState(state) {
   try {
     const payload = {
       version: STORAGE_VERSION,
-      theme: state?.theme ?? 'dark',
-      importMeta: sanitizeImportMeta(state?.importMeta),
+      theme: sanitizeTheme(state?.theme),
+      playlistTitle: sanitizeTitle(state?.playlistTitle),
+      importedAt: typeof state?.importedAt === 'string' ? state.importedAt : null,
+      lastImportUrl: typeof state?.lastImportUrl === 'string' ? state.lastImportUrl : '',
       tracks: sanitizeTracks(state?.tracks),
-      notesByTrack: isPlainObject(state?.notesByTrack) ? state.notesByTrack : {},
+      importMeta: sanitizeImportMeta(state?.importMeta),
     };
     localStorage.setItem(LS_KEY, JSON.stringify(payload));
   } catch {
-    // ignore quota or private-mode errors
+    // ignore quota / private mode errors
   }
 }
 
-// ✅ Clear saved state, preserving theme if provided
+/**
+ * @param {Partial<PersistedState>} [preserve]
+ * @returns {PersistedState | null}
+ */
 export function clearAppState(preserve = {}) {
   try {
-    const cleared = createEmptyState(preserve.theme);
+    const cleared = createEmptyState(sanitizeTheme(preserve?.theme));
     localStorage.setItem(LS_KEY, JSON.stringify(cleared));
     return cleared;
   } catch {
+    // ignore clear errors
     return null;
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
 // Helpers
 
+/**
+ * @param {Theme} [theme]
+ * @returns {PersistedState}
+ */
 function createEmptyState(theme = 'dark') {
   return {
     version: STORAGE_VERSION,
     theme,
-    importMeta: {
-      provider: null,
-      playlistId: null,
-      title: null,
-      snapshotId: null,
-      cursor: null,
-      sourceUrl: null,
-    },
+    playlistTitle: 'My Playlist',
+    importedAt: null,
+    lastImportUrl: '',
     tracks: [],
-    notesByTrack: {},
+    importMeta: { ...EMPTY_META },
   };
 }
 
-function migrateV2ToV3(v2) {
-  // v2 shape (from your file): { version: 2, theme, provider, title, tracks, notes }
-  const theme = v2?.theme ?? 'dark';
-  const tracks = sanitizeTracks(v2?.tracks);
-
-  // We didn’t store playlistId/snapshotId/cursor/sourceUrl in v2 → set nulls
-  const importMeta = {
-    provider: v2?.provider ?? null,
-    playlistId: null,
-    title: v2?.title ?? null,
-    snapshotId: null,
-    cursor: null,
-    sourceUrl: null,
+/**
+ * @param {any} data
+ * @returns {PersistedState}
+ */
+function normalizeState(data) {
+  const base = createEmptyState(sanitizeTheme(data?.theme));
+  return {
+    ...base,
+    playlistTitle: sanitizeTitle(data?.playlistTitle) ?? base.playlistTitle,
+    importedAt: typeof data?.importedAt === 'string' ? data.importedAt : base.importedAt,
+    lastImportUrl: typeof data?.lastImportUrl === 'string' ? data.lastImportUrl : base.lastImportUrl,
+    tracks: sanitizeTracks(data?.tracks),
+    importMeta: sanitizeImportMeta(data?.importMeta),
   };
+}
 
-  // v2 had a flat `notes` array; new schema uses notesByTrack map
-  const notesByTrack = isPlainObject(v2?.notesByTrack)
-    ? v2.notesByTrack
-    : {}; // if you only had `notes: []`, we can’t reliably remap → start fresh
+/**
+ * @param {any} v2
+ * @returns {PersistedState | null}
+ */
+function migrateLegacy(v2) {
+  if (!v2 || typeof v2 !== 'object') return null;
+  const theme = sanitizeTheme(v2?.theme);
+  const playlistTitle = sanitizeTitle(v2?.playlistTitle ?? v2?.title);
+  const tracks = sanitizeTracks(v2?.tracks);
+  const lastImportUrl = typeof v2?.lastImportUrl === 'string' ? v2.lastImportUrl : '';
+
+  const importMeta = sanitizeImportMeta({
+    provider: v2?.provider,
+    title: playlistTitle,
+    sourceUrl: lastImportUrl,
+  });
 
   return {
     version: STORAGE_VERSION,
     theme,
-    importMeta,
+    playlistTitle: playlistTitle ?? 'My Playlist',
+    importedAt: typeof v2?.importedAt === 'string' ? v2.importedAt : null,
+    lastImportUrl,
     tracks,
-    notesByTrack,
+    importMeta,
   };
 }
 
-function sanitizeImportMeta(m) {
-  if (!m || typeof m !== 'object') {
-    return {
-      provider: null,
-      playlistId: null,
-      title: null,
-      snapshotId: null,
-      cursor: null,
-      sourceUrl: null,
-    };
-  }
-  return {
-    provider: m.provider ?? null,
-    playlistId: m.playlistId ?? null,
-    title: m.title ?? null,
-    snapshotId: m.snapshotId ?? null,
-    cursor: m.cursor ?? null,
-    sourceUrl: m.sourceUrl ?? null,
-  };
+/**
+ * @param {unknown} theme
+ * @returns {Theme}
+ */
+function sanitizeTheme(theme) {
+  return theme === 'light' ? 'light' : 'dark';
 }
 
+/**
+ * @param {unknown} title
+ * @returns {string}
+ */
+function sanitizeTitle(title) {
+  if (typeof title !== 'string') return 'My Playlist';
+  const trimmed = title.trim();
+  return trimmed || 'My Playlist';
+}
+
+/**
+ * Build a clean list of PersistedTrack (no nulls).
+ * @param {unknown} list
+ * @returns {PersistedTrack[]}
+ */
 function sanitizeTracks(list) {
   if (!Array.isArray(list)) return [];
-  return list
-    .filter(t => t && typeof t === 'object')
-    .map(t => ({
-      id: String(t.id ?? '').trim(),
-      title: String(t.title ?? '').trim() || 'Untitled',
-      artist: String(t.artist ?? '').trim() || 'Unknown',
-    }))
-    // keep only known-stable IDs (provider-prefixed)
-    .filter(t => /^(sp|yt|sc)-/.test(t.id));
+  /** @type {Set<string>} */
+  const seen = new Set();
+  /** @type {PersistedTrack[]} */
+  const out = [];
+
+  list.forEach((t, idx) => {
+    if (!t || typeof t !== 'object') return;
+    const id = safeString(/** @type {any} */(t).id) || `track-${idx + 1}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    out.push({
+      id,
+      title: safeString(/** @type {any} */(t).title) || `Track ${idx + 1}`,
+      artist: safeString(/** @type {any} */(t).artist) || 'Unknown Artist',
+      notes: Array.isArray(/** @type {any} */(t).notes) ? [.../** @type {any} */(t).notes] : [],
+    });
+  });
+
+  return out;
 }
 
-function isPlainObject(o) {
-  return typeof o === 'object' && o !== null && o.constructor === Object;
+/**
+ * @param {any} meta
+ * @returns {ImportMeta}
+ */
+function sanitizeImportMeta(meta) {
+  if (!meta || typeof meta !== 'object') return { ...EMPTY_META };
+  const m = /** @type {any} */ (meta);
+  const provider = VALID_PROVIDERS.has(m.provider) ? m.provider : null;
+  const cursor = safeString(m.cursor);
+  return {
+    provider,
+    playlistId: safeString(m.playlistId),
+    snapshotId: safeString(m.snapshotId),
+    cursor: cursor || null,
+    hasMore: Boolean(m.hasMore) || Boolean(cursor),
+    sourceUrl: safeString(m.sourceUrl),
+    debug: sanitizeDebug(m.debug),
+  };
+}
+
+/**
+ * @param {any} debug
+ * @returns {{ isMock: boolean, lastErrorCode: string | null } | null}
+ */
+function sanitizeDebug(debug) {
+  if (!debug || typeof debug !== 'object') return null;
+  const d = /** @type {any} */ (debug);
+  return {
+    isMock: Boolean(d.isMock),
+    lastErrorCode: safeString(d.lastErrorCode) || null,
+  };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function safeString(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  return trimmed || '';
 }

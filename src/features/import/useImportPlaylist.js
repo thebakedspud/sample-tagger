@@ -28,11 +28,11 @@ const MOCK_TITLE_PREFIX = 'MOCK DATA (fallback) - ';
  */
 function createAdapterError(code, details = {}, cause) {
   const err = new Error(code);
-  // @ts-ignore augmenting Error instance by convention
+  // @ts-ignore - augmenting Error instance by convention
   err.code = code;
-  // @ts-ignore add contextual information for UI/tests
+  // @ts-ignore
   if (details) err.details = details;
-  // @ts-ignore surface upstream cause when available
+  // @ts-ignore
   if (cause) err.cause = cause;
   return err;
 }
@@ -44,7 +44,7 @@ function createAdapterError(code, details = {}, cause) {
  * @returns {((options: any) => Promise<any>) | null}
  */
 function getImportFn(provider) {
-  // @ts-ignore provider validated earlier
+  // @ts-ignore - provider is validated earlier
   const mod = ADAPTER_REGISTRY[provider];
   if (!mod) return null;
   if (typeof mod === 'function') return mod;
@@ -57,6 +57,7 @@ function getImportFn(provider) {
  * @param {'spotify'|'youtube'|'soundcloud'} provider
  */
 function getMock(provider) {
+  // @ts-ignore
   return mockPlaylists?.[provider] || null;
 }
 
@@ -66,7 +67,7 @@ function getMock(provider) {
  * @returns {string}
  */
 function extractErrorCode(err) {
-  // @ts-ignore code may be attached on custom errors
+  // @ts-ignore
   const raw = err?.code ?? err?.cause?.code;
   if (typeof raw === 'string' && isKnownAdapterError(raw)) return raw;
   return DEFAULT_ERROR_CODE;
@@ -81,14 +82,18 @@ function extractErrorCode(err) {
  * @param {{ isFallback?: boolean, lastErrorCode?: string }} [meta]
  */
 function coerceResult(provider, url, payload, meta = {}) {
+  /** @type {any[]} */
   const rawTracks = Array.isArray(payload?.tracks) ? payload.tracks : [];
 
   // NOTE: normalizeTrack signature is (raw, index, provider)
-  const tracks = rawTracks.map((/** @type {import('./adapters/types.js').NormalizedTrack} */ t, /** @type {number} */ i) => normalizeTrack(t, i, provider));
+  const tracks = rawTracks.map(
+    (/** @type {any} */ t, /** @type {number} */ i) => normalizeTrack(t, i, provider)
+  );
 
   const title = payload?.title ? String(payload.title) : `${provider} playlist`;
   const playlistId = payload?.playlistId || payload?.id || `${provider}-playlist`;
 
+  // Ensure pageInfo is normalized and cursor is consistently a string when present
   const pageInfo =
     payload?.pageInfo && typeof payload.pageInfo === 'object'
       ? {
@@ -126,7 +131,7 @@ export default function useImportPlaylist() {
    * Import a playlist by URL, optionally resuming via cursor.
    * Adapters are async and abort-aware; this function may throw:
    *  - DOMException('AbortError') if cancelled
-   *  - Error(code) where code ? KNOWN_ADAPTER_ERRORS
+   *  - Error(code) where code ∈ KNOWN_ADAPTER_ERRORS
    * @param {string} rawUrl
    * @param {{ cursor?: string, signal?: AbortSignal, context?: Record<string, any> }} [options]
    */
@@ -154,7 +159,9 @@ export default function useImportPlaylist() {
       context: context ?? {},
     };
 
+    // If caller submits a new URL while a previous request is still in flight.
     if (signal?.aborted) {
+      // Propagate a true cancel; caller can ignore gracefully.
       throw new DOMException('Aborted', 'AbortError');
     }
 
@@ -190,7 +197,8 @@ export default function useImportPlaylist() {
 
       return coerceResult(provider, url, payload);
     } catch (err) {
-      // @ts-ignore treat actual aborts as first-class cancels
+      // True cancel: do not map to a fallback or treat as error.
+      // @ts-ignore
       if (err?.name === 'AbortError') throw err;
 
       const code = extractErrorCode(err);
