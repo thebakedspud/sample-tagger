@@ -1,50 +1,44 @@
-# Sample Tagger (prototype)
+# Sample Tagger (Prototype)
 
 Bare-bones prototype for importing a playlist and adding notes.
 
+As part of my UX/UI design course, I’ve been learning about accessibility, inclusion, and inclusive design.  
+This app is an attempt to deepen that understanding and put those principles into practice.
 
-As a part of my UX/UI design course I have been learning about accessibility, inclusion and inclusive design. The design behind this app is an attempt to deepen my understanding and put principle into practice.
+Below is a checklist of guidelines that have shaped development so far.  
+It will continue to evolve as the project grows.
 
-Below is a list of guidelines that have shaped the development of this app, which i'm hoping to continiously develop and contribute to. 
+---
 
-Accessibility Checklist -
+## ♿ Accessibility Checklist
 
-We aim to follow WCAG principles and good inclusive practices as we build.
+We aim to follow **WCAG principles** and good inclusive practices as we build.
 
-Page structure
+### Page Structure
+- Use landmarks (`header`, `main`, `footer`) so assistive tech users can jump around quickly.
+- Have **one `<h1>`** for the app title; use `<h2>`, `<h3>` for section headings to show hierarchy.
 
-Use landmarks (<header>, <main>, <footer>) so assistive tech users can jump around quickly.
+### Lists & Content
+- Use real lists (`<ul><li>`) for tracks and notes so users know how many items there are and where they are in the list.
 
-Have one <h1> for the app title; use <h2>, <h3> in order to show structure.
+### Buttons & Controls
+- All actions are real `<button>` elements, not hidden right-clicks.  
+- Every button has a clear label or an accessible name (`aria-label` if icon-only).  
+- Keep focus visible (don’t remove outlines).
 
-Lists & content
+### Keyboard Use
+- Everything can be reached with **Tab** and activated with **Enter/Space**.  
+- When new inputs appear (like “Add note”), focus moves straight into them.  
+- When actions complete, focus returns to a sensible place (e.g., back to the triggering button).
 
-Use real lists (<ul><li>) for tracks and notes so users know how many items and where they are in the list.
+### Feedback
+- Use a hidden **live region** (`role="status"`) to announce changes (e.g., “Imported 3 tracks”, “Note added”).  
+- Don’t rely on color alone — pair it with text or icons.
 
-Buttons & controls
+### Visuals
+- Text contrast: **≥ 4.5 : 1** for body text, **≥ 3 : 1** for large text and UI controls.  
+- Clickable areas are large enough (around 44 × 44 px).
 
-All actions are real <button> elements, not hidden right-clicks.
+---
 
-Every button has a clear label or an accessible name (aria-label if icon-only).
-
-Keep focus visible (don’t remove outlines).
-
-Keyboard use
-
-Everything can be reached with Tab and activated with Enter/Space.
-
-When new inputs appear (like “Add note”), focus moves straight into them.
-
-When actions complete, focus returns to a sensible place (e.g., back to the button).
-
-Feedback
-
-Use a hidden live region (role="status") to announce changes (e.g., “Imported 3 tracks”, “Note added”).
-
-Don’t rely on color alone — use text or icons too.
-
-Visuals
-
-Text contrast: at least 4.5:1 for body text, 3:1 for large text and UI controls.
-
-Clickable areas are big enough (about 44×44px).
+_This checklist is a living document and part of the project’s ongoing accessibility focus._

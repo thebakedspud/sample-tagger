@@ -4,7 +4,7 @@
 
 // @ts-check
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 const TOTAL_TRACKS = 75;
 const DELAY_MS = 120;
 
