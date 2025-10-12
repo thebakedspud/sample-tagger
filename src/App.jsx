@@ -134,6 +134,13 @@ export default function App() {
     }
   }, [tracks, editingId])
 
+  // 🔐 Safety: if you somehow land on the playlist screen with zero tracks, bounce to landing
+  useEffect(() => {
+    if (screen === 'playlist' && tracks.length === 0) {
+      setScreen('landing')
+    }
+  }, [screen, tracks.length])
+
   // Ctrl/Cmd+Z undo
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -379,18 +386,27 @@ export default function App() {
   }
 
   const handleClearAll = () => {
+    // Reset transient UI and timers
     setPending(new Map())
+    setEditingId(null); setDraft(''); setError(null)
+    setImportError(null)
+    setImportBusyKind(null)
+
+    // Clear persisted data
     clearAppState()
+
+    // Reset in-memory app state
     setTracks([])
     setImportMeta({ ...EMPTY_IMPORT_META })
     setPlaylistTitle('My Playlist')
     setImportedAt(null)
     setLastImportUrl('')
     setImportUrl('')
-    setImportError(null)
-    setImportBusyKind(null)
+
+    // Reset import session internals
     resetImportSession()
-    setEditingId(null); setDraft(''); setError(null)
+
+    // Route back to landing + UX polish
     setScreen('landing')
     announce("All saved data cleared. You're back at the start.")
     setTimeout(() => importInputRef.current?.focus(), 0)
