@@ -8,7 +8,7 @@ import * as spotifyAdapter from './adapters/spotifyAdapter.js';
 import * as youtubeAdapter from './adapters/youtubeAdapter.js';
 import * as soundcloudAdapter from './adapters/soundcloudAdapter.js';
 import { normalizeTrack } from './normalizeTrack.js';
-import { isKnownAdapterError } from './adapters/types.js';
+import { CODES, createAdapterError, extractErrorCode } from './adapters/types.js';
 import { mockPlaylists } from '../../data/mockPlaylists.js';
 
 const ADAPTER_REGISTRY = Object.freeze({
@@ -17,25 +17,8 @@ const ADAPTER_REGISTRY = Object.freeze({
   soundcloud: soundcloudAdapter,
 });
 
-const DEFAULT_ERROR_CODE = 'ERR_UNKNOWN';
+const DEFAULT_ERROR_CODE = CODES.ERR_UNKNOWN;
 const MOCK_TITLE_PREFIX = 'MOCK DATA (fallback) - ';
-
-/**
- * Create a standardized Error with code/details/cause.
- * @param {string} code
- * @param {Record<string, any>} [details]
- * @param {Error} [cause]
- */
-function createAdapterError(code, details = {}, cause) {
-  const err = new Error(code);
-  // @ts-ignore - augmenting Error instance by convention
-  err.code = code;
-  // @ts-ignore
-  if (details) err.details = details;
-  // @ts-ignore
-  if (cause) err.cause = cause;
-  return err;
-}
 
 /**
  * Resolve an import function from the adapter registry.
@@ -62,24 +45,12 @@ function getMock(provider) {
 }
 
 /**
- * Extract a normalized error code from an unknown error.
- * @param {unknown} err
- * @returns {string}
- */
-function extractErrorCode(err) {
-  // @ts-ignore
-  const raw = err?.code ?? err?.cause?.code;
-  if (typeof raw === 'string' && isKnownAdapterError(raw)) return raw;
-  return DEFAULT_ERROR_CODE;
-}
-
-/**
  * Coerce any adapter payload (or mock) into a normalized adapter result.
  * Adds a small debug envelope when returning fallbacks.
  * @param {'spotify'|'youtube'|'soundcloud'} provider
  * @param {string} url
  * @param {any} payload
- * @param {{ isFallback?: boolean, lastErrorCode?: string }} [meta]
+ * @param {{ isFallback?: boolean, lastErrorCode?: import('./adapters/types.js').AdapterErrorCode }} [meta]
  */
 function coerceResult(provider, url, payload, meta = {}) {
   /** @type {any[]} */
@@ -140,12 +111,12 @@ export default function useImportPlaylist() {
     const { cursor, signal, context } = options;
 
     if (!url) {
-      throw createAdapterError('ERR_UNSUPPORTED_URL', { reason: 'empty_url' });
+      throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, { reason: 'empty_url' });
     }
 
     const provider = detectProvider(url);
     if (!provider) {
-      throw createAdapterError('ERR_UNSUPPORTED_URL', {
+      throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, {
         urlPreview: url.slice(0, 120),
       });
     }
@@ -166,7 +137,7 @@ export default function useImportPlaylist() {
     }
 
     if (!importFn) {
-      const fallback = getMock(provider);
+      const fallback = getMock(/** @type any */ (provider));
       if (!fallback) {
         throw createAdapterError(DEFAULT_ERROR_CODE, {
           provider,
@@ -197,11 +168,12 @@ export default function useImportPlaylist() {
 
       return coerceResult(provider, url, payload);
     } catch (err) {
-      // True cancel: do not map to a fallback or treat as error.
-      // @ts-ignore
-      if (err?.name === 'AbortError') throw err;
+      const anyErr = /** @type {any} */ (err);
 
-      const code = extractErrorCode(err);
+      // True cancel: do not map to a fallback or treat as error.
+      if (anyErr?.name === 'AbortError') throw err;
+
+      const code = extractErrorCode(anyErr);
       const fallback = getMock(provider);
 
       if (fallback) {
@@ -211,7 +183,7 @@ export default function useImportPlaylist() {
         });
       }
 
-      throw createAdapterError(code, { provider, url, cursor }, /** @type {Error} */ (err));
+      throw createAdapterError(code, { provider, url, cursor }, /** @type {Error} */ (anyErr));
     }
   }
 

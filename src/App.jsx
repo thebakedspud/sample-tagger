@@ -15,6 +15,10 @@ import UndoPlaceholder from './components/UndoPlaceholder.jsx'
 import detectProvider from './features/import/detectProvider'
 import useImportPlaylist from './features/import/useImportPlaylist.js'
 
+// NEW: centralised error helpers/messages
+import { extractErrorCode, CODES } from './features/import/adapters/types.js'
+import { ERROR_MAP } from './features/import/errors.js'
+
 // -- Derive initial state from storage (v3 structured: { importMeta, tracks, ... })
 const persisted = loadAppState()
 const HAS_VALID_PLAYLIST = !!(persisted?.importMeta?.provider && persisted?.tracks?.length)
@@ -192,6 +196,11 @@ export default function App() {
   const showReimportSpinner = isReimportBusy && importLoading
   const showLoadMoreSpinner = isLoadMoreBusy && importLoading
 
+  // Small helper to resolve a friendly message from a code
+  function msgFromCode(code) {
+    return ERROR_MAP[code] ?? ERROR_MAP[CODES.ERR_UNKNOWN] ?? 'Something went wrong. Please try again.'
+  }
+
   // IMPORT handlers
   const handleImport = async (e) => {
     e?.preventDefault?.()
@@ -199,16 +208,20 @@ export default function App() {
     const trimmedUrl = importUrl.trim()
 
     if (!trimmedUrl) {
-      setImportError('Paste a playlist URL to import.')
+      const msg = 'Paste a playlist URL to import.'
+      setImportError(msg)
       announce('Import failed. URL missing.')
       importInputRef.current?.focus(); importInputRef.current?.select()
+      console.log('[import error]', { code: 'URL_MISSING', raw: null })
       return
     }
 
     if (!providerChip) {
-      setImportError("That URL doesn't look like a Spotify, YouTube, or SoundCloud playlist.")
+      const msg = msgFromCode(CODES.ERR_UNSUPPORTED_URL)
+      setImportError(msg)
       announce('Import failed. Unsupported URL.')
       importInputRef.current?.focus(); importInputRef.current?.select()
+      console.log('[import error]', { code: CODES.ERR_UNSUPPORTED_URL, raw: null })
       return
     }
 
@@ -250,16 +263,12 @@ export default function App() {
         }
       })
     } catch (err) {
+      // Abort is a true cancel: no error UI
       if (err?.name === "AbortError") return
 
-      const code = err?.code
-      const msg = code === 'ERR_UNSUPPORTED_URL'
-        ? 'That link is not a supported playlist URL.'
-        : code === 'ERR_PRIVATE_PLAYLIST'
-          ? 'That playlist looks private or unavailable.'
-          : code === 'ERR_RATE_LIMITED'
-            ? 'Too many requests right now. Try again shortly.'
-            : 'Could not import right now. Check the link or try again.'
+      const code = extractErrorCode(err)
+      const msg = msgFromCode(code)
+      console.log('[import error]', { code, raw: err })
       setImportError(msg)
       announce('Import failed. ' + msg)
       importInputRef.current?.focus(); importInputRef.current?.select()
@@ -267,6 +276,7 @@ export default function App() {
       setImportBusyKind(null)
     }
   }
+
   const handleReimport = async () => {
     if (!lastImportUrl) return
     const wasActive = document.activeElement === reimportBtnRef.current
@@ -304,10 +314,9 @@ export default function App() {
         setImportBusyKind(null)
         return
       }
-
-      const msg = err?.code === 'ERR_PRIVATE_PLAYLIST'
-        ? 'That playlist looks private or unavailable.'
-        : 'Re-import failed. Try again.'
+      const code = extractErrorCode(err)
+      const msg = msgFromCode(code)
+      console.log('[reimport error]', { code, raw: err })
       setImportError(msg)
       announce(msg)
       if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
@@ -315,6 +324,7 @@ export default function App() {
       setImportBusyKind(null)
     }
   }
+
   const handleLoadMore = async () => {
     if (!importMeta.cursor || !importMeta.provider || !lastImportUrl) {
       return
@@ -374,9 +384,9 @@ export default function App() {
       announce(unique.length + ' more tracks loaded.')
     } catch (err) {
       if (err?.name !== 'AbortError') {
-        const msg = err?.code === 'ERR_RATE_LIMITED'
-          ? 'Too many requests right now. Try again shortly.'
-          : 'Could not load more tracks. Try again.'
+        const code = extractErrorCode(err)
+        const msg = msgFromCode(code)
+        console.log('[load-more error]', { code, raw: err })
         setImportError(msg)
         announce(msg)
       }

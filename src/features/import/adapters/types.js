@@ -32,10 +32,10 @@
 /**
  * Adapter options accepted by every provider importer.
  * @typedef {Object} AdapterOptions
- * @property {string} url The user supplied playlist URL.
- * @property {string} [cursor] Provider specific pagination cursor.
- * @property {any} [signal] Used to cancel in-flight network work (AbortSignal or compatible).
- * @property {Record<string, any>} [context] Extra data (e.g. tokens) shared by callers.
+ * @property {string} url
+ * @property {string} [cursor]
+ * @property {any} [signal]
+ * @property {Record<string, any>} [context]
  */
 
 /**
@@ -57,39 +57,87 @@
 
 /**
  * Error codes adapters should surface so the UI can branch correctly.
- * @typedef {'ERR_UNSUPPORTED_URL' | 'ERR_NOT_FOUND' | 'ERR_PRIVATE_PLAYLIST' | 'ERR_RATE_LIMITED' | 'ERR_TOKEN_EXPIRED' | 'ERR_UNKNOWN'} AdapterErrorCode
+ * @typedef {'ERR_UNSUPPORTED_URL' | 'ERR_NOT_FOUND' | 'ERR_PRIVATE_PLAYLIST' | 'ERR_RATE_LIMITED' | 'ERR_TOKEN_EXPIRED' | 'ERR_NETWORK' | 'ERR_INVALID_RESPONSE' | 'ERR_ABORTED' | 'ERR_UNKNOWN'} AdapterErrorCode
  */
 
-/**
- * Providers adapters must support.
- * @type {ReadonlyArray<PlaylistProvider>}
- */
 export const KNOWN_PROVIDERS = Object.freeze(['spotify', 'youtube', 'soundcloud']);
 
-/**
- * Adapter error codes the rest of the app can target.
- * @type {ReadonlyArray<AdapterErrorCode>}
- */
 export const KNOWN_ADAPTER_ERRORS = Object.freeze([
   'ERR_UNSUPPORTED_URL',
   'ERR_NOT_FOUND',
   'ERR_PRIVATE_PLAYLIST',
   'ERR_RATE_LIMITED',
   'ERR_TOKEN_EXPIRED',
+  'ERR_NETWORK',
+  'ERR_INVALID_RESPONSE',
+  'ERR_ABORTED',
   'ERR_UNKNOWN',
 ]);
 
 /**
- * Type guard for providers.
  * @param {unknown} p
  * @returns {p is PlaylistProvider}
  */
-export const isKnownProvider = (p) => KNOWN_PROVIDERS.includes(/** @type {any} */ (p));
+export const isKnownProvider = (p) =>
+  KNOWN_PROVIDERS.includes(/** @type {any} */ (p));
 
 /**
- * Type guard for adapter error codes.
  * @param {unknown} c
  * @returns {c is AdapterErrorCode}
  */
 export const isKnownAdapterError = (c) =>
   KNOWN_ADAPTER_ERRORS.includes(/** @type {any} */ (c));
+
+/* -------------------------------------------------------------------------- */
+/*  Runtime helpers for consistent error handling                             */
+/* -------------------------------------------------------------------------- */
+
+/** @type {Readonly<Record<AdapterErrorCode, AdapterErrorCode>>} */
+export const CODES = Object.freeze({
+  ERR_UNSUPPORTED_URL: 'ERR_UNSUPPORTED_URL',
+  ERR_NOT_FOUND: 'ERR_NOT_FOUND',
+  ERR_PRIVATE_PLAYLIST: 'ERR_PRIVATE_PLAYLIST',
+  ERR_RATE_LIMITED: 'ERR_RATE_LIMITED',
+  ERR_TOKEN_EXPIRED: 'ERR_TOKEN_EXPIRED',
+  ERR_NETWORK: 'ERR_NETWORK',
+  ERR_INVALID_RESPONSE: 'ERR_INVALID_RESPONSE',
+  ERR_ABORTED: 'ERR_ABORTED',
+  ERR_UNKNOWN: 'ERR_UNKNOWN',
+});
+
+/**
+ * Create a standardized Error with code/details/cause.
+ * @param {AdapterErrorCode} code
+ * @param {Record<string, any>} [details]
+ * @param {unknown} [cause]
+ */
+export function createAdapterError(code, details = {}, cause) {
+  const err = new Error(code);
+  const anyErr = /** @type {any} */ (err);
+  anyErr.code = CODES[code] || code || CODES.ERR_UNKNOWN;
+  anyErr.details = details;
+  if (cause) anyErr.cause = cause;
+  return err;
+}
+
+/**
+ * Extract a known AdapterErrorCode or fall back to ERR_UNKNOWN.
+ * @param {unknown} e
+ * @returns {AdapterErrorCode}
+ */
+export function extractErrorCode(e) {
+  const anyErr = /** @type {any} */ (e);
+  const code = anyErr && (anyErr.code || anyErr.message);
+  return Object.values(CODES).includes(/** @type {any} */ (code))
+    ? /** @type {AdapterErrorCode} */ (code)
+    : /** @type {AdapterErrorCode} */ (CODES.ERR_UNKNOWN);
+}
+
+/**
+ * Type guard for known adapter error objects.
+ * @param {unknown} e
+ * @returns {boolean}
+ */
+export function isKnownAdapterErrorObject(e) {
+  return extractErrorCode(e) !== CODES.ERR_UNKNOWN;
+}
