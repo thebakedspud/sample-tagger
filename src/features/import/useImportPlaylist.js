@@ -177,6 +177,7 @@ export default function useImportPlaylist() {
       const fallback = getMock(provider);
 
       if (fallback) {
+        console.warn('[import fallback]', { provider, code, err: anyErr });
         return coerceResult(provider, url, fallback, {
           isFallback: true,
           lastErrorCode: code,
@@ -187,5 +188,15 @@ export default function useImportPlaylist() {
     }
   }
 
-  return { importPlaylist };
+  async function importNext() {
+    throw createAdapterError(CODES.ERR_UNKNOWN, { reason: 'pagination_not_implemented' });
+  }
+
+  const loading = false;
+
+  function reset() {
+    // Placeholder: real adapters can expose their own reset logic
+  }
+
+  return { importPlaylist, importNext, loading, reset };
 }
