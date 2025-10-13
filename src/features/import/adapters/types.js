@@ -127,10 +127,20 @@ export function createAdapterError(code, details = {}, cause) {
  */
 export function extractErrorCode(e) {
   const anyErr = /** @type {any} */ (e);
-  const code = anyErr && (anyErr.code || anyErr.message);
-  return Object.values(CODES).includes(/** @type {any} */ (code))
-    ? /** @type {AdapterErrorCode} */ (code)
-    : /** @type {AdapterErrorCode} */ (CODES.ERR_UNKNOWN);
+
+  /** @param {unknown} v */
+  const toKnown = (v) =>
+    typeof v === 'string' && Object.values(CODES).includes(/** @type {any} */ (v))
+      ? /** @type {AdapterErrorCode} */ (v)
+      : null;
+
+  const code =
+    toKnown(anyErr?.code) ||
+    toKnown(anyErr?.cause?.code) ||
+    toKnown(anyErr?.message) ||
+    toKnown(anyErr?.cause?.message);
+
+  return code ?? CODES.ERR_UNKNOWN;
 }
 
 /**
