@@ -26,8 +26,8 @@
 /**
  * Pagination metadata returned with a playlist page.
  * @typedef {Object} PageInfo
- * @property {string} [cursor]
- * @property {boolean} [hasMore]
+ * @property {string|null} cursor
+ * @property {boolean} hasMore
  */
 
 /**

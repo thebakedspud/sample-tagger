@@ -19,10 +19,12 @@ const ADAPTER_REGISTRY = Object.freeze({
 
 const DEFAULT_ERROR_CODE = CODES.ERR_UNKNOWN;
 const MOCK_TITLE_PREFIX = 'MOCK DATA (fallback) - ';
-const EMPTY_PAGE_INFO = Object.freeze(/** @type {{ cursor: undefined, hasMore: boolean }} */ ({
-  cursor: undefined,
-  hasMore: false,
-}));
+const EMPTY_PAGE_INFO = Object.freeze(
+  /** @type {{ cursor: null, hasMore: boolean }} */ ({
+    cursor: null,
+    hasMore: false,
+  })
+);
 
 /**
  * Resolve an import function from the adapter registry.
@@ -48,17 +50,19 @@ function getMock(provider) {
   return mockPlaylists?.[provider] || null;
 }
 
-/** @param {any} pageInfo @returns {{ cursor: string | undefined, hasMore: boolean }} */
-function normalizePageInfo(pageInfo) {
+/** @param {any} pageInfo @returns {{ cursor: string | null, hasMore: boolean }} */
+export function normalizePageInfo(pageInfo) {
   if (!pageInfo || typeof pageInfo !== 'object') {
     return { ...EMPTY_PAGE_INFO };
   }
   const rawCursor = pageInfo.cursor;
-  const cursorString =
-    rawCursor == null ? undefined : (String(rawCursor).trim() || undefined);
-  const hasMore = Boolean(pageInfo.hasMore && cursorString);
+  const cursor =
+    typeof rawCursor === 'string' && rawCursor.trim().length > 0
+      ? rawCursor.trim()
+      : null;
+  const hasMore = Boolean(pageInfo.hasMore && cursor);
   return {
-    cursor: cursorString,
+    cursor,
     hasMore,
   };
 }
@@ -151,7 +155,7 @@ function coerceResult(provider, url, payload, meta = {}) {
  *   importNext: (options?: any) => Promise<any>,
  *   reset: () => void,
  *   tracks: import('./adapters/types.js').NormalizedTrack[],
- *   pageInfo: { cursor: string | undefined, hasMore: boolean },
+ *   pageInfo: { cursor: string | null, hasMore: boolean },
  *   loading: boolean,
  *   importBusyKind: string | null,
  *   errorCode: import('./adapters/types.js').AdapterErrorCode | null
@@ -162,7 +166,7 @@ export default function useImportPlaylist() {
     /** @type {import('./adapters/types.js').NormalizedTrack[]} */ ([])
   );
   const [pageInfo, setPageInfo] = useState(
-    /** @type {{ cursor: string | undefined, hasMore: boolean }} */ ({ ...EMPTY_PAGE_INFO })
+    /** @type {{ cursor: string | null, hasMore: boolean }} */ ({ ...EMPTY_PAGE_INFO })
   );
   const [loading, setLoading] = useState(false);
   const [importBusyKind, setImportBusyKind] = useState(
@@ -179,11 +183,11 @@ export default function useImportPlaylist() {
     /** @type {{
       provider: import('./adapters/types.js').PlaylistProvider | null,
       url: string | null,
-      cursor: string | undefined
+      cursor: string | null
     }} */ ({
       provider: null,
       url: null,
-      cursor: undefined,
+      cursor: null,
     })
   );
 
@@ -394,10 +398,23 @@ export default function useImportPlaylist() {
     const provider =
       options.provider ?? lastRequestRef.current.provider ?? null;
     const url = options.url ?? lastRequestRef.current.url ?? null;
+    const normalizedOptionCursor =
+      typeof options.cursor === 'string' && options.cursor.trim().length > 0
+        ? options.cursor.trim()
+        : null;
+    const normalizedPageCursor =
+      typeof pageInfo.cursor === 'string' && pageInfo.cursor.trim().length > 0
+        ? pageInfo.cursor
+        : null;
+    const normalizedLastCursor =
+      typeof lastRequestRef.current.cursor === 'string' &&
+      lastRequestRef.current.cursor.trim().length > 0
+        ? lastRequestRef.current.cursor
+        : null;
     const effectiveCursor =
-      options.cursor ??
-      pageInfo.cursor ??
-      lastRequestRef.current.cursor ??
+      normalizedOptionCursor ??
+      normalizedPageCursor ??
+      normalizedLastCursor ??
       null;
 
     if (!provider || !url || !effectiveCursor) return null;
@@ -534,7 +551,7 @@ export default function useImportPlaylist() {
     controllerRef.current?.abort();
     controllerRef.current = null;
     requestIdRef.current += 1;
-    lastRequestRef.current = { provider: null, url: null, cursor: undefined };
+    lastRequestRef.current = { provider: null, url: null, cursor: null };
     setTracks([]);
     setPageInfo({ ...EMPTY_PAGE_INFO });
     setLoading(false);

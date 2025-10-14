@@ -225,12 +225,16 @@ function sanitizeImportMeta(meta) {
   if (!meta || typeof meta !== 'object') return { ...EMPTY_META };
   const m = /** @type {any} */ (meta);
   const provider = VALID_PROVIDERS.has(m.provider) ? m.provider : null;
-  const cursor = safeString(m.cursor);
+  const rawCursor = m.cursor;
+  const cursor =
+    typeof rawCursor === 'string' && rawCursor.trim().length > 0
+      ? rawCursor.trim()
+      : null;
   return {
     provider,
     playlistId: safeString(m.playlistId),
     snapshotId: safeString(m.snapshotId),
-    cursor: cursor || null,
+    cursor,
     hasMore: Boolean(m.hasMore) || Boolean(cursor),
     sourceUrl: safeString(m.sourceUrl),
     debug: sanitizeDebug(m.debug),
