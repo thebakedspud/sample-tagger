@@ -17,6 +17,7 @@
  * @property {string} artist
  * @property {string} [sourceUrl]
  * @property {string} [providerTrackId]
+ * @property {'spotify' | 'youtube' | 'soundcloud'} [provider]
  * @property {number} [durationMs]
  * @property {string} [thumbnailUrl]
  * @property {any[]} [notes]

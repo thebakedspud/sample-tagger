@@ -9,6 +9,6 @@ export function normalizeTrack(t = {}, i, provider) {
     id: t?.id ?? `${provider}-${i + 1}`,
     title: safeTitle || `Untitled Track ${i + 1}`,
     artist: safeArtist || 'Unknown Artist',
-    provider: t?.provider ?? provider ?? null,
+    provider: t?.provider ?? provider ?? undefined,
   };
 }
