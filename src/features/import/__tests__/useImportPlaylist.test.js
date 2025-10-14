@@ -1,3 +1,4 @@
+import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import useImportPlaylist from '../useImportPlaylist.js';
 import { CODES } from '../adapters/types.js';
@@ -15,7 +16,7 @@ describe('useImportPlaylist', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns adapter payload when fetch client succeeds', async () => {
+  it('exposes playlist data and clears loading on success', async () => {
     const fetchClient = {
       getJson: vi.fn(async () => ({
         title: 'Synthwave Decade',
@@ -23,16 +24,23 @@ describe('useImportPlaylist', () => {
       })),
     };
 
-    const { importPlaylist } = useImportPlaylist();
-    const result = await importPlaylist(SPOTIFY_URL, { fetchClient });
+    const { result } = renderHook(() => useImportPlaylist());
+    let response;
+    await act(async () => {
+      response = await result.current.importPlaylist(SPOTIFY_URL, { fetchClient });
+    });
 
     expect(fetchClient.getJson).toHaveBeenCalledTimes(1);
-    expect(result.provider).toBe('spotify');
-    expect(result.title).toBe('Synthwave Decade');
-    expect(result.tracks.length).toBeGreaterThan(0);
+    expect(response.provider).toBe('spotify');
+    expect(result.current.loading).toBe(false);
+    expect(result.current.importBusyKind).toBe(null);
+    expect(result.current.errorCode).toBe(null);
+    expect(result.current.tracks.length).toBeGreaterThan(0);
+    expect(result.current.pageInfo?.hasMore).toBe(false);
+    expect(result.current.pageInfo?.cursor).toBeUndefined();
   });
 
-  it('falls back to mock data when adapter throws a known error', async () => {
+  it('maps 429 errors to ERR_RATE_LIMITED, returns fallback data, and resets loading', async () => {
     const fetchClient = {
       getJson: vi.fn(async () => {
         const err = new Error('HTTP_429');
@@ -43,24 +51,37 @@ describe('useImportPlaylist', () => {
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const { importPlaylist } = useImportPlaylist();
-    const result = await importPlaylist(SPOTIFY_URL, { fetchClient });
+    const { result } = renderHook(() => useImportPlaylist());
+    let response;
+    await act(async () => {
+      response = await result.current.importPlaylist(SPOTIFY_URL, { fetchClient });
+    });
 
     expect(warnSpy).toHaveBeenCalledWith(
       '[import fallback]',
       expect.objectContaining({ provider: 'spotify', code: CODES.ERR_RATE_LIMITED })
     );
-    expect(result.title.startsWith('MOCK DATA (fallback) - ')).toBe(true);
-    expect(result.debug?.isMock).toBe(true);
-    expect(result.debug?.lastErrorCode).toBe(CODES.ERR_RATE_LIMITED);
+    expect(response.title.startsWith('MOCK DATA (fallback) - ')).toBe(true);
+    expect(result.current.tracks.length).toBeGreaterThan(0);
+    expect(result.current.errorCode).toBe(CODES.ERR_RATE_LIMITED);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.importBusyKind).toBe(null);
   });
 
   it('throws ERR_UNSUPPORTED_URL for invalid providers', async () => {
-    const { importPlaylist } = useImportPlaylist();
+    const { result } = renderHook(() => useImportPlaylist());
 
-    await expect(importPlaylist('https://example.com/anything')).rejects.toMatchObject({
-      message: CODES.ERR_UNSUPPORTED_URL,
-      code: CODES.ERR_UNSUPPORTED_URL,
+    await act(async () => {
+      await expect(
+        result.current.importPlaylist('https://example.com/anything')
+      ).rejects.toMatchObject({
+        message: CODES.ERR_UNSUPPORTED_URL,
+        code: CODES.ERR_UNSUPPORTED_URL,
+      });
     });
+
+    expect(result.current.errorCode).toBe(CODES.ERR_UNSUPPORTED_URL);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.importBusyKind).toBe(null);
   });
 });

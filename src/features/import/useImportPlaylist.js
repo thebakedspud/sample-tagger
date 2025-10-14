@@ -2,7 +2,7 @@
 // Provides a single entry point for importing playlists from any provider.
 
 // @ts-check
-
+import { useState } from 'react';
 import detectProvider from './detectProvider.js';
 import * as spotifyAdapter from './adapters/spotifyAdapter.js';
 import * as youtubeAdapter from './adapters/youtubeAdapter.js';
@@ -97,7 +97,31 @@ function coerceResult(provider, url, payload, meta = {}) {
   return result;
 }
 
+/**
+ * Playlist import hook exposing helper methods plus UI-friendly state.
+ * @returns {{
+ *   importPlaylist: (url: string, options?: {
+ *     cursor?: string,
+ *     signal?: AbortSignal,
+ *     context?: Record<string, any>,
+ *     fetchClient?: ReturnType<typeof import('../../utils/fetchClient.js').makeFetchClient>
+ *   }) => Promise<any>,
+ *   importNext: (options?: any) => Promise<any>,
+ *   reset: () => void,
+ *   tracks: import('./adapters/types.js').NormalizedTrack[],
+ *   pageInfo: import('./adapters/types.js').PageInfo | null,
+ *   loading: boolean,
+ *   importBusyKind: string | null,
+ *   errorCode: import('./adapters/types.js').AdapterErrorCode | null
+ * }}
+ */
 export default function useImportPlaylist() {
+  const [tracks, setTracks] = useState([]);
+  const [pageInfo, setPageInfo] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [importBusyKind, setImportBusyKind] = useState(null);
+  const [errorCode, setErrorCode] = useState(null);
+
   /**
    * Import a playlist by URL, optionally resuming via cursor.
    * Adapters are async and abort-aware; this function may throw:
@@ -117,82 +141,113 @@ export default function useImportPlaylist() {
     const resolvedFetchClient =
       fetchClient ?? (context && typeof context === 'object' ? context.fetchClient : undefined);
 
-    if (!url) {
-      throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, { reason: 'empty_url' });
-    }
-
-    const provider = detectProvider(url);
-    if (!provider) {
-      throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, {
-        urlPreview: url.slice(0, 120),
-      });
-    }
-
-    const importFn = getImportFn(provider);
-
-    const invokeOptions = {
-      url,
-      cursor: cursor ?? undefined,
-      signal,
-      context: context ?? {},
-      ...(resolvedFetchClient ? { fetchClient: resolvedFetchClient } : {}),
-    };
-
-    // If caller submits a new URL while a previous request is still in flight.
-    if (signal?.aborted) {
-      // Propagate a true cancel; caller can ignore gracefully.
-      throw new DOMException('Aborted', 'AbortError');
-    }
-
-    if (!importFn) {
-      const fallback = getMock(/** @type any */ (provider));
-      if (!fallback) {
-        throw createAdapterError(DEFAULT_ERROR_CODE, {
-          provider,
-          reason: 'missing_adapter',
-          urlPreview: url.slice(0, 120),
-        });
-      }
-      return coerceResult(provider, url, fallback, { isFallback: true });
-    }
+    const busyKind = context?.importBusyKind ?? 'initial';
+    setImportBusyKind(busyKind);
+    setLoading(true);
+    setErrorCode(null);
 
     try {
-      const payload = await importFn(invokeOptions);
+      if (!url) {
+        setErrorCode(CODES.ERR_UNSUPPORTED_URL);
+        throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, { reason: 'empty_url' });
+      }
 
-      if (!payload) {
-        const fallback = getMock(provider);
-        if (fallback) {
-          return coerceResult(provider, url, fallback, {
-            isFallback: true,
-            lastErrorCode: DEFAULT_ERROR_CODE,
-          });
-        }
-        throw createAdapterError(DEFAULT_ERROR_CODE, {
-          provider,
-          reason: 'empty_payload',
+      const provider = detectProvider(url);
+      if (!provider) {
+        setErrorCode(CODES.ERR_UNSUPPORTED_URL);
+        throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, {
           urlPreview: url.slice(0, 120),
         });
       }
 
-      return coerceResult(provider, url, payload);
-    } catch (err) {
-      const anyErr = /** @type {any} */ (err);
+      const importFn = getImportFn(provider);
 
-      // True cancel: do not map to a fallback or treat as error.
-      if (anyErr?.name === 'AbortError') throw err;
+      const invokeOptions = {
+        url,
+        cursor: cursor ?? undefined,
+        signal,
+        context: context ?? {},
+        ...(resolvedFetchClient ? { fetchClient: resolvedFetchClient } : {}),
+      };
 
-      const code = extractErrorCode(anyErr);
-      const fallback = getMock(provider);
-
-      if (fallback) {
-        console.warn('[import fallback]', { provider, code, err: anyErr });
-        return coerceResult(provider, url, fallback, {
-          isFallback: true,
-          lastErrorCode: code,
-        });
+      // If caller submits a new URL while a previous request is still in flight.
+      if (signal?.aborted) {
+        // Propagate a true cancel; caller can ignore gracefully.
+        throw new DOMException('Aborted', 'AbortError');
       }
 
-      throw createAdapterError(code, { provider, url, cursor }, /** @type {Error} */ (anyErr));
+      if (!importFn) {
+        const fallback = getMock(/** @type any */ (provider));
+        if (!fallback) {
+          setErrorCode(DEFAULT_ERROR_CODE);
+          throw createAdapterError(DEFAULT_ERROR_CODE, {
+            provider,
+            reason: 'missing_adapter',
+            urlPreview: url.slice(0, 120),
+          });
+        }
+        const result = coerceResult(provider, url, fallback, { isFallback: true });
+        setTracks(result.tracks);
+        setPageInfo(result.pageInfo ?? null);
+        setErrorCode(DEFAULT_ERROR_CODE);
+        return result;
+      }
+
+      try {
+        const payload = await importFn(invokeOptions);
+
+        if (!payload) {
+          const fallback = getMock(provider);
+          if (fallback) {
+            const result = coerceResult(provider, url, fallback, {
+              isFallback: true,
+              lastErrorCode: DEFAULT_ERROR_CODE,
+            });
+            setTracks(result.tracks);
+            setPageInfo(result.pageInfo ?? null);
+            setErrorCode(DEFAULT_ERROR_CODE);
+            return result;
+          }
+          setErrorCode(DEFAULT_ERROR_CODE);
+          throw createAdapterError(DEFAULT_ERROR_CODE, {
+            provider,
+            reason: 'empty_payload',
+            urlPreview: url.slice(0, 120),
+          });
+        }
+
+        const result = coerceResult(provider, url, payload);
+        setTracks(result.tracks);
+        setPageInfo(result.pageInfo ?? null);
+        setErrorCode(null);
+        return result;
+      } catch (err) {
+        const anyErr = /** @type {any} */ (err);
+
+        // True cancel: do not map to a fallback or treat as error.
+        if (anyErr?.name === 'AbortError') throw err;
+
+        const code = extractErrorCode(anyErr);
+        const fallback = getMock(provider);
+
+        if (fallback) {
+          console.warn('[import fallback]', { provider, code, err: anyErr });
+          const result = coerceResult(provider, url, fallback, {
+            isFallback: true,
+            lastErrorCode: code,
+          });
+          setTracks(result.tracks);
+          setPageInfo(result.pageInfo ?? null);
+          setErrorCode(code);
+          return result;
+        }
+
+        setErrorCode(code);
+        throw createAdapterError(code, { provider, url, cursor }, /** @type {Error} */ (anyErr));
+      }
+    } finally {
+      setLoading(false);
+      setImportBusyKind(null);
     }
   }
 
@@ -200,11 +255,22 @@ export default function useImportPlaylist() {
     throw createAdapterError(CODES.ERR_UNKNOWN, { reason: 'pagination_not_implemented' });
   }
 
-  const loading = false;
-
   function reset() {
-    // Placeholder: real adapters can expose their own reset logic
+    setTracks([]);
+    setPageInfo(null);
+    setLoading(false);
+    setImportBusyKind(null);
+    setErrorCode(null);
   }
 
-  return { importPlaylist, importNext, loading, reset };
+  return {
+    importPlaylist,
+    importNext,
+    reset,
+    tracks,
+    pageInfo,
+    loading,
+    importBusyKind,
+    errorCode,
+  };
 }
