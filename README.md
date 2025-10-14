@@ -1,5 +1,7 @@
 # Sample Tagger (Prototype)
 
+[![Tests](https://github.com/thebakedspud/sample-tagger/actions/workflows/test.yml/badge.svg)](https://github.com/thebakedspud/sample-tagger/actions/workflows/test.yml)
+
 Bare-bones prototype for importing a playlist and adding notes.
 
 As part of my UX/UI design course, I’ve been learning about accessibility, inclusion, and inclusive design.  
