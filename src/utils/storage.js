@@ -2,7 +2,6 @@
 // Provides versioned persistence for the playlist app state.
 
 /* eslint-env browser */
-/* global localStorage */
 // @ts-check
 
 /**
