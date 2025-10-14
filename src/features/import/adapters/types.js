@@ -36,6 +36,7 @@
  * @property {string} [cursor]
  * @property {any} [signal]
  * @property {Record<string, any>} [context]
+ * @property {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} [fetchClient]
  */
 
 /**

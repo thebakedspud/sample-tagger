@@ -7,6 +7,7 @@
 import { normalizeTrack } from '../normalizeTrack.js';
 import { mockPlaylists } from '../../../data/mockPlaylists.js';
 import { createAdapterError, CODES } from './types.js';
+import { defaultFetchClient } from '../../../utils/fetchClient.js';
 
 const PROVIDER = 'spotify';
 const OEMBED_REMOTE_BASE = 'https://open.spotify.com/oembed';
@@ -45,15 +46,51 @@ function extractPlaylistId(raw) {
  * @param {string} endpoint
  * @param {{ signal?: AbortSignal }} [options]
  */
-async function fetchOEmbedFrom(endpoint, { signal } = {}) {
-  const res = await fetch(endpoint, { signal, headers: { Accept: 'application/json' } });
-  if (res.status === 404) {
-    throw createAdapterError(CODES.ERR_NOT_FOUND, { endpoint });
+/**
+ * Parse a status code from an HTTP_* error code.
+ * @param {unknown} code
+ */
+function toStatus(code) {
+  if (typeof code !== 'string') return null;
+  const match = /^HTTP_(\d+)/.exec(code);
+  if (!match) return null;
+  const value = Number.parseInt(match[1], 10);
+  return Number.isNaN(value) ? null : value;
+}
+
+/**
+ * Fetch and validate an oEmbed response from a specific endpoint.
+ * @param {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} fetchClient
+ * @param {string} endpoint
+ * @param {{ signal?: AbortSignal }} [options]
+ */
+async function fetchOEmbedFrom(fetchClient, endpoint, { signal } = {}) {
+  try {
+    return await fetchClient.getJson(endpoint, {
+      signal,
+      headers: { Accept: 'application/json' },
+    });
+  } catch (err) {
+    const anyErr = /** @type {any} */ (err);
+    if (anyErr?.name === 'AbortError') throw err;
+
+    const status = toStatus(anyErr?.code);
+    const details = { endpoint, ...(status ? { status } : {}) };
+
+    if (status === 404) {
+      throw createAdapterError(CODES.ERR_NOT_FOUND, details, err);
+    }
+    if (status === 401 || status === 403) {
+      throw createAdapterError(CODES.ERR_PRIVATE_PLAYLIST, details, err);
+    }
+    if (status === 429) {
+      throw createAdapterError(CODES.ERR_RATE_LIMITED, details, err);
+    }
+    if (status != null) {
+      throw createAdapterError(CODES.ERR_NETWORK, details, err);
+    }
+    throw createAdapterError(CODES.ERR_NETWORK, details, err);
   }
-  if (!res.ok) {
-    throw createAdapterError(CODES.ERR_NETWORK, { status: res.status, endpoint });
-  }
-  return res.json();
 }
 
 /**
@@ -62,7 +99,7 @@ async function fetchOEmbedFrom(endpoint, { signal } = {}) {
  * @param {string} playlistUrl
  * @param {{ signal?: AbortSignal }} [options]
  */
-async function fetchOEmbed(playlistUrl, { signal } = {}) {
+async function fetchOEmbed(playlistUrl, { signal, fetchClient }) {
   const remoteEndpoint = buildOEmbedEndpoint(OEMBED_REMOTE_BASE, playlistUrl);
   const importMeta = /** @type {any} */ (typeof import.meta !== 'undefined' ? import.meta : undefined);
   const isDev = Boolean(importMeta?.env?.DEV);
@@ -71,7 +108,7 @@ async function fetchOEmbed(playlistUrl, { signal } = {}) {
   }
 
   try {
-    const data = await fetchOEmbedFrom(remoteEndpoint, { signal });
+    const data = await fetchOEmbedFrom(fetchClient, remoteEndpoint, { signal });
     if (isDev) {
       console.debug('[spotify][oembed] remote success', { title: data?.title ?? null });
     }
@@ -79,13 +116,16 @@ async function fetchOEmbed(playlistUrl, { signal } = {}) {
   } catch (err) {
     const anyErr = /** @type {any} */ (err);
     if (anyErr?.name === 'AbortError') throw err;
-    if (anyErr?.code) throw err;
+    if (anyErr?.code === CODES.ERR_NOT_FOUND) throw err;
+    if (anyErr?.code && anyErr.code !== CODES.ERR_NETWORK && anyErr.code !== CODES.ERR_RATE_LIMITED) {
+      throw err;
+    }
 
     if (isDev) {
       const proxyEndpoint = buildOEmbedEndpoint(DEV_PROXY_PATH, playlistUrl);
       console.debug('[spotify][oembed] remote failed, trying proxy', proxyEndpoint);
       try {
-        const data = await fetchOEmbedFrom(proxyEndpoint, { signal });
+        const data = await fetchOEmbedFrom(fetchClient, proxyEndpoint, { signal });
         console.debug('[spotify][oembed] proxy success', { title: data?.title ?? null });
         return data;
       } catch (proxyErr) {
@@ -106,6 +146,7 @@ async function fetchOEmbed(playlistUrl, { signal } = {}) {
       }
     }
 
+    if (anyErr?.code) throw err;
     throw createAdapterError(CODES.ERR_NETWORK, { endpoint: remoteEndpoint }, anyErr);
   }
 }
@@ -115,6 +156,7 @@ async function fetchOEmbed(playlistUrl, { signal } = {}) {
  * @param {{ url?: string, signal?: AbortSignal }} [options]
  */
 export async function importPlaylist(options = {}) {
+  const fetchClient = options?.fetchClient ?? defaultFetchClient;
   const playlistUrl = typeof options?.url === 'string' ? options.url.trim() : '';
   const playlistId = extractPlaylistId(playlistUrl);
   if (!playlistId) {
@@ -125,7 +167,7 @@ export async function importPlaylist(options = {}) {
 
   let meta;
   try {
-    meta = await fetchOEmbed(playlistUrl, { signal: options.signal });
+    meta = await fetchOEmbed(playlistUrl, { signal: options.signal, fetchClient });
   } catch (err) {
     const finalErr = /** @type {any} */ (err);
     if (finalErr?.name === 'AbortError') throw err;

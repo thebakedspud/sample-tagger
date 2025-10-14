@@ -102,13 +102,20 @@ export default function useImportPlaylist() {
    * Import a playlist by URL, optionally resuming via cursor.
    * Adapters are async and abort-aware; this function may throw:
    *  - DOMException('AbortError') if cancelled
-   *  - Error(code) where code ∈ KNOWN_ADAPTER_ERRORS
+   *  - Error(code) where code maps to KNOWN_ADAPTER_ERRORS
    * @param {string} rawUrl
-   * @param {{ cursor?: string, signal?: AbortSignal, context?: Record<string, any> }} [options]
+   * @param {{
+   *   cursor?: string,
+   *   signal?: AbortSignal,
+   *   context?: Record<string, any>,
+   *   fetchClient?: ReturnType<typeof import('../../utils/fetchClient.js').makeFetchClient>
+   * }} [options]
    */
   async function importPlaylist(rawUrl, options = {}) {
     const url = typeof rawUrl === 'string' ? rawUrl.trim() : '';
-    const { cursor, signal, context } = options;
+    const { cursor, signal, context, fetchClient } = options;
+    const resolvedFetchClient =
+      fetchClient ?? (context && typeof context === 'object' ? context.fetchClient : undefined);
 
     if (!url) {
       throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, { reason: 'empty_url' });
@@ -128,6 +135,7 @@ export default function useImportPlaylist() {
       cursor: cursor ?? undefined,
       signal,
       context: context ?? {},
+      ...(resolvedFetchClient ? { fetchClient: resolvedFetchClient } : {}),
     };
 
     // If caller submits a new URL while a previous request is still in flight.
