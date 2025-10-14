@@ -2,7 +2,7 @@
 // Provides a single entry point for importing playlists from any provider.
 
 // @ts-check
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import detectProvider from './detectProvider.js';
 import * as spotifyAdapter from './adapters/spotifyAdapter.js';
 import * as youtubeAdapter from './adapters/youtubeAdapter.js';
@@ -19,11 +19,15 @@ const ADAPTER_REGISTRY = Object.freeze({
 
 const DEFAULT_ERROR_CODE = CODES.ERR_UNKNOWN;
 const MOCK_TITLE_PREFIX = 'MOCK DATA (fallback) - ';
+const EMPTY_PAGE_INFO = Object.freeze(/** @type {{ cursor: undefined, hasMore: boolean }} */ ({
+  cursor: undefined,
+  hasMore: false,
+}));
 
 /**
  * Resolve an import function from the adapter registry.
  * Supports both default function export and named { importPlaylist }.
- * @param {unknown} provider
+ * @param {import('./adapters/types.js').PlaylistProvider | null | undefined} provider
  * @returns {((options: any) => Promise<any>) | null}
  */
 function getImportFn(provider) {
@@ -42,6 +46,54 @@ function getImportFn(provider) {
 function getMock(provider) {
   // @ts-ignore
   return mockPlaylists?.[provider] || null;
+}
+
+/** @param {any} pageInfo @returns {{ cursor: string | undefined, hasMore: boolean }} */
+function normalizePageInfo(pageInfo) {
+  if (!pageInfo || typeof pageInfo !== 'object') {
+    return { ...EMPTY_PAGE_INFO };
+  }
+  const rawCursor = pageInfo.cursor;
+  const cursorString =
+    rawCursor == null ? undefined : (String(rawCursor).trim() || undefined);
+  const hasMore = Boolean(pageInfo.hasMore && cursorString);
+  return {
+    cursor: cursorString,
+    hasMore,
+  };
+}
+
+/**
+ * Merge a new page of tracks, skipping duplicate ids.
+ * @param {import('./adapters/types.js').NormalizedTrack[]} prev
+ * @param {import('./adapters/types.js').NormalizedTrack[]} next
+ * @param {string | null | undefined} provider
+ * @returns {import('./adapters/types.js').NormalizedTrack[]}
+ */
+function mergeUniqueTracks(prev, next, provider) {
+  if (!Array.isArray(next) || next.length === 0) return prev;
+
+  const seen = new Set(
+    prev.map(t => {
+      const id = String(t?.id ?? '');
+      const prov = String(t?.provider ?? '');
+      return `${prov}:${id}`;
+    })
+  );
+
+  /** @type {import('./adapters/types.js').NormalizedTrack[]} */
+  const additions = [];
+
+  next.forEach(t => {
+    const id = String(t?.id ?? '');
+    const prov = String(t?.provider ?? provider ?? '');
+    const key = `${prov}:${id}`;
+    if (!id || seen.has(key)) return;
+    seen.add(key);
+    additions.push(t);
+  });
+
+  return additions.length ? [...prev, ...additions] : prev;
 }
 
 /**
@@ -64,17 +116,7 @@ function coerceResult(provider, url, payload, meta = {}) {
   const title = payload?.title ? String(payload.title) : `${provider} playlist`;
   const playlistId = payload?.playlistId || payload?.id || `${provider}-playlist`;
 
-  // Ensure pageInfo is normalized and cursor is consistently a string when present
-  const pageInfo =
-    payload?.pageInfo && typeof payload.pageInfo === 'object'
-      ? {
-          cursor:
-            payload.pageInfo.cursor != null
-              ? String(payload.pageInfo.cursor)
-              : undefined,
-          hasMore: Boolean(payload.pageInfo.hasMore),
-        }
-      : undefined;
+  const pageInfo = normalizePageInfo(payload?.pageInfo);
 
   /** @type {any} */
   const result = {
@@ -109,18 +151,81 @@ function coerceResult(provider, url, payload, meta = {}) {
  *   importNext: (options?: any) => Promise<any>,
  *   reset: () => void,
  *   tracks: import('./adapters/types.js').NormalizedTrack[],
- *   pageInfo: import('./adapters/types.js').PageInfo | null,
+ *   pageInfo: { cursor: string | undefined, hasMore: boolean },
  *   loading: boolean,
  *   importBusyKind: string | null,
  *   errorCode: import('./adapters/types.js').AdapterErrorCode | null
  * }}
  */
 export default function useImportPlaylist() {
-  const [tracks, setTracks] = useState([]);
-  const [pageInfo, setPageInfo] = useState(null);
+  const [tracks, setTracks] = useState(
+    /** @type {import('./adapters/types.js').NormalizedTrack[]} */ ([])
+  );
+  const [pageInfo, setPageInfo] = useState(
+    /** @type {{ cursor: string | undefined, hasMore: boolean }} */ ({ ...EMPTY_PAGE_INFO })
+  );
   const [loading, setLoading] = useState(false);
-  const [importBusyKind, setImportBusyKind] = useState(null);
-  const [errorCode, setErrorCode] = useState(null);
+  const [importBusyKind, setImportBusyKind] = useState(
+    /** @type {string | null} */ (null)
+  );
+  const [errorCode, setErrorCode] = useState(
+    /** @type {import('./adapters/types.js').AdapterErrorCode | null} */ (null)
+  );
+  const controllerRef = useRef(
+    /** @type {AbortController | null} */ (null)
+  );
+  const requestIdRef = useRef(0);
+  const lastRequestRef = useRef(
+    /** @type {{
+      provider: import('./adapters/types.js').PlaylistProvider | null,
+      url: string | null,
+      cursor: string | undefined
+    }} */ ({
+      provider: null,
+      url: null,
+      cursor: undefined,
+    })
+  );
+
+  /**
+   * Abort any in-flight request and create a new controller.
+   * @returns {{ ctrl: AbortController, reqId: number }}
+   */
+  function beginRequest(kind = 'import') {
+    if (controllerRef.current) controllerRef.current.abort();
+    const ctrl = new AbortController();
+    controllerRef.current = ctrl;
+    const reqId = requestIdRef.current + 1;
+    requestIdRef.current = reqId;
+    setImportBusyKind(kind);
+    setLoading(true);
+    return { ctrl, reqId };
+  }
+
+  /** @param {AbortController} ctrl @param {AbortSignal | undefined} upstream @returns {AbortSignal} */
+  function linkAbortSignals(ctrl, upstream) {
+    if (!upstream) return ctrl.signal;
+    if (upstream.aborted) {
+      ctrl.abort();
+    } else {
+      const abort = () => ctrl.abort();
+      upstream.addEventListener('abort', abort, { once: true });
+    }
+    return ctrl.signal;
+  }
+
+  /** @param {AbortController} ctrl @param {number} reqId */
+  function isStale(ctrl, reqId) {
+    return ctrl.signal.aborted || reqId !== requestIdRef.current;
+  }
+
+  /** @param {AbortController} ctrl @param {number} reqId */
+  function finalizeRequest(ctrl, reqId) {
+    if (!isStale(ctrl, reqId)) {
+      setLoading(false);
+      setImportBusyKind(null);
+    }
+  }
 
   /**
    * Import a playlist by URL, optionally resuming via cursor.
@@ -137,31 +242,30 @@ export default function useImportPlaylist() {
    */
   async function importPlaylist(rawUrl, options = {}) {
     const url = typeof rawUrl === 'string' ? rawUrl.trim() : '';
-    const { cursor, signal, context, fetchClient } = options;
+    const { signal: upstreamSignal, cursor, context, fetchClient } = options;
     const resolvedFetchClient =
       fetchClient ?? (context && typeof context === 'object' ? context.fetchClient : undefined);
 
-    const busyKind = context?.importBusyKind ?? 'initial';
-    setImportBusyKind(busyKind);
-    setLoading(true);
+    const busyKind = context?.importBusyKind ?? 'import';
+    const { ctrl, reqId } = beginRequest(busyKind);
+    const signal = linkAbortSignals(ctrl, upstreamSignal);
     setErrorCode(null);
 
     try {
       if (!url) {
-        setErrorCode(CODES.ERR_UNSUPPORTED_URL);
+        if (!isStale(ctrl, reqId)) setErrorCode(CODES.ERR_UNSUPPORTED_URL);
         throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, { reason: 'empty_url' });
       }
 
       const provider = detectProvider(url);
       if (!provider) {
-        setErrorCode(CODES.ERR_UNSUPPORTED_URL);
+        if (!isStale(ctrl, reqId)) setErrorCode(CODES.ERR_UNSUPPORTED_URL);
         throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, {
           urlPreview: url.slice(0, 120),
         });
       }
 
       const importFn = getImportFn(provider);
-
       const invokeOptions = {
         url,
         cursor: cursor ?? undefined,
@@ -170,16 +274,10 @@ export default function useImportPlaylist() {
         ...(resolvedFetchClient ? { fetchClient: resolvedFetchClient } : {}),
       };
 
-      // If caller submits a new URL while a previous request is still in flight.
-      if (signal?.aborted) {
-        // Propagate a true cancel; caller can ignore gracefully.
-        throw new DOMException('Aborted', 'AbortError');
-      }
-
       if (!importFn) {
         const fallback = getMock(/** @type any */ (provider));
         if (!fallback) {
-          setErrorCode(DEFAULT_ERROR_CODE);
+          if (!isStale(ctrl, reqId)) setErrorCode(DEFAULT_ERROR_CODE);
           throw createAdapterError(DEFAULT_ERROR_CODE, {
             provider,
             reason: 'missing_adapter',
@@ -187,9 +285,17 @@ export default function useImportPlaylist() {
           });
         }
         const result = coerceResult(provider, url, fallback, { isFallback: true });
-        setTracks(result.tracks);
-        setPageInfo(result.pageInfo ?? null);
-        setErrorCode(DEFAULT_ERROR_CODE);
+        if (!isStale(ctrl, reqId)) {
+          setTracks(result.tracks);
+          const normalized = normalizePageInfo(result.pageInfo);
+          setPageInfo(normalized);
+          lastRequestRef.current = {
+            provider: result.provider ?? provider,
+            url,
+            cursor: normalized.cursor,
+          };
+          setErrorCode(DEFAULT_ERROR_CODE);
+        }
         return result;
       }
 
@@ -203,12 +309,20 @@ export default function useImportPlaylist() {
               isFallback: true,
               lastErrorCode: DEFAULT_ERROR_CODE,
             });
-            setTracks(result.tracks);
-            setPageInfo(result.pageInfo ?? null);
-            setErrorCode(DEFAULT_ERROR_CODE);
+            if (!isStale(ctrl, reqId)) {
+        setTracks(result.tracks);
+        const normalized = normalizePageInfo(result.pageInfo);
+        setPageInfo(normalized);
+              lastRequestRef.current = {
+                provider: result.provider ?? provider,
+                url,
+                cursor: normalized.cursor,
+              };
+              setErrorCode(DEFAULT_ERROR_CODE);
+            }
             return result;
           }
-          setErrorCode(DEFAULT_ERROR_CODE);
+          if (!isStale(ctrl, reqId)) setErrorCode(DEFAULT_ERROR_CODE);
           throw createAdapterError(DEFAULT_ERROR_CODE, {
             provider,
             reason: 'empty_payload',
@@ -217,14 +331,21 @@ export default function useImportPlaylist() {
         }
 
         const result = coerceResult(provider, url, payload);
-        setTracks(result.tracks);
-        setPageInfo(result.pageInfo ?? null);
-        setErrorCode(null);
+          if (!isStale(ctrl, reqId)) {
+            setTracks(result.tracks);
+            const normalized = normalizePageInfo(result.pageInfo);
+            setPageInfo(normalized);
+          lastRequestRef.current = {
+            provider: result.provider ?? provider,
+            url,
+            cursor: normalized.cursor,
+          };
+          setErrorCode(null);
+        }
         return result;
       } catch (err) {
         const anyErr = /** @type {any} */ (err);
 
-        // True cancel: do not map to a fallback or treat as error.
         if (anyErr?.name === 'AbortError') throw err;
 
         const code = extractErrorCode(anyErr);
@@ -236,28 +357,186 @@ export default function useImportPlaylist() {
             isFallback: true,
             lastErrorCode: code,
           });
-          setTracks(result.tracks);
-          setPageInfo(result.pageInfo ?? null);
-          setErrorCode(code);
+          if (!isStale(ctrl, reqId)) {
+            setTracks(result.tracks);
+            const normalized = normalizePageInfo(result.pageInfo);
+            setPageInfo(normalized);
+            lastRequestRef.current = {
+              provider: result.provider ?? provider,
+              url,
+              cursor: normalized.cursor,
+            };
+            setErrorCode(code);
+          }
           return result;
         }
 
-        setErrorCode(code);
+        if (!isStale(ctrl, reqId)) setErrorCode(code);
         throw createAdapterError(code, { provider, url, cursor }, /** @type {Error} */ (anyErr));
       }
     } finally {
-      setLoading(false);
-      setImportBusyKind(null);
+      finalizeRequest(ctrl, reqId);
     }
   }
 
-  async function importNext() {
-    throw createAdapterError(CODES.ERR_UNKNOWN, { reason: 'pagination_not_implemented' });
+  /**
+   * Fetch the next page using the supplied cursor/provider/url trio.
+   * @param {{
+   *   cursor?: string,
+   *   provider?: import('./adapters/types.js').PlaylistProvider,
+   *   url?: string,
+   *   signal?: AbortSignal,
+   *   context?: Record<string, any>,
+   *   fetchClient?: ReturnType<typeof import('../../utils/fetchClient.js').makeFetchClient>
+   * }} [options]
+   */
+  async function importNext(options = {}) {
+    const provider =
+      options.provider ?? lastRequestRef.current.provider ?? null;
+    const url = options.url ?? lastRequestRef.current.url ?? null;
+    const effectiveCursor =
+      options.cursor ??
+      pageInfo.cursor ??
+      lastRequestRef.current.cursor ??
+      null;
+
+    if (!provider || !url || !effectiveCursor) return null;
+    if (loading || !pageInfo.hasMore) return null;
+
+    const resolvedFetchClient =
+      options.fetchClient ??
+      (options.context && typeof options.context === 'object'
+        ? options.context.fetchClient
+        : undefined);
+
+    const busyKind = options.context?.importBusyKind ?? 'load-more';
+    const { ctrl, reqId } = beginRequest(busyKind);
+    const signal = linkAbortSignals(ctrl, options.signal);
+    setErrorCode(null);
+
+    try {
+      const importFn = getImportFn(provider);
+
+      if (!importFn) {
+        const fallback = getMock(provider);
+        if (!fallback) {
+          if (!isStale(ctrl, reqId)) setErrorCode(DEFAULT_ERROR_CODE);
+          throw createAdapterError(DEFAULT_ERROR_CODE, {
+            provider,
+            reason: 'missing_adapter',
+            urlPreview: url.slice(0, 120),
+          });
+        }
+        const result = coerceResult(provider, url, fallback, {
+          isFallback: true,
+          lastErrorCode: DEFAULT_ERROR_CODE,
+        });
+        if (!isStale(ctrl, reqId)) {
+          setTracks(prev => mergeUniqueTracks(prev, result.tracks, provider));
+          const normalized = normalizePageInfo(result.pageInfo);
+          setPageInfo(normalized);
+          lastRequestRef.current = {
+            provider: result.provider ?? provider,
+            url,
+            cursor: normalized.cursor,
+          };
+          setErrorCode(DEFAULT_ERROR_CODE);
+        }
+        return result;
+      }
+
+      const invokeOptions = {
+        url,
+        cursor: effectiveCursor,
+        signal,
+        context: options.context ?? {},
+        ...(resolvedFetchClient ? { fetchClient: resolvedFetchClient } : {}),
+      };
+
+      const payload = await importFn(invokeOptions);
+
+      if (!payload) {
+        const fallback = getMock(provider);
+        if (fallback) {
+          const result = coerceResult(provider, url, fallback, {
+            isFallback: true,
+            lastErrorCode: DEFAULT_ERROR_CODE,
+          });
+          if (!isStale(ctrl, reqId)) {
+            setTracks(prev => mergeUniqueTracks(prev, result.tracks, provider));
+            const normalized = normalizePageInfo(result.pageInfo);
+            setPageInfo(normalized);
+            lastRequestRef.current = {
+              provider: result.provider ?? provider,
+              url,
+              cursor: normalized.cursor,
+            };
+            setErrorCode(DEFAULT_ERROR_CODE);
+          }
+          return result;
+        }
+        if (!isStale(ctrl, reqId)) setErrorCode(DEFAULT_ERROR_CODE);
+        throw createAdapterError(DEFAULT_ERROR_CODE, {
+          provider,
+          reason: 'empty_payload',
+          urlPreview: url.slice(0, 120),
+        });
+      }
+
+      const result = coerceResult(provider, url, payload);
+      if (!isStale(ctrl, reqId)) {
+        setTracks(prev => mergeUniqueTracks(prev, result.tracks, provider));
+        const normalized = normalizePageInfo(result.pageInfo);
+        setPageInfo(normalized);
+        lastRequestRef.current = {
+          provider: result.provider ?? provider,
+          url,
+          cursor: normalized.cursor,
+        };
+        setErrorCode(null);
+      }
+      return result;
+    } catch (err) {
+      const anyErr = /** @type {any} */ (err);
+      if (anyErr?.name === 'AbortError') throw err;
+
+      const code = extractErrorCode(anyErr);
+      const fallback = getMock(provider);
+
+      if (fallback) {
+        console.warn('[import fallback]', { provider, code, err: anyErr });
+        const result = coerceResult(provider, url, fallback, {
+          isFallback: true,
+          lastErrorCode: code,
+        });
+        if (!isStale(ctrl, reqId)) {
+          setTracks(prev => mergeUniqueTracks(prev, result.tracks, provider));
+          const normalized = normalizePageInfo(result.pageInfo);
+          setPageInfo(normalized);
+          lastRequestRef.current = {
+            provider: result.provider ?? provider,
+            url,
+            cursor: normalized.cursor,
+          };
+          setErrorCode(code);
+        }
+        return result;
+      }
+
+      if (!isStale(ctrl, reqId)) setErrorCode(code);
+      throw createAdapterError(code, { provider, url, cursor: effectiveCursor }, /** @type {Error} */ (anyErr));
+    } finally {
+      finalizeRequest(ctrl, reqId);
+    }
   }
 
   function reset() {
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    requestIdRef.current += 1;
+    lastRequestRef.current = { provider: null, url: null, cursor: undefined };
     setTracks([]);
-    setPageInfo(null);
+    setPageInfo({ ...EMPTY_PAGE_INFO });
     setLoading(false);
     setImportBusyKind(null);
     setErrorCode(null);

@@ -118,6 +118,7 @@ export default function App() {
 
   // REIMPORT focus pattern
   const reimportBtnRef = useRef(null)
+  const loadMoreBtnRef = useRef(null)
 
   // -- PERSISTENCE: save whenever core state changes (v3 structured shape)
   useEffect(() => {
@@ -229,7 +230,7 @@ export default function App() {
 
     try {
       announce('Import started.')
-      const res = await runImport(trimmedUrl)
+      const res = await runImport(trimmedUrl, { context: { importBusyKind: 'initial' } })
 
       const mapped = res.tracks.map((t, idx) => ({
         id: t.id || [(res.provider ?? providerChip), idx + 1].filter(Boolean).join('-'),
@@ -245,7 +246,7 @@ export default function App() {
         playlistId: res.playlistId ?? null,
         snapshotId: res.snapshotId ?? null,
         cursor: res.pageInfo?.cursor ?? null,
-        hasMore: Boolean(res.pageInfo?.hasMore && res.pageInfo?.cursor),
+        hasMore: Boolean(res.pageInfo?.hasMore),
         sourceUrl: res.sourceUrl ?? trimmedUrl,
         debug: res.debug ?? null,
       })
@@ -284,7 +285,7 @@ export default function App() {
     setImportBusyKind('reimport')
     try {
       announce('Re-importing playlist.')
-      const res = await runImport(lastImportUrl)
+      const res = await runImport(lastImportUrl, { context: { importBusyKind: 'reimport' } })
 
       const mapped = res.tracks.map((t, idx) => ({
         id: t.id || [(res.provider ?? importMeta.provider), idx + 1].filter(Boolean).join('-'),
@@ -300,7 +301,7 @@ export default function App() {
         playlistId: res.playlistId ?? importMeta.playlistId ?? null,
         snapshotId: res.snapshotId ?? importMeta.snapshotId ?? null,
         cursor: res.pageInfo?.cursor ?? null,
-        hasMore: Boolean(res.pageInfo?.hasMore && res.pageInfo?.cursor),
+        hasMore: Boolean(res.pageInfo?.hasMore),
         sourceUrl: res.sourceUrl ?? lastImportUrl,
         debug: res.debug ?? null,
       })
@@ -335,11 +336,7 @@ export default function App() {
 
     try {
       announce('Loading more tracks.')
-      const res = await importNext({
-        cursor: importMeta.cursor,
-        provider: importMeta.provider,
-        url: importMeta.sourceUrl || lastImportUrl,
-      })
+      const res = await importNext({ context: { importBusyKind: 'load-more' } })
 
       if (!res) {
         setImportMeta(prev => ({ ...prev, cursor: null, hasMore: false }))
@@ -361,7 +358,7 @@ export default function App() {
         setImportMeta(prev => ({
           ...prev,
           cursor: res.pageInfo?.cursor ?? null,
-          hasMore: Boolean(res.pageInfo?.hasMore && res.pageInfo?.cursor),
+          hasMore: Boolean(res.pageInfo?.hasMore),
           sourceUrl: res.sourceUrl ?? prev.sourceUrl ?? lastImportUrl,
           debug: res.debug ?? prev.debug,
         }))
@@ -375,12 +372,19 @@ export default function App() {
         playlistId: res.playlistId ?? prev.playlistId ?? null,
         snapshotId: res.snapshotId ?? prev.snapshotId ?? null,
         cursor: res.pageInfo?.cursor ?? null,
-        hasMore: Boolean(res.pageInfo?.hasMore && res.pageInfo?.cursor),
+        hasMore: Boolean(res.pageInfo?.hasMore),
         sourceUrl: res.sourceUrl ?? prev.sourceUrl ?? lastImportUrl,
         debug: res.debug ?? prev.debug,
       }))
       setImportedAt(new Date().toISOString())
-      requestAnimationFrame(() => focusById('add-note-btn-' + unique[0].id))
+      const firstNewId = unique[0]?.id
+      if (firstNewId) {
+        focusById(`track-${firstNewId}`)
+      } else {
+        requestAnimationFrame(() => {
+          loadMoreBtnRef.current?.focus()
+        })
+      }
       announce(unique.length + ' more tracks loaded.')
     } catch (err) {
       if (err?.name !== 'AbortError') {
@@ -727,8 +731,10 @@ export default function App() {
                 const isEditing = editingId === t.id
 
                 return (
-                  <li
-                    key={t.id}
+                      <li
+                        key={t.id}
+                        id={`track-${t.id}`}
+                        tabIndex={-1}
                     style={{
                       border: '1px solid var(--border)',
                       background: 'var(--card)',
@@ -826,6 +832,7 @@ export default function App() {
               <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
                 <button
                   type="button"
+                  ref={loadMoreBtnRef}
                   className="btn"
                   onClick={handleLoadMore}
                   disabled={isAnyImportBusy}
