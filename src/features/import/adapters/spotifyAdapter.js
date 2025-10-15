@@ -6,6 +6,7 @@
 import { normalizeTrack } from '../normalizeTrack.js';
 import { createAdapterError, CODES } from './types.js';
 import { defaultFetchClient } from '../../../utils/fetchClient.js';
+import { isDev } from '../../../utils/isDev.js';
 
 const PROVIDER = 'spotify';
 const TOKEN_ENDPOINT = '/api/spotify/token';
@@ -42,12 +43,8 @@ function sanitizePlaylistId(maybeId) {
 }
 
 function debugLog(label, payload) {
-  try {
-    if (typeof import.meta !== 'undefined' && import.meta?.env?.DEV) {
-      console.debug(`[spotify] ${label}`, payload);
-    }
-  } catch {
-    // ignore logging issues in non-browser environments
+  if (isDev()) {
+    console.debug(`[spotify] ${label}`, payload);
   }
 }
 
@@ -449,7 +446,9 @@ export async function importPlaylist(options = {}) {
       : () => Date.now();
 
   const runWithToken = async (forceRefresh = false) => {
+    const tokenStart = Date.now();
     const token = await fetchAccessToken(fetchClient, { signal, forceRefresh });
+    const tokenMs = Date.now() - tokenStart;
 
     let metaMs = null;
     let tracksMs = null;
@@ -470,8 +469,15 @@ export async function importPlaylist(options = {}) {
     });
 
     const [meta, tracksPayload] = await Promise.all([metaPromise, tracksPromise]);
-    debugLog('parallel:fetch', { metaMs, tracksMs });
-    return { meta, tracksPayload, timings: { metaMs, tracksMs } };
+    debugLog('parallel:fetch', {
+      metaMs,
+      tracksMs,
+      tokenMs,
+      next: Boolean(tracksPayload?.next),
+      total: typeof tracksPayload?.total === 'number' ? tracksPayload.total : null,
+      items: Array.isArray(tracksPayload?.items) ? tracksPayload.items.length : 0,
+    });
+    return { meta, tracksPayload, timings: { metaMs, tracksMs, tokenMs } };
   };
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -508,6 +514,7 @@ export async function importPlaylist(options = {}) {
           tokenRefreshed,
           metaMs: timings.metaMs,
           tracksMs: timings.tracksMs,
+          tokenMs: timings.tokenMs,
           inputUrl: playlistUrl || null,
         },
       };
@@ -515,7 +522,7 @@ export async function importPlaylist(options = {}) {
       lastError = err;
       const status = extractHttpStatus(err);
       if (status === 401 && attempt === 0) {
-        debugLog('token:retry', { reason: 'unauthorized' });
+        debugLog('token:retry', { reason: 'unauthorized', playlist: playlistId.slice(0, 8) });
         invalidateTokenMemo();
         tokenRefreshed = true;
         continue;

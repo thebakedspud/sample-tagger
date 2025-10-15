@@ -18,6 +18,7 @@ const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const EXPIRY_SKEW_SECONDS = 60;
 const MIN_EXPIRES_SECONDS = 5;
 const RETRY_AFTER_MAX_MS = 5000;
+const isDevRuntime = process.env.NODE_ENV !== 'production';
 
 /** @type {{ access_token: string, token_type: string, expires_at: number, fetched_at: number } | null} */
 let cachedToken = null;
@@ -203,6 +204,13 @@ export default async function handler(req, res) {
     const token = cachedToken;
     if (!token) {
       throw new Error('token_unavailable');
+    }
+
+    if (isDevRuntime) {
+      console.debug('[spotify][token]', {
+        cacheHit: isTokenValid(cachedToken),
+        expiresAt: cachedToken?.expires_at ?? null,
+      });
     }
 
     const expiresIn = Math.max(

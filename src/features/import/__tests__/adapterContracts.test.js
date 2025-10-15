@@ -45,6 +45,7 @@ describe('adapter contracts', () => {
           },
         ],
         next: null,
+        total: 1,
       };
 
       const fetchClient = {
@@ -97,7 +98,10 @@ describe('adapter contracts', () => {
       expect(result.pageInfo).toEqual({ hasMore: false, cursor: null });
       expect(result.debug?.source).toBe('spotify:web');
       expect(result.debug?.tokenRefreshed).toBe(false);
-      expect(result.total).toBeUndefined();
+      expect(typeof result.debug?.tokenMs).toBe('number');
+      expect(typeof result.debug?.metaMs).toBe('number');
+      expect(typeof result.debug?.tracksMs).toBe('number');
+      expect(result.total).toBe(1);
     });
 
     it('maps HTTP_429 responses from the tracks endpoint to ERR_RATE_LIMITED', async () => {

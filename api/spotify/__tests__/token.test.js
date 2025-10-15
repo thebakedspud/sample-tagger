@@ -40,6 +40,7 @@ beforeEach(() => {
   vi.resetModules();
   process.env.SPOTIFY_CLIENT_ID = 'id';
   process.env.SPOTIFY_CLIENT_SECRET = 'secret';
+  vi.spyOn(console, 'debug').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -85,6 +86,43 @@ describe('api/spotify/token', () => {
     const body2 = res2.json();
     expect(body2.access_token).toBe('token-A');
     expect(body2.expires_in).toBeGreaterThan(0);
+
+    __resetTokenCacheForTests();
+  });
+
+  it('emits cache headers and expires_at when issuing a token', async () => {
+    const payload = {
+      access_token: 'token-header',
+      token_type: 'Bearer',
+      expires_in: 3600,
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        createResponse(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+    global.fetch = fetchMock;
+
+    const { default: handler, __resetTokenCacheForTests } = await loadHandler();
+
+    const res = createRes();
+    await handler({ method: 'GET' }, res);
+
+    const cacheHeader = res.getHeader('cache-control');
+    expect(cacheHeader).toMatch(/no-store/i);
+
+    const body = res.json();
+    expect(body).toMatchObject({
+      access_token: 'token-header',
+      token_type: 'Bearer',
+    });
+    expect(typeof body.expires_at).toBe('number');
+    expect(body.expires_at).toBeGreaterThan(Date.now());
 
     __resetTokenCacheForTests();
   });

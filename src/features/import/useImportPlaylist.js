@@ -10,6 +10,7 @@ import * as soundcloudAdapter from './adapters/soundcloudAdapter.js';
 import { normalizeTrack } from './normalizeTrack.js';
 import { CODES, createAdapterError, extractErrorCode } from './adapters/types.js';
 import { mockPlaylists } from '../../data/mockPlaylists.js';
+import { isDev } from '../../utils/isDev.js';
 
 const ADAPTER_REGISTRY = Object.freeze({
   spotify: spotifyAdapter,
@@ -129,6 +130,7 @@ function coerceResult(provider, url, payload, meta = {}) {
     title: meta.isFallback ? `${MOCK_TITLE_PREFIX}${title}` : title,
     snapshotId: payload?.snapshotId || undefined,
     sourceUrl: payload?.sourceUrl || url,
+    total: typeof payload?.total === 'number' ? payload.total : undefined,
     tracks,
     pageInfo,
   };
@@ -141,6 +143,14 @@ function coerceResult(provider, url, payload, meta = {}) {
   }
 
   return result;
+}
+
+/** @param {import('./adapters/types.js').NormalizedTrack[]} list @param {number | null} total */
+function computeProgress(list, total) {
+  if (typeof total === 'number' && total > 0) {
+    return { imported: list.length, total };
+  }
+  return null;
 }
 
 /**
@@ -158,7 +168,9 @@ function coerceResult(provider, url, payload, meta = {}) {
  *   pageInfo: { cursor: string | null, hasMore: boolean },
  *   loading: boolean,
  *   importBusyKind: string | null,
- *   errorCode: import('./adapters/types.js').AdapterErrorCode | null
+ *   errorCode: import('./adapters/types.js').AdapterErrorCode | null,
+ *   total: number | null,
+ *   progress: { imported: number, total: number } | null
  * }}
  */
 export default function useImportPlaylist() {
@@ -167,6 +179,9 @@ export default function useImportPlaylist() {
   );
   const [pageInfo, setPageInfo] = useState(
     /** @type {{ cursor: string | null, hasMore: boolean }} */ ({ ...EMPTY_PAGE_INFO })
+  );
+  const [total, setTotal] = useState(
+    /** @type {number | null} */ (null)
   );
   const [loading, setLoading] = useState(false);
   const [importBusyKind, setImportBusyKind] = useState(
@@ -232,6 +247,52 @@ export default function useImportPlaylist() {
   }
 
   /**
+   * Apply an adapter result to local state with dev-friendly telemetry.
+   * @param {'spotify'|'youtube'|'soundcloud'} provider
+   * @param {string} url
+   * @param {any} result
+   */
+  function commitResult(provider, url, result) {
+    let nextTracksSnapshot = Array.isArray(result?.tracks) ? result.tracks : [];
+
+    setTracks(prev => {
+      const next = mergeUniqueTracks(prev, result?.tracks ?? [], provider);
+      nextTracksSnapshot = next;
+      return next;
+    });
+
+    const normalized = normalizePageInfo(result?.pageInfo);
+    setPageInfo(normalized);
+
+    lastRequestRef.current = {
+      provider: result?.provider ?? provider,
+      url,
+      cursor: normalized.cursor,
+    };
+
+    setTotal(prev => {
+      const nextTotalValue =
+        typeof result?.total === 'number' && Number.isFinite(result.total)
+          ? result.total
+          : prev;
+      const resolvedTotal = typeof nextTotalValue === 'number' ? nextTotalValue : null;
+
+      if (isDev()) {
+        const progress = computeProgress(nextTracksSnapshot, resolvedTotal);
+        console.debug('[import]', {
+          provider: result?.provider ?? provider,
+          imported: nextTracksSnapshot.length,
+          total: progress?.total ?? null,
+          hasMore: normalized.hasMore,
+          cursor: normalized.cursor,
+        });
+      }
+
+      return resolvedTotal;
+    });
+  }
+
+  /**
    * Import a playlist by URL, optionally resuming via cursor.
    * Adapters are async and abort-aware; this function may throw:
    *  - DOMException('AbortError') if cancelled
@@ -290,14 +351,7 @@ export default function useImportPlaylist() {
         }
         const result = coerceResult(provider, url, fallback, { isFallback: true });
         if (!isStale(ctrl, reqId)) {
-          setTracks(result.tracks);
-          const normalized = normalizePageInfo(result.pageInfo);
-          setPageInfo(normalized);
-          lastRequestRef.current = {
-            provider: result.provider ?? provider,
-            url,
-            cursor: normalized.cursor,
-          };
+          commitResult(provider, url, result);
           setErrorCode(DEFAULT_ERROR_CODE);
         }
         return result;
@@ -314,14 +368,7 @@ export default function useImportPlaylist() {
               lastErrorCode: DEFAULT_ERROR_CODE,
             });
             if (!isStale(ctrl, reqId)) {
-        setTracks(result.tracks);
-        const normalized = normalizePageInfo(result.pageInfo);
-        setPageInfo(normalized);
-              lastRequestRef.current = {
-                provider: result.provider ?? provider,
-                url,
-                cursor: normalized.cursor,
-              };
+              commitResult(provider, url, result);
               setErrorCode(DEFAULT_ERROR_CODE);
             }
             return result;
@@ -335,15 +382,8 @@ export default function useImportPlaylist() {
         }
 
         const result = coerceResult(provider, url, payload);
-          if (!isStale(ctrl, reqId)) {
-            setTracks(result.tracks);
-            const normalized = normalizePageInfo(result.pageInfo);
-            setPageInfo(normalized);
-          lastRequestRef.current = {
-            provider: result.provider ?? provider,
-            url,
-            cursor: normalized.cursor,
-          };
+        if (!isStale(ctrl, reqId)) {
+          commitResult(provider, url, result);
           setErrorCode(null);
         }
         return result;
@@ -362,14 +402,7 @@ export default function useImportPlaylist() {
             lastErrorCode: code,
           });
           if (!isStale(ctrl, reqId)) {
-            setTracks(result.tracks);
-            const normalized = normalizePageInfo(result.pageInfo);
-            setPageInfo(normalized);
-            lastRequestRef.current = {
-              provider: result.provider ?? provider,
-              url,
-              cursor: normalized.cursor,
-            };
+            commitResult(provider, url, result);
             setErrorCode(code);
           }
           return result;
@@ -449,14 +482,7 @@ export default function useImportPlaylist() {
           lastErrorCode: DEFAULT_ERROR_CODE,
         });
         if (!isStale(ctrl, reqId)) {
-          setTracks(prev => mergeUniqueTracks(prev, result.tracks, provider));
-          const normalized = normalizePageInfo(result.pageInfo);
-          setPageInfo(normalized);
-          lastRequestRef.current = {
-            provider: result.provider ?? provider,
-            url,
-            cursor: normalized.cursor,
-          };
+          commitResult(provider, url, result);
           setErrorCode(DEFAULT_ERROR_CODE);
         }
         return result;
@@ -480,14 +506,7 @@ export default function useImportPlaylist() {
             lastErrorCode: DEFAULT_ERROR_CODE,
           });
           if (!isStale(ctrl, reqId)) {
-            setTracks(prev => mergeUniqueTracks(prev, result.tracks, provider));
-            const normalized = normalizePageInfo(result.pageInfo);
-            setPageInfo(normalized);
-            lastRequestRef.current = {
-              provider: result.provider ?? provider,
-              url,
-              cursor: normalized.cursor,
-            };
+            commitResult(provider, url, result);
             setErrorCode(DEFAULT_ERROR_CODE);
           }
           return result;
@@ -502,14 +521,7 @@ export default function useImportPlaylist() {
 
       const result = coerceResult(provider, url, payload);
       if (!isStale(ctrl, reqId)) {
-        setTracks(prev => mergeUniqueTracks(prev, result.tracks, provider));
-        const normalized = normalizePageInfo(result.pageInfo);
-        setPageInfo(normalized);
-        lastRequestRef.current = {
-          provider: result.provider ?? provider,
-          url,
-          cursor: normalized.cursor,
-        };
+        commitResult(provider, url, result);
         setErrorCode(null);
       }
       return result;
@@ -527,14 +539,7 @@ export default function useImportPlaylist() {
           lastErrorCode: code,
         });
         if (!isStale(ctrl, reqId)) {
-          setTracks(prev => mergeUniqueTracks(prev, result.tracks, provider));
-          const normalized = normalizePageInfo(result.pageInfo);
-          setPageInfo(normalized);
-          lastRequestRef.current = {
-            provider: result.provider ?? provider,
-            url,
-            cursor: normalized.cursor,
-          };
+          commitResult(provider, url, result);
           setErrorCode(code);
         }
         return result;
@@ -557,6 +562,7 @@ export default function useImportPlaylist() {
     setLoading(false);
     setImportBusyKind(null);
     setErrorCode(null);
+    setTotal(null);
   }
 
   return {
@@ -568,5 +574,7 @@ export default function useImportPlaylist() {
     loading,
     importBusyKind,
     errorCode,
+    total,
+    progress: computeProgress(tracks, total),
   };
 }

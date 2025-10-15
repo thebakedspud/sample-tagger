@@ -108,6 +108,7 @@ export function createPagedMockAdapter({ provider, title, tracks, total = TOTAL_
         cursor: nextCursor,
         hasMore,
       },
+      total: dataset.length,
       totalTracks: dataset.length,
     };
   }
