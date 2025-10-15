@@ -15,20 +15,80 @@ const TRACK_FIELDS =
   'items(track(id,uri,name,duration_ms,external_urls,album(images),artists(name),is_local,type)),next';
 const PAGE_SIZE = 100;
 
+const SPOTIFY_HOSTS = new Set(['open.spotify.com', 'play.spotify.com']);
+const PLAYLIST_ID_LENGTH = 22;
+const PLAYLIST_ID_PATTERN = /^[0-9a-zA-Z]+$/;
+
 /**
- * Extract a playlist ID from an open.spotify.com URL.
+ * @param {string | undefined} maybeId
+ * @returns {string | null}
+ */
+function sanitizePlaylistId(maybeId) {
+  if (!maybeId) return null;
+  const trimmed = maybeId.trim();
+  if (trimmed.length !== PLAYLIST_ID_LENGTH) return null;
+  return PLAYLIST_ID_PATTERN.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Extract a playlist ID from supported Spotify playlist formats.
+ * Supports canonical, legacy user, embed, and URI share links.
  * @param {string} raw
  * @returns {string | null}
  */
-function extractPlaylistId(raw) {
-  const url = typeof raw === 'string' ? raw.trim() : '';
-  if (!url) return null;
+export function extractPlaylistId(raw) {
+  if (typeof raw !== 'string') return null;
+
+  const input = raw.trim();
+  if (!input) return null;
+
+  const lowerInput = input.toLowerCase();
+
+  if (lowerInput.startsWith('spotify://')) {
+    const translated = `https://open.spotify.com/${input.slice('spotify://'.length).replace(/^\/+/, '')}`;
+    return extractPlaylistId(translated);
+  }
+
+  if (lowerInput.startsWith('spotify:')) {
+    const parts = input.split(':').filter(Boolean);
+    if (parts.length >= 3 && parts[parts.length - 2]?.toLowerCase() === 'playlist') {
+      return sanitizePlaylistId(parts[parts.length - 1]);
+    }
+    return null;
+  }
+
+  const candidateUrl = /^https?:\/\//i.test(input) ? input : `https://${input}`;
+
   try {
-    const parsed = new URL(url);
-    if (parsed.hostname !== 'open.spotify.com') return null;
-    const parts = parsed.pathname.split('/').filter(Boolean);
-    if (parts[0] !== 'playlist' || !parts[1]) return null;
-    return parts[1];
+    const parsed = new URL(candidateUrl);
+    const host = parsed.hostname.toLowerCase();
+    if (!SPOTIFY_HOSTS.has(host)) return null;
+
+    const rawSegments = parsed.pathname.split('/').filter(Boolean);
+    if (!rawSegments.length) return null;
+    const segments = rawSegments.map((seg) => seg.toLowerCase());
+
+    // Canonical: /playlist/{id}
+    if (segments[0] === 'playlist') {
+      return sanitizePlaylistId(rawSegments[1]);
+    }
+
+    // Localized: /intl-xx/playlist/{id}
+    if (segments[0]?.startsWith('intl-') && segments[1] === 'playlist') {
+      return sanitizePlaylistId(rawSegments[2]);
+    }
+
+    // Legacy: /user/{userId}/playlist/{id}
+    if (segments[0] === 'user' && segments[2] === 'playlist') {
+      return sanitizePlaylistId(rawSegments[3]);
+    }
+
+    // Embed: /embed/playlist/{id}
+    if (segments[0] === 'embed' && segments[1] === 'playlist') {
+      return sanitizePlaylistId(rawSegments[2]);
+    }
+
+    return null;
   } catch {
     return null;
   }
