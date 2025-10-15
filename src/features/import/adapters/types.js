@@ -48,6 +48,7 @@
  * @property {string} title
  * @property {string} [snapshotId]
  * @property {string} sourceUrl
+ * @property {number} [total]
  * @property {NormalizedTrack[]} tracks
  * @property {PageInfo} [pageInfo]
  */

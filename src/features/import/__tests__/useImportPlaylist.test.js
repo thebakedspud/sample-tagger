@@ -73,13 +73,18 @@ describe('useImportPlaylist', () => {
     rateErr.details = { status: 429 };
 
     const fetchClient = {
-      getJson: vi
-        .fn()
-        .mockResolvedValueOnce({ access_token: 'token-abc', expires_in: 3600 })
-        .mockResolvedValueOnce({ name: 'Synthwave Decade' })
-        .mockImplementationOnce(async () => {
+      getJson: vi.fn(async (url) => {
+        if (url === '/api/spotify/token') {
+          return { access_token: 'token-abc', expires_in: 3600 };
+        }
+        if (url.includes('/tracks')) {
           throw rateErr;
-        }),
+        }
+        if (url.includes('/playlists/')) {
+          return { name: 'Synthwave Decade' };
+        }
+        return {};
+      }),
     };
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

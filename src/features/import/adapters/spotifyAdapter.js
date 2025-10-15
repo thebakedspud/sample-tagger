@@ -12,8 +12,19 @@ const TOKEN_ENDPOINT = '/api/spotify/token';
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 const PLAYLIST_FIELDS = 'name,external_urls,images,owner(display_name),snapshot_id';
 const TRACK_FIELDS =
-  'items(track(id,uri,name,duration_ms,external_urls,album(images),artists(name),is_local,type)),next';
+  'items(track(id,uri,name,duration_ms,external_urls,album(images),artists(name),is_local,type)),next,total';
 const PAGE_SIZE = 100;
+const TOKEN_REFRESH_BUFFER_MS = 30_000;
+const CANONICAL_BASE_URL = 'https://open.spotify.com/playlist/';
+
+/**
+ * @typedef {{ value: string, tokenType: string, expiresAt: number }} TokenMemo
+ */
+
+/** @type {TokenMemo | null} */
+let tokenMemo = null;
+/** @type {Promise<TokenMemo> | null} */
+let tokenPromise = null;
 
 const SPOTIFY_HOSTS = new Set(['open.spotify.com', 'play.spotify.com']);
 const PLAYLIST_ID_LENGTH = 22;
@@ -28,6 +39,16 @@ function sanitizePlaylistId(maybeId) {
   const trimmed = maybeId.trim();
   if (trimmed.length !== PLAYLIST_ID_LENGTH) return null;
   return PLAYLIST_ID_PATTERN.test(trimmed) ? trimmed : null;
+}
+
+function debugLog(label, payload) {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta?.env?.DEV) {
+      console.debug(`[spotify] ${label}`, payload);
+    }
+  } catch {
+    // ignore logging issues in non-browser environments
+  }
 }
 
 /**
@@ -162,26 +183,101 @@ function invalidResponse(stage, details = {}) {
 }
 
 /**
- * @param {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} fetchClient
- * @param {{ signal?: AbortSignal }} options
+ * @param {TokenMemo | null} memo
  */
-async function fetchAccessToken(fetchClient, { signal }) {
-  try {
-    const tokenPayload = await fetchClient.getJson(TOKEN_ENDPOINT, {
-      method: 'GET',
-      signal,
-      headers: {
-        'Cache-Control': 'no-store',
-      },
-    });
+function isTokenFresh(memo) {
+  if (!memo) return false;
+  return Date.now() + TOKEN_REFRESH_BUFFER_MS < memo.expiresAt;
+}
 
-    const accessToken = /** @type {any} */ (tokenPayload)?.access_token;
-    if (typeof accessToken !== 'string' || !accessToken) {
-      invalidResponse('token', { received: tokenPayload });
+function invalidateTokenMemo() {
+  tokenMemo = null;
+}
+
+/**
+ * @param {any} payload
+ * @returns {TokenMemo}
+ */
+function toTokenMemo(payload) {
+  const accessToken = /** @type {any} */ (payload)?.access_token;
+  if (typeof accessToken !== 'string' || !accessToken) {
+    invalidResponse('token', { reason: 'missing_token', received: payload });
+  }
+
+  const tokenType =
+    typeof payload?.token_type === 'string' && payload.token_type.trim()
+      ? payload.token_type
+      : 'Bearer';
+
+  const now = Date.now();
+  const rawExpiresAt = Number(/** @type {any} */ (payload)?.expires_at);
+  if (Number.isFinite(rawExpiresAt) && rawExpiresAt > now) {
+    return {
+      value: accessToken,
+      tokenType,
+      expiresAt: rawExpiresAt,
+    };
+  }
+
+  const rawExpiresIn = Number(/** @type {any} */ (payload)?.expires_in);
+  const safeExpiresInSeconds = Number.isFinite(rawExpiresIn)
+    ? Math.max(5, rawExpiresIn - 5)
+    : 55;
+
+  return {
+    value: accessToken,
+    tokenType,
+    expiresAt: now + safeExpiresInSeconds * 1000,
+  };
+}
+
+/**
+ * @param {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} fetchClient
+ * @param {{ signal?: AbortSignal, forceRefresh?: boolean }} [options]
+ * @returns {Promise<TokenMemo>}
+ */
+async function fetchAccessToken(fetchClient, { signal, forceRefresh = false } = {}) {
+  if (forceRefresh) {
+    invalidateTokenMemo();
+  }
+
+  if (!forceRefresh && isTokenFresh(tokenMemo)) {
+    debugLog('token:hit', { expiresInMs: tokenMemo.expiresAt - Date.now() });
+    return /** @type {TokenMemo} */ (tokenMemo);
+  }
+
+  if (!forceRefresh && tokenPromise) {
+    return tokenPromise;
+  }
+
+  debugLog('token:fetch', { forceRefresh });
+
+  const request = (async () => {
+    try {
+      const tokenPayload = await fetchClient.getJson(TOKEN_ENDPOINT, {
+        method: 'GET',
+        signal,
+        headers: {
+          'Cache-Control': 'no-store',
+        },
+      });
+      const memo = toTokenMemo(tokenPayload);
+      tokenMemo = memo;
+      debugLog('token:stored', { expiresAt: memo.expiresAt });
+      return memo;
+    } catch (err) {
+      invalidateTokenMemo();
+      mapSpotifyError('token', err);
     }
-    return accessToken;
-  } catch (err) {
-    mapSpotifyError('token', err);
+  })();
+
+  tokenPromise = request;
+  try {
+    return await request;
+  } finally {
+    if (tokenPromise === request) {
+      tokenPromise = null;
+    }
   }
 }
 
@@ -207,6 +303,13 @@ function buildPlaylistTracksUrl(playlistId) {
 }
 
 /**
+ * @param {string} playlistId
+ */
+function buildCanonicalPlaylistUrl(playlistId) {
+  return `${CANONICAL_BASE_URL}${playlistId}`;
+}
+
+/**
  * Only allow cursor URLs that target the Spotify Web API.
  * @param {string} raw
  * @returns {string | null}
@@ -225,7 +328,7 @@ function sanitizeCursor(raw) {
 /**
  * @param {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} fetchClient
  * @param {string} playlistId
- * @param {string} token
+ * @param {TokenMemo} token
  * @param {{ signal?: AbortSignal }} options
  */
 async function fetchPlaylistMeta(fetchClient, playlistId, token, { signal }) {
@@ -233,7 +336,7 @@ async function fetchPlaylistMeta(fetchClient, playlistId, token, { signal }) {
     return await fetchClient.getJson(buildPlaylistMetaUrl(playlistId), {
       signal,
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `${token.tokenType} ${token.value}`,
       },
     });
   } catch (err) {
@@ -244,7 +347,7 @@ async function fetchPlaylistMeta(fetchClient, playlistId, token, { signal }) {
 /**
  * @param {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} fetchClient
  * @param {string} playlistId
- * @param {string} token
+ * @param {TokenMemo} token
  * @param {{ signal?: AbortSignal, cursor?: string | null }} options
  */
 async function fetchPlaylistTracks(fetchClient, playlistId, token, { signal, cursor }) {
@@ -257,7 +360,7 @@ async function fetchPlaylistTracks(fetchClient, playlistId, token, { signal, cur
     return await fetchClient.getJson(endpoint, {
       signal,
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `${token.tokenType} ${token.value}`,
       },
     });
   } catch (err) {
@@ -335,35 +438,98 @@ export async function importPlaylist(options = {}) {
     });
   }
 
-  const token = await fetchAccessToken(fetchClient, { signal: options.signal });
-  const meta = await fetchPlaylistMeta(fetchClient, playlistId, token, { signal: options.signal });
+  const signal = options.signal;
+  const cursor = options.cursor ?? null;
+  let lastError = null;
+  let tokenRefreshed = false;
 
-  const tracksPayload = await fetchPlaylistTracks(fetchClient, playlistId, token, {
-    signal: options.signal,
-    cursor: options.cursor ?? null,
-  });
+  const perfNow =
+    typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? () => performance.now()
+      : () => Date.now();
 
-  const items = /** @type {any[]} */ (tracksPayload?.items ?? []);
-  const tracks = toNormalizedTracks(items, meta);
-  const nextCursor = typeof tracksPayload?.next === 'string' ? tracksPayload.next : null;
+  const runWithToken = async (forceRefresh = false) => {
+    const token = await fetchAccessToken(fetchClient, { signal, forceRefresh });
 
-  return {
-    provider: PROVIDER,
-    playlistId,
-    title: typeof meta?.name === 'string' ? meta.name : `Spotify playlist ${playlistId}`,
-    snapshotId: typeof meta?.snapshot_id === 'string' ? meta.snapshot_id : undefined,
-    sourceUrl: playlistUrl,
-    tracks,
-    pageInfo: {
-      cursor: nextCursor,
-      hasMore: Boolean(nextCursor),
-    },
-    debug: {
-      source: 'spotify:web',
-      stage: options.cursor ? 'paginate' : 'initial',
-      hasNext: Boolean(nextCursor),
-    },
+    let metaMs = null;
+    let tracksMs = null;
+
+    const metaStart = perfNow();
+    const metaPromise = fetchPlaylistMeta(fetchClient, playlistId, token, { signal }).then((meta) => {
+      metaMs = perfNow() - metaStart;
+      return meta;
+    });
+
+    const trackStart = perfNow();
+    const tracksPromise = fetchPlaylistTracks(fetchClient, playlistId, token, {
+      signal,
+      cursor,
+    }).then((payload) => {
+      tracksMs = perfNow() - trackStart;
+      return payload;
+    });
+
+    const [meta, tracksPayload] = await Promise.all([metaPromise, tracksPromise]);
+    debugLog('parallel:fetch', { metaMs, tracksMs });
+    return { meta, tracksPayload, timings: { metaMs, tracksMs } };
   };
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const forceRefresh = attempt > 0;
+    try {
+      const { meta, tracksPayload, timings } = await runWithToken(forceRefresh);
+
+      const items = /** @type {any[]} */ (tracksPayload?.items ?? []);
+      const tracks = toNormalizedTracks(items, meta);
+      const nextCursor = typeof tracksPayload?.next === 'string' ? tracksPayload.next : null;
+      const totalTracks =
+        typeof tracksPayload?.total === 'number' && Number.isFinite(tracksPayload.total)
+          ? tracksPayload.total
+          : undefined;
+
+      const canonicalUrl = buildCanonicalPlaylistUrl(playlistId);
+
+      return {
+        provider: PROVIDER,
+        playlistId,
+        title: typeof meta?.name === 'string' ? meta.name : `Spotify playlist ${playlistId}`,
+        snapshotId: typeof meta?.snapshot_id === 'string' ? meta.snapshot_id : undefined,
+        sourceUrl: canonicalUrl,
+        total: totalTracks,
+        tracks,
+        pageInfo: {
+          cursor: nextCursor,
+          hasMore: Boolean(nextCursor),
+        },
+        debug: {
+          source: 'spotify:web',
+          stage: cursor ? 'paginate' : 'initial',
+          hasNext: Boolean(nextCursor),
+          tokenRefreshed,
+          metaMs: timings.metaMs,
+          tracksMs: timings.tracksMs,
+          inputUrl: playlistUrl || null,
+        },
+      };
+    } catch (err) {
+      lastError = err;
+      const status = extractHttpStatus(err);
+      if (status === 401 && attempt === 0) {
+        debugLog('token:retry', { reason: 'unauthorized' });
+        invalidateTokenMemo();
+        tokenRefreshed = true;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw /** @type {Error} */ (lastError ?? createAdapterError(CODES.ERR_UNKNOWN));
 }
 
 export default { importPlaylist };
+
+export function __resetSpotifyTokenMemoForTests() {
+  tokenMemo = null;
+  tokenPromise = null;
+}

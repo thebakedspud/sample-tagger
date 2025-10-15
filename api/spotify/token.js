@@ -14,6 +14,16 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type,Authorization',
 };
 
+const TOKEN_URL = 'https://accounts.spotify.com/api/token';
+const EXPIRY_SKEW_SECONDS = 60;
+const MIN_EXPIRES_SECONDS = 5;
+const RETRY_AFTER_MAX_MS = 5000;
+
+/** @type {{ access_token: string, token_type: string, expires_at: number, fetched_at: number } | null} */
+let cachedToken = null;
+/** @type {Promise<{ access_token: string, token_type: string, expires_at: number, fetched_at: number }> | null} */
+let inFlightToken = null;
+
 /**
  * Attach shared CORS headers.
  * @param {VercelResponse} res
@@ -33,7 +43,116 @@ function applyCors(res) {
 function sendJson(res, status, body) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.end(JSON.stringify(body));
+}
+
+/**
+ * @param {{ access_token: string, token_type: string, expires_at: number, fetched_at: number } | null} token
+ */
+function isTokenValid(token) {
+  return Boolean(token && Date.now() < token.expires_at);
+}
+
+/**
+ * @param {string | null} header
+ * @returns {number | null}
+ */
+function parseRetryAfter(header) {
+  if (!header) return null;
+  const trimmed = header.trim();
+  if (!trimmed) return null;
+
+  const seconds = Number.parseFloat(trimmed);
+  if (!Number.isNaN(seconds)) {
+    return Math.max(0, Math.min(seconds * 1000, RETRY_AFTER_MAX_MS));
+  }
+
+  const retryDate = Date.parse(trimmed);
+  if (!Number.isNaN(retryDate)) {
+    const delta = retryDate - Date.now();
+    if (delta <= 0) return 0;
+    return Math.min(delta, RETRY_AFTER_MAX_MS);
+  }
+  return null;
+}
+
+/**
+ * @param {number} ms
+ */
+async function delay(ms) {
+  if (ms <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * @param {string} clientId
+ * @param {string} clientSecret
+ */
+async function fetchSpotifyToken(clientId, clientSecret) {
+  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+  const makeRequest = async () =>
+    fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    });
+
+  let attempt = 0;
+  let lastError = null;
+
+  while (attempt < 2) {
+    attempt += 1;
+    const response = await makeRequest();
+
+    if (response.ok) {
+      const data = await response.json();
+      const rawExpiresIn = typeof data?.expires_in === 'number' ? data.expires_in : 0;
+      const expiresInSeconds = Math.max(
+        MIN_EXPIRES_SECONDS,
+        rawExpiresIn - EXPIRY_SKEW_SECONDS
+      );
+      const now = Date.now();
+      const expiresAt = now + expiresInSeconds * 1000;
+
+      return {
+        access_token: data.access_token,
+        token_type: typeof data?.token_type === 'string' ? data.token_type : 'Bearer',
+        expires_at: expiresAt,
+        fetched_at: now,
+      };
+    }
+
+    if (response.status === 429 && attempt < 2) {
+      const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
+      if (retryAfter !== null) {
+        await delay(retryAfter);
+        continue;
+      }
+    }
+
+    let errorPayload = null;
+    try {
+      errorPayload = await response.json();
+    } catch {
+      // noop
+    }
+
+    lastError = {
+      status: response.status,
+      error: errorPayload?.error || 'spotify_error',
+    };
+    break;
+  }
+
+  if (lastError) {
+    throw Object.assign(new Error('spotify_error'), lastError);
+  }
+  throw new Error('spotify_error');
 }
 
 /**
@@ -63,43 +182,51 @@ export default async function handler(req, res) {
     return;
   }
 
-  const tokenUrl = 'https://accounts.spotify.com/api/token';
-  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-
   try {
-    const response = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${basicAuth}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: 'grant_type=client_credentials',
-    });
-
-    if (!response.ok) {
-      const status = response.status === 429 ? 503 : 502;
-      let errorPayload = null;
-      try {
-        errorPayload = await response.json();
-      } catch {
-        // ignore JSON parse issues
+    if (!isTokenValid(cachedToken)) {
+      if (!inFlightToken) {
+        inFlightToken = fetchSpotifyToken(clientId, clientSecret).then((token) => {
+          cachedToken = {
+            access_token: token.access_token,
+            token_type: token.token_type,
+            expires_at: token.expires_at,
+            fetched_at: token.fetched_at,
+          };
+          return cachedToken;
+        }).finally(() => {
+          inFlightToken = null;
+        });
       }
-
-      sendJson(res, status, {
-        error: errorPayload?.error || 'spotify_error',
-        status: response.status,
-      });
-      return;
+      await inFlightToken;
     }
 
-    const data = await response.json();
+    const token = cachedToken;
+    if (!token) {
+      throw new Error('token_unavailable');
+    }
+
+    const expiresIn = Math.max(
+      0,
+      Math.round((token.expires_at - Date.now()) / 1000)
+    );
+
     sendJson(res, 200, {
-      access_token: data.access_token,
-      expires_in: data.expires_in,
-      token_type: data.token_type ?? 'Bearer',
+      access_token: token.access_token,
+      token_type: token.token_type,
+      expires_in: expiresIn,
+      expires_at: token.expires_at,
     });
   } catch (err) {
-    console.error('[spotify][token] fetch failed', err);
-    sendJson(res, 503, { error: 'spotify_unavailable' });
+    const anyErr = /** @type {any} */ (err);
+    const status = anyErr?.status === 429 ? 503 : 503;
+    sendJson(res, status, {
+      error: anyErr?.error || 'spotify_unavailable',
+      status: anyErr?.status ?? 503,
+    });
   }
+}
+
+export function __resetTokenCacheForTests() {
+  cachedToken = null;
+  inFlightToken = null;
 }
