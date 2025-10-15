@@ -1,0 +1,26 @@
+{
+  "spotify": {
+    "title": "Imported from Spotify",
+    "tracks": [
+      { "id": "spotify-nautilus", "title": "Nautilus", "artist": "Bob James" },
+      { "id": "spotify-champ", "title": "The Champ", "artist": "The Mohawks" },
+      { "id": "spotify-electric-relaxation", "title": "Electric Relaxation", "artist": "A Tribe Called Quest" }
+    ]
+  },
+  "youtube": {
+    "title": "Imported from YouTube",
+    "tracks": [
+      { "id": "youtube-amen-break", "title": "Amen Break (Full)", "artist": "The Winstons" },
+      { "id": "youtube-cissy-strut", "title": "Cissy Strut", "artist": "The Meters" },
+      { "id": "youtube-apache", "title": "Apache", "artist": "Incredible Bongo Band" }
+    ]
+  },
+  "soundcloud": {
+    "title": "Imported from SoundCloud",
+    "tracks": [
+      { "id": "soundcloud-soulful-loop", "title": "Soulful Loop 92bpm", "artist": "crate_digger" },
+      { "id": "soundcloud-dusty-rhodes", "title": "Dusty Rhodes 84bpm", "artist": "vinyl_junkie" },
+      { "id": "soundcloud-blue-smoke", "title": "Blue Smoke 78bpm", "artist": "midnight_sampler" }
+    ]
+  }
+}

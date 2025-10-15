@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useEffect, useState, useRef } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
@@ -10,314 +11,425 @@ import './styles/primitives.css';
 import { usePendingDelete } from './features/undo/usePendingDelete'
 import UndoPlaceholder from './components/UndoPlaceholder.jsx'
 
-// ✅ Extracted helpers
+// Extracted helpers
 import detectProvider from './features/import/detectProvider'
-import importPlaylist from './features/import/mockImporter'
+import useImportPlaylist from './features/import/useImportPlaylist.js'
+
+// NEW: centralised error helpers/messages
+import { extractErrorCode, CODES } from './features/import/adapters/types.js'
+import { ERROR_MAP } from './features/import/errors.js'
+
+// -- Derive initial state from storage (v3 structured: { importMeta, tracks, ... })
+const persisted = loadAppState()
+const HAS_VALID_PLAYLIST = !!(persisted?.importMeta?.provider && persisted?.tracks?.length)
+const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
+
+// Safe default importMeta shape (mirrors storage v3)
+const EMPTY_IMPORT_META = {
+  provider: null,
+  playlistId: null,
+  snapshotId: null,
+  cursor: null,
+  hasMore: false,
+  sourceUrl: '',
+  debug: null,
+}
+
+// Handy helper so we never explode on undefined notes
+function getNotes(t) {
+  return Array.isArray(t?.notes) ? t.notes : [];
+}
 
 export default function App() {
   // SIMPLE "ROUTING"
-  const [screen, setScreen] = useState('landing')
+  const [screen, setScreen] = useState(INITIAL_SCREEN)
 
-  // ANNOUNCEMENTS (for screen readers)
+  // ANNOUNCEMENTS (for screen readers) - light debounce
   const [announceMsg, setAnnounceMsg] = useState('')
+  const announceTimerRef = useRef(null)
   function announce(msg) {
-    setAnnounceMsg(msg)
+    if (announceTimerRef.current) clearTimeout(announceTimerRef.current)
+    announceTimerRef.current = setTimeout(() => {
+      setAnnounceMsg(msg)
+      announceTimerRef.current = null
+    }, 60)
   }
 
   // IMPORT state
   const [importUrl, setImportUrl] = useState('')
-  const provider = detectProvider(importUrl || '')
-  const [importLoading, setImportLoading] = useState(false)
+  const providerChip = detectProvider(importUrl || '')
   const [importError, setImportError] = useState(null)
   const importInputRef = useRef(null)
+  const [importBusyKind, setImportBusyKind] = useState(null)
 
-  // PLAYLIST META
-  const [playlistTitle, setPlaylistTitle] = useState('My Playlist')
-  const [importedAt, setImportedAt] = useState(null) // ISO string
-  const [lastImportUrl, setLastImportUrl] = useState('')
+  // PLAYLIST META (local state; persisted via storage v3 importMeta)
+  const [importMeta, setImportMeta] = useState(() => {
+    const initialMeta = persisted?.importMeta ?? {}
+    const sourceUrl = initialMeta.sourceUrl ?? (persisted?.lastImportUrl ?? '')
+    return {
+      ...EMPTY_IMPORT_META,
+      ...initialMeta,
+      sourceUrl,
+      hasMore: Boolean(initialMeta.cursor || initialMeta.hasMore),
+    }
+  })
+  const [playlistTitle, setPlaylistTitle] = useState(persisted?.playlistTitle ?? 'My Playlist')
+  const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null)
+  const [lastImportUrl, setLastImportUrl] = useState(
+    persisted?.lastImportUrl ?? (persisted?.importMeta?.sourceUrl ?? '')
+  )
 
-  // DATA
-  const [tracks, setTracks] = useState([
-    // Existing demo data remains; it will be replaced on successful import
-    { id: 1, title: 'Nautilus', artist: 'Bob James', notes: [] },
-    { id: 2, title: 'Electric Relaxation', artist: 'A Tribe Called Quest', notes: [] },
-    { id: 3, title: 'The Champ', artist: 'The Mohawks', notes: [] },
-  ])
+  // DATA - normalize persisted tracks so notes always exist
+  const [tracks, setTracks] = useState(
+    (persisted?.tracks ?? []).map(t => ({ ...t, notes: getNotes(t) }))
+  )
 
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
-  const [error, setError] = useState(null) // error message for note editor
+  const [error, setError] = useState(null)
 
   // Remember which button opened the editor
   const editorInvokerRef = useRef(null)
 
-  // NEW — inline undo bookkeeping:
-  // pending map: id -> { trackId, note, index, restoreFocusId, fallbackFocusId }
+  // NEW - inline undo bookkeeping:
   const [pending, setPending] = useState(new Map())
-  const pendingRef = useRef(pending)              // <-- keep latest pending in a ref
+  const pendingRef = useRef(pending)
   useEffect(() => { pendingRef.current = pending }, [pending])
 
   const lastPendingIdRef = useRef(null)
 
-  // IMPORTANT: make hook timer inert; let the component own expiry (so it can pause on focus/hover)
+  // IMPORTANT: make hook timer inert; let the component own expiry
   const { start: startPendingDelete, undo: undoPending, isPending } = usePendingDelete({
-    timeoutMs: 600000, // 10 minutes — effectively disables auto-finalize from the hook
+    timeoutMs: 600000,
     onAnnounce: announce,
     onFinalize: (id) => {
-      // Safety net only; should rarely/never fire now
       const meta = pendingRef.current.get(id)
       setPending(prev => {
         const next = new Map(prev)
         next.delete(id)
         return next
       })
-
       announce('Note deleted')
-
       if (meta?.fallbackFocusId) {
-        requestAnimationFrame(() => {
-          focusById(meta.fallbackFocusId)
-        })
+        requestAnimationFrame(() => { focusById(meta.fallbackFocusId) })
       }
     }
   })
 
   // REIMPORT focus pattern
   const reimportBtnRef = useRef(null)
-  const [reimportLoading, setReimportLoading] = useState(false)
+  const loadMoreBtnRef = useRef(null)
 
-  // —— PERSISTENCE: load-once from localStorage
-  useEffect(() => {
-    const saved = loadAppState()
-    if (!saved) return
-
-    if (Array.isArray(saved.tracks)) setTracks(saved.tracks)
-    if (typeof saved.playlistTitle === 'string') setPlaylistTitle(saved.playlistTitle)
-    if (typeof saved.importedAt === 'string') setImportedAt(saved.importedAt)
-    if (typeof saved.lastImportUrl === 'string') setLastImportUrl(saved.lastImportUrl)
-
-    if (Array.isArray(saved.tracks) && saved.tracks.length) setScreen('playlist')
-     
-  }, [])
-
-  // —— PERSISTENCE: save whenever core state changes
+  // -- PERSISTENCE: save whenever core state changes (v3 structured shape)
   useEffect(() => {
     saveAppState({
-      tracks,
       playlistTitle,
       importedAt,
       lastImportUrl,
+      tracks,
+      importMeta,
     })
-  }, [tracks, playlistTitle, importedAt, lastImportUrl])
+  }, [playlistTitle, importedAt, lastImportUrl, tracks, importMeta])
 
   // Safety: close editor if its track disappears or changes
   useEffect(() => {
     if (editingId == null) return
     if (!tracks.some(t => t.id === editingId)) {
-      setEditingId(null)
-      setDraft('')
-      setError(null)
+      setEditingId(null); setDraft(''); setError(null)
     }
   }, [tracks, editingId])
 
-  // Ctrl/Cmd+Z undo (for the most recent pending delete)
+  // 🔐 Safety: if you somehow land on the playlist screen with zero tracks, bounce to landing
+  useEffect(() => {
+    if (screen === 'playlist' && tracks.length === 0) {
+      setScreen('landing')
+    }
+  }, [screen, tracks.length])
+
+  // Ctrl/Cmd+Z undo
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (
-        (e.ctrlKey || e.metaKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        e.key.toLowerCase() === 'z'
-      ) {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
         const id = lastPendingIdRef.current
-        if (id && isPending(id)) {
-          e.preventDefault()
-          handleUndoInline(id)
-        }
+        if (id && isPending(id)) { e.preventDefault(); handleUndoInline(id) }
       }
     }
-
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPending])
 
-  // ===== NEW: tiny extracted handlers (stay inside App.jsx) =====
-  function handleImportUrlChange(e) {
-    setImportUrl(e.target.value)
-    setImportError(null)
-  }
+  // ===== tiny extracted handlers =====
+  function handleImportUrlChange(e) { setImportUrl(e.target.value); setImportError(null) }
+  function handleDraftChange(e) { setDraft(e.target.value) }
 
-  function handleDraftChange(e) {
-    setDraft(e.target.value)
-  }
-  // ==============================================================
-
-  // ===== NEW: normalization helper for IDs used via data-* =====
   function normalizeTrackId(raw) {
-    // If purely digits, convert to number to match demo IDs; otherwise leave as string
     return /^\d+$/.test(String(raw)) ? Number(raw) : raw;
   }
 
-  // ===== NEW: top-level named handlers (replace inline lambdas) =====
   function handleAddNoteClick(e) {
-    const btn = e.currentTarget;
-    const trackId = normalizeTrackId(btn.dataset.trackId);
-    onAddNote(trackId);
+    const trackId = normalizeTrackId(e.currentTarget.dataset.trackId)
+    onAddNote(trackId)
   }
-
   function handleDeleteNoteClick(e) {
-    const btn = e.currentTarget;
-    const trackId = normalizeTrackId(btn.dataset.trackId);
-    const noteIndex = Number(btn.dataset.noteIndex);
-    onDeleteNote(trackId, noteIndex);
+    const btn = e.currentTarget
+    const trackId = normalizeTrackId(btn.dataset.trackId)
+    const noteIndex = Number(btn.dataset.noteIndex)
+    onDeleteNote(trackId, noteIndex)
   }
-
   function handleSaveNoteClick(e) {
-    const btn = e.currentTarget;
-    const trackId = normalizeTrackId(btn.dataset.trackId);
-    onSaveNote(trackId);
+    const trackId = normalizeTrackId(e.currentTarget.dataset.trackId)
+    onSaveNote(trackId)
   }
-
   function handleCancelNoteClick(e) {
-    const btn = e.currentTarget;
-    const trackId = normalizeTrackId(btn.dataset.trackId);
-    onCancelNote(trackId);
+    const trackId = normalizeTrackId(e.currentTarget.dataset.trackId)
+    onCancelNote(trackId)
   }
+  function handleBackToLanding() { setScreen('landing') }
 
-  function handleBackToLanding() {
-    setScreen('landing');
+  // import hook (mock-first, async)
+  const { importPlaylist: runImport, importNext, loading: importLoading, reset: resetImportSession } = useImportPlaylist()
+  const isInitialImportBusy = importBusyKind === 'initial'
+  const isReimportBusy = importBusyKind === 'reimport'
+  const isLoadMoreBusy = importBusyKind === 'load-more'
+  const isAnyImportBusy = importLoading || importBusyKind !== null
+  const showInitialSpinner = isInitialImportBusy && importLoading
+  const showReimportSpinner = isReimportBusy && importLoading
+  const showLoadMoreSpinner = isLoadMoreBusy && importLoading
+
+  // Small helper to resolve a friendly message from a code
+  function msgFromCode(code) {
+    return ERROR_MAP[code] ?? ERROR_MAP[CODES.ERR_UNKNOWN] ?? 'Something went wrong. Please try again.'
   }
-  // ==============================================================
 
   // IMPORT handlers
   const handleImport = async (e) => {
     e?.preventDefault?.()
     setImportError(null)
-    if (!importUrl.trim()) {
-      setImportError('Paste a playlist URL to import.')
+    const trimmedUrl = importUrl.trim()
+
+    if (!trimmedUrl) {
+      const msg = 'Paste a playlist URL to import.'
+      setImportError(msg)
       announce('Import failed. URL missing.')
-      if (importInputRef.current) {
-        importInputRef.current.focus()
-        importInputRef.current.select()
-      }
+      importInputRef.current?.focus(); importInputRef.current?.select()
+      console.log('[import error]', { code: 'URL_MISSING', raw: null })
       return
     }
-    if (!provider) {
-      setImportError('That URL doesn’t look like a Spotify, YouTube, or SoundCloud playlist.')
+
+    if (!providerChip) {
+      const msg = msgFromCode(CODES.ERR_UNSUPPORTED_URL)
+      setImportError(msg)
       announce('Import failed. Unsupported URL.')
-      if (importInputRef.current) {
-        importInputRef.current.focus()
-        importInputRef.current.select()
-      }
+      importInputRef.current?.focus(); importInputRef.current?.select()
+      console.log('[import error]', { code: CODES.ERR_UNSUPPORTED_URL, raw: null })
       return
     }
+
+    setImportBusyKind('initial')
+
     try {
-      setImportLoading(true)
       announce('Import started.')
-      const res = await importPlaylist(importUrl.trim())
-      // Map to your track shape, preserving notes array
+      const res = await runImport(trimmedUrl, { context: { importBusyKind: 'initial' } })
+
       const mapped = res.tracks.map((t, idx) => ({
-        id: t.id || `${res.provider}-${idx}`,
+        id: t.id || [(res.provider ?? providerChip), idx + 1].filter(Boolean).join('-'),
         title: t.title,
         artist: t.artist || '',
         notes: [],
       }))
       setTracks(mapped)
-      setPlaylistTitle(res.title || 'Imported Playlist')
-      const now = new Date().toISOString()
-      setImportedAt(now)
-      setLastImportUrl(importUrl.trim())
-      setScreen('playlist')
-      announce(`Playlist imported. ${mapped.length} tracks.`)
 
-      // Move focus to first "Add note" button when ready (first-time import UX)
-      setTimeout(() => {
+      setImportMeta({
+        ...EMPTY_IMPORT_META,
+        provider: res.provider ?? providerChip ?? null,
+        playlistId: res.playlistId ?? null,
+        snapshotId: res.snapshotId ?? null,
+        cursor: res.pageInfo?.cursor ?? null,
+        hasMore: Boolean(res.pageInfo?.hasMore),
+        sourceUrl: res.sourceUrl ?? trimmedUrl,
+        debug: res.debug ?? null,
+      })
+
+      setPlaylistTitle(res.title || 'Imported Playlist')
+      const timestamp = new Date().toISOString()
+      setImportedAt(timestamp)
+      setLastImportUrl(trimmedUrl)
+      setScreen('playlist')
+      announce('Playlist imported. ' + mapped.length + ' tracks.')
+
+      requestAnimationFrame(() => {
         if (mapped.length > 0) {
-          focusById(`add-note-btn-${mapped[0].id}`)
+          focusById('add-note-btn-' + mapped[0].id)
         }
-      }, 0)
+      })
     } catch (err) {
-      const msg = err?.code === 'UNSUPPORTED_OR_INVALID_URL'
-        ? 'That link is not a supported playlist URL.'
-        : 'Couldn’t import right now. Check the link or try again.'
+      // Abort is a true cancel: no error UI
+      if (err?.name === "AbortError") return
+
+      const code = extractErrorCode(err)
+      const msg = msgFromCode(code)
+      console.log('[import error]', { code, raw: err })
       setImportError(msg)
-      announce(`Import failed. ${msg}`)
-      if (importInputRef.current) {
-        importInputRef.current.focus()
-        importInputRef.current.select()
-      }
+      announce('Import failed. ' + msg)
+      importInputRef.current?.focus(); importInputRef.current?.select()
     } finally {
-      setImportLoading(false)
+      setImportBusyKind(null)
     }
   }
 
-  // Re-import keeps focus on the same button and announces results
   const handleReimport = async () => {
     if (!lastImportUrl) return
-
     const wasActive = document.activeElement === reimportBtnRef.current
+    setImportError(null)
+    setImportBusyKind('reimport')
     try {
-      setReimportLoading(true)
-      announce('Re-importing playlist…')
+      announce('Re-importing playlist.')
+      const res = await runImport(lastImportUrl, { context: { importBusyKind: 'reimport' } })
 
-      const res = await importPlaylist(lastImportUrl)
       const mapped = res.tracks.map((t, idx) => ({
-        id: t.id || `${res.provider}-${idx}`,
+        id: t.id || [(res.provider ?? importMeta.provider), idx + 1].filter(Boolean).join('-'),
         title: t.title,
         artist: t.artist || '',
         notes: [],
       }))
       setTracks(mapped)
-      setPlaylistTitle(res.title || 'Imported Playlist')
+
+      setImportMeta({
+        ...EMPTY_IMPORT_META,
+        provider: res.provider ?? importMeta.provider ?? null,
+        playlistId: res.playlistId ?? importMeta.playlistId ?? null,
+        snapshotId: res.snapshotId ?? importMeta.snapshotId ?? null,
+        cursor: res.pageInfo?.cursor ?? null,
+        hasMore: Boolean(res.pageInfo?.hasMore),
+        sourceUrl: res.sourceUrl ?? lastImportUrl,
+        debug: res.debug ?? null,
+      })
+
+      setPlaylistTitle(res.title || playlistTitle || 'Imported Playlist')
       setImportedAt(new Date().toISOString())
-
-      announce(`Playlist re-imported. ${mapped.length} tracks available.`)
-
-      if (wasActive) {
-        // wait a frame in case the list rerender affected focus
-        requestAnimationFrame(() => reimportBtnRef.current?.focus())
+      announce('Playlist re-imported. ' + mapped.length + ' tracks available.')
+      if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        setImportBusyKind(null)
+        return
       }
-    } catch {
-      announce('Re-import failed. Try again.')
+      const code = extractErrorCode(err)
+      const msg = msgFromCode(code)
+      console.log('[reimport error]', { code, raw: err })
+      setImportError(msg)
+      announce(msg)
+      if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
     } finally {
-      setReimportLoading(false)
+      setImportBusyKind(null)
     }
   }
 
-  // —— Clear-all handler (full reset)
+  const handleLoadMore = async () => {
+    if (!importMeta.cursor || !importMeta.provider || !lastImportUrl) {
+      return
+    }
+
+    setImportError(null)
+    setImportBusyKind('load-more')
+
+    try {
+      announce('Loading more tracks.')
+      const res = await importNext({ context: { importBusyKind: 'load-more' } })
+
+      if (!res) {
+        setImportMeta(prev => ({ ...prev, cursor: null, hasMore: false }))
+        announce('No additional tracks available.')
+        return
+      }
+
+      const startIndex = tracks.length
+      const mapped = res.tracks.map((t, idx) => ({
+        id: t.id || [(res.provider ?? importMeta.provider), startIndex + idx + 1].filter(Boolean).join('-'),
+        title: t.title,
+        artist: t.artist || '',
+        notes: [],
+      }))
+      const existingIds = new Set(tracks.map(t => t.id))
+      const unique = mapped.filter(t => !existingIds.has(t.id))
+
+      if (unique.length === 0) {
+        setImportMeta(prev => ({
+          ...prev,
+          cursor: res.pageInfo?.cursor ?? null,
+          hasMore: Boolean(res.pageInfo?.hasMore),
+          sourceUrl: res.sourceUrl ?? prev.sourceUrl ?? lastImportUrl,
+          debug: res.debug ?? prev.debug,
+        }))
+        announce('No additional tracks available.')
+        return
+      }
+
+      setTracks(prev => [...prev, ...unique])
+      setImportMeta(prev => ({
+        ...prev,
+        playlistId: res.playlistId ?? prev.playlistId ?? null,
+        snapshotId: res.snapshotId ?? prev.snapshotId ?? null,
+        cursor: res.pageInfo?.cursor ?? null,
+        hasMore: Boolean(res.pageInfo?.hasMore),
+        sourceUrl: res.sourceUrl ?? prev.sourceUrl ?? lastImportUrl,
+        debug: res.debug ?? prev.debug,
+      }))
+      setImportedAt(new Date().toISOString())
+      const firstNewId = unique[0]?.id
+      if (firstNewId) {
+        focusById(`track-${firstNewId}`)
+      } else {
+        requestAnimationFrame(() => {
+          loadMoreBtnRef.current?.focus()
+        })
+      }
+      announce(unique.length + ' more tracks loaded.')
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        const code = extractErrorCode(err)
+        const msg = msgFromCode(code)
+        console.log('[load-more error]', { code, raw: err })
+        setImportError(msg)
+        announce(msg)
+      }
+    } finally {
+      setImportBusyKind(null)
+    }
+  }
+
   const handleClearAll = () => {
-    // Cancel any pending placeholders
+    // Reset transient UI and timers
     setPending(new Map())
+    setEditingId(null); setDraft(''); setError(null)
+    setImportError(null)
+    setImportBusyKind(null)
 
-    clearAppState() // wipe localStorage
+    // Clear persisted data
+    clearAppState()
 
-    // reset in-memory state
-    setTracks([
-      { id: 1, title: 'Nautilus', artist: 'Bob James', notes: [] },
-      { id: 2, title: 'Electric Relaxation', artist: 'A Tribe Called Quest', notes: [] },
-      { id: 3, title: 'The Champ', artist: 'The Mohawks', notes: [] },
-    ])
+    // Reset in-memory app state
+    setTracks([])
+    setImportMeta({ ...EMPTY_IMPORT_META })
     setPlaylistTitle('My Playlist')
     setImportedAt(null)
     setLastImportUrl('')
-    setEditingId(null)
-    setDraft('')
-    setError(null)
+    setImportUrl('')
 
+    // Reset import session internals
+    resetImportSession()
+
+    // Route back to landing + UX polish
     setScreen('landing')
-    announce('All saved data cleared. You’re back at the start.')
+    announce("All saved data cleared. You're back at the start.")
     setTimeout(() => importInputRef.current?.focus(), 0)
   }
 
   const onAddNote = (trackId) => {
-    setEditingId(trackId)
-    setDraft('')
-    setError(null)
+    setEditingId(trackId); setDraft(''); setError(null)
     editorInvokerRef.current = document.getElementById(`add-note-btn-${trackId}`)
-    setTimeout(() => {
-      focusById(`note-input-${trackId}`)
-    }, 0)
+    setTimeout(() => { focusById(`note-input-${trackId}`) }, 0)
   }
 
   const onSaveNote = (trackId) => {
@@ -326,46 +438,42 @@ export default function App() {
       setError('Note cannot be empty.')
       return
     }
-    setTracks((prev) =>
-      prev.map((t) =>
-        t.id === trackId ? { ...t, notes: [...t.notes, draft.trim()] } : t
-      )
+    setTracks(prev =>
+      prev.map(t => {
+        if (t.id !== trackId) return t
+        const notes = getNotes(t)
+        return { ...t, notes: [...notes, draft.trim()] }
+      })
     )
-    setEditingId(null)
-    setDraft('')
-    setError(null)
+    setEditingId(null); setDraft(''); setError(null)
     announce('Note added.')
     editorInvokerRef.current?.focus()
   }
 
-  const onCancelNote = (_trackId) => {
-    setEditingId(null)
-    setDraft('')
-    setError(null)
+  const onCancelNote = () => {
+    setEditingId(null); setDraft(''); setError(null)
     announce('Note cancelled.')
     editorInvokerRef.current?.focus()
   }
 
-  // Create a unique pending id for a deletion (per note)
   function makePendingId(trackId, index) {
-    // Include time to avoid collisions when deleting the same index repeatedly
     return `${trackId}::${index}::${Date.now()}`
   }
 
   const onDeleteNote = (trackId, noteIndex) => {
-    const noteToDelete = tracks.find(t => t.id === trackId)?.notes[noteIndex]
+    const track = tracks.find(t => t.id === trackId)
+    const notes = getNotes(track)
+    const noteToDelete = notes[noteIndex]
     if (noteToDelete == null) return
 
-    // Remove the note now…
     setTracks(prev =>
-      prev.map(t =>
-        t.id === trackId
-          ? { ...t, notes: t.notes.filter((_, i) => i !== noteIndex) }
-          : t
-      )
+      prev.map(t => {
+        if (t.id !== trackId) return t
+        const n = getNotes(t)
+        return { ...t, notes: n.filter((_, i) => i !== noteIndex) }
+      })
     )
 
-    // …and insert a placeholder record to render inline at the same index.
     const id = makePendingId(trackId, noteIndex)
     lastPendingIdRef.current = id
     setPending(prev => {
@@ -374,46 +482,32 @@ export default function App() {
         trackId,
         note: noteToDelete,
         index: noteIndex,
-
-        // NEW: where to send focus after Undo/dismiss
         restoreFocusId: `del-btn-${trackId}-${noteIndex}`,
         fallbackFocusId: `add-note-btn-${trackId}`,
       })
       return next
     })
 
-    // Start timer via hook (announces initial delete; expiry will be owned by component)
     startPendingDelete(id)
-
-    // Focus will move into the inline Undo button when the placeholder mounts.
   }
 
   function handleUndoInline(id) {
     const meta = pending.get(id)
     if (!meta) return
-    const {
-      trackId,
-      note,
-      index,
-      restoreFocusId,
-      fallbackFocusId
-    } = meta
+    const { trackId, note, index, restoreFocusId, fallbackFocusId } = meta
 
-    // Cancel hook timer
     undoPending(id)
 
-    // Restore note at its original index (clamped to current length)
     setTracks(prev =>
       prev.map(t => {
         if (t.id !== trackId) return t
-        const notes = [...t.notes]
+        const notes = [...getNotes(t)]
         const insertAt = Math.min(Math.max(index, 0), notes.length)
         notes.splice(insertAt, 0, note)
         return { ...t, notes }
       })
     )
 
-    // Remove placeholder
     setPending(prev => {
       const next = new Map(prev)
       next.delete(id)
@@ -421,8 +515,6 @@ export default function App() {
     })
 
     announce('Note restored')
-
-    // After re-render, move focus to the restored Delete (fallback to Add note)
     requestAnimationFrame(() => {
       if (restoreFocusId && document.getElementById(restoreFocusId)) {
         focusById(restoreFocusId)
@@ -432,27 +524,23 @@ export default function App() {
     })
   }
 
-  // NEW: component-owned expiry handler (called by UndoPlaceholder onDismiss)
   function handleExpireInline(id) {
     const meta = pendingRef.current.get(id)
-
-    // Remove placeholder
     setPending(prev => {
       const next = new Map(prev)
       next.delete(id)
       return next
     })
-
-    // Announce final state distinctly from initial delete
     announce('Undo expired. Note deleted')
-
-    // Focus to safe fallback
     if (meta?.fallbackFocusId) {
-      requestAnimationFrame(() => {
-        focusById(meta.fallbackFocusId)
-      })
+      requestAnimationFrame(() => { focusById(meta.fallbackFocusId) })
     }
   }
+
+  // Helper to hide the mock prefix from SRs but keep it visible
+  const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
+  const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
+  const cleanTitle = hasMockPrefix ? playlistTitle.slice(MOCK_PREFIX.length) : playlistTitle
 
   return (
     <div className="app">
@@ -460,6 +548,13 @@ export default function App() {
         .error-text { color: #d9534f; font-size: 0.9em; margin-top: 4px; }
         .chip { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--muted); background:var(--card); }
         .chip-dot { width:8px; height:8px; border-radius:999px; display:inline-block; }
+        .sr-only {
+          position: absolute !important;
+          width: 1px; height: 1px;
+          padding: 0; margin: -1px;
+          overflow: hidden; clip: rect(0, 0, 1px, 1px);
+          white-space: nowrap; border: 0;
+        }
       `}</style>
 
       {/* Screen reader announcements */}
@@ -489,7 +584,7 @@ export default function App() {
                     ref={importInputRef}
                     type="url"
                     inputMode="url"
-                    placeholder="https://open.spotify.com/playlist/…"
+                    placeholder="https://open.spotify.com/playlist/..."
                     autoComplete="off"
                     value={importUrl}
                     onChange={handleImportUrlChange}
@@ -504,9 +599,9 @@ export default function App() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="chip" title={provider ? `Detected ${provider}` : 'No provider detected yet'}>
-                    <span className="chip-dot" style={{ background: provider ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
-                    {provider ? provider : 'no match'}
+                  <span className="chip">
+                    <span className="chip-dot" style={{ background: providerChip ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
+                    {providerChip ? providerChip : 'no match'}
                   </span>
                 </div>
 
@@ -514,12 +609,10 @@ export default function App() {
                   <button
                     type="submit"
                     className="btn primary"
-                    // Keep focusable/clickable; validate in handleImport
-                    disabled={importLoading}
-                    aria-busy={importLoading ? 'true' : 'false'}
-                    title={!provider ? 'Paste a Spotify/YouTube/SoundCloud playlist URL' : undefined}
+                    disabled={isAnyImportBusy}
+                    aria-busy={showInitialSpinner ? 'true' : 'false'}
                   >
-                    {importLoading ? 'Importing…' : 'Import playlist'}
+                    {showInitialSpinner ? 'Importing...' : 'Import playlist'}
                   </button>
                 </div>
               </div>
@@ -531,10 +624,14 @@ export default function App() {
           <section aria-labelledby="playlist-title">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <h2 id="playlist-title" style={{ marginTop: 0, marginBottom: 0 }}>{playlistTitle}</h2>
+                {/* Clean label for SR, hide mock prefix textually */}
+                <h2 id="playlist-title" aria-label={cleanTitle} style={{ marginTop: 0, marginBottom: 0 }}>
+                  {hasMockPrefix && <span aria-hidden="true">{MOCK_PREFIX}</span>}
+                  {cleanTitle}
+                </h2>
                 {importedAt && (
-                  <span className="chip" title="Snapshot info">
-                    {tracks.length} tracks • imported {new Date(importedAt).toLocaleDateString()} {new Date(importedAt).toLocaleTimeString()}
+                  <span className="chip">
+                    {tracks.length} tracks - imported {new Date(importedAt).toLocaleDateString()} {new Date(importedAt).toLocaleTimeString()}
                   </span>
                 )}
               </div>
@@ -546,30 +643,28 @@ export default function App() {
                     className="btn"
                     onClick={handleReimport}
                     aria-label="Re-import this playlist"
-                    title="Fetch a fresh snapshot of this playlist"
-                    disabled={reimportLoading}
-                    aria-busy={reimportLoading ? 'true' : 'false'}
+                    disabled={isAnyImportBusy}
+                    aria-busy={showReimportSpinner ? 'true' : 'false'}
                   >
-                    {reimportLoading ? 'Re-importing…' : 'Re-import'}
+                    {showReimportSpinner ? 'Re-importing...' : 'Re-import'}
                   </button>
                 )}
                 <button
                   type="button"
                   className="btn"
                   onClick={handleClearAll}
-                  title="Remove saved playlist and notes from this device"
+                  aria-label="Clear all data"
                 >
                   Clear
                 </button>
                 <button type="button" className="btn" onClick={handleBackToLanding}>
-                  ← Back
+                  Back
                 </button>
               </div>
             </div>
 
             <ul style={{ padding: 0, listStyle: 'none' }}>
               {tracks.map((t, i) => {
-                // Build a quick lookup of pending placeholders for this track by index
                 const placeholders = []
                 for (const [pid, meta] of pending.entries()) {
                   if (meta.trackId === t.id) {
@@ -581,15 +676,12 @@ export default function App() {
                     })
                   }
                 }
-                // Sort placeholders by index so they appear in the right order
                 placeholders.sort((a, b) => a.index - b.index)
 
-                // Render notes with inline placeholders at original indices.
-                // We iterate from 0..notes.length and insert any placeholders that belong at each index.
                 const rows = []
-                const noteCount = t.notes.length
+                const noteArr = getNotes(t)
+                const noteCount = noteArr.length
                 for (let idx = 0; idx <= noteCount; idx++) {
-                  // Insert placeholder(s) that target this index
                   placeholders
                     .filter(ph => ph.index === idx && isPending(ph.pid))
                     .forEach(ph => {
@@ -597,8 +689,8 @@ export default function App() {
                         <li key={`ph-${ph.pid}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                           <UndoPlaceholder
                             pendingId={ph.pid}
-                            onUndo={handleUndoInline}             // receives pendingId
-                            onDismiss={handleExpireInline}        // component-owned expiry
+                            onUndo={handleUndoInline}
+                            onDismiss={handleExpireInline}
                             restoreFocusId={ph.restoreFocusId}
                             fallbackFocusId={ph.fallbackFocusId}
                           />
@@ -606,9 +698,8 @@ export default function App() {
                       )
                     })
 
-                  // Insert the real note if exists at this index
                   if (idx < noteCount) {
-                    const n = t.notes[idx]
+                    const n = noteArr[idx]
                     rows.push(
                       <li
                         key={`n-${t.id}-${idx}`}
@@ -620,7 +711,7 @@ export default function App() {
                           gap: 8,
                         }}
                       >
-                        <span>– {n}</span>
+                        <span>- {n}</span>
                         <button
                           type="button"
                           id={`del-btn-${t.id}-${idx}`}
@@ -637,9 +728,13 @@ export default function App() {
                   }
                 }
 
+                const isEditing = editingId === t.id
+
                 return (
-                  <li
-                    key={t.id}
+                      <li
+                        key={t.id}
+                        id={`track-${t.id}`}
+                        tabIndex={-1}
                     style={{
                       border: '1px solid var(--border)',
                       background: 'var(--card)',
@@ -650,20 +745,26 @@ export default function App() {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>
-                        <strong>{i + 1}.</strong> {t.title} — {t.artist}
-                        {t.notes.length > 0 && (
-                          <span style={{ marginLeft: 8, color: 'var(--muted)' }}>
-                            · {t.notes.length} note{t.notes.length > 1 ? 's' : ''}
+                      {/* Track title as a proper heading; split title/artist for cleaner SR output */}
+                      <h3 id={`t-${t.id}`} style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>
+                        <span aria-hidden="true">{i + 1}. </span>
+                        <span id={`title-${t.id}`}>{t.title}</span>
+                        {' - '}
+                        <span aria-hidden="true">{t.artist}</span>
+                        {noteArr.length > 0 && (
+                          <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400 }}>
+                            - {noteArr.length} note{noteArr.length > 1 ? 's' : ''}
                           </span>
                         )}
-                      </span>
+                      </h3>
+
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button
                           type="button"
                           id={`add-note-btn-${t.id}`}
                           className="btn"
-                          aria-label={`Add note to ${t.title}`}
+                          aria-label="Add note"
+                          aria-describedby={`title-${t.id}`}
                           data-track-id={t.id}
                           onClick={handleAddNoteClick}
                         >
@@ -672,16 +773,16 @@ export default function App() {
                       </div>
                     </div>
 
-                    {(t.notes.length > 0 || placeholders.length > 0) && (
+                    {(noteArr.length > 0 || placeholders.length > 0) && (
                       <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 16 }}>
                         {rows}
                       </ul>
                     )}
 
-                    {editingId === t.id && (
-                      <div style={{ marginTop: 10 }}>
-                        <label htmlFor={`note-input-${t.id}`} style={{ display: 'block', marginBottom: 6 }}>
-                          Note for “{t.title}”
+                    {isEditing && (
+                      <section id={`note-${t.id}`} aria-labelledby={`t-${t.id}`} style={{ marginTop: 10 }}>
+                        <label className="sr-only" htmlFor={`note-input-${t.id}`}>
+                          Note text
                         </label>
                         <textarea
                           id={`note-input-${t.id}`}
@@ -721,18 +822,32 @@ export default function App() {
                             Cancel
                           </button>
                         </div>
-                      </div>
+                      </section>
                     )}
                   </li>
                 )
               })}
             </ul>
+            {importMeta.hasMore && importMeta.cursor && (
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  ref={loadMoreBtnRef}
+                  className="btn"
+                  onClick={handleLoadMore}
+                  disabled={isAnyImportBusy}
+                  aria-busy={showLoadMoreSpinner ? 'true' : 'false'}
+                >
+                  {showLoadMoreSpinner ? 'Loading more...' : 'Load more'}
+                </button>
+              </div>
+            )}
           </section>
         )}
       </main>
 
       <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)' }}>
-        <small>Prototype · Keyboard-first, accessible-by-default</small>
+        <small>Prototype - Keyboard-first, accessible-by-default</small>
       </footer>
     </div>
   )
