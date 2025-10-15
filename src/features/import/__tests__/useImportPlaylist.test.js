@@ -18,13 +18,38 @@ describe('useImportPlaylist', () => {
     vi.restoreAllMocks();
   });
 
-  it('exposes playlist data and clears loading on success', async () => {
+  function makeSpotifySuccessClient() {
     const fetchClient = {
-      getJson: vi.fn(async () => ({
-        title: 'Synthwave Decade',
-        thumbnail_url: 'https://images.spotify.com/mock.jpg',
-      })),
+      getJson: vi
+        .fn()
+        .mockResolvedValueOnce({ access_token: 'token-123', expires_in: 3600 })
+        .mockResolvedValueOnce({
+          name: 'Synthwave Decade',
+          snapshot_id: 'snapshot-1',
+          images: [{ url: 'https://images.spotify.com/meta.jpg' }],
+          external_urls: { spotify: SPOTIFY_URL },
+        })
+        .mockResolvedValueOnce({
+          items: [
+            {
+              track: {
+                id: 'track-1',
+                name: 'Night Drive',
+                artists: [{ name: 'Synth Master' }],
+                external_urls: { spotify: 'https://open.spotify.com/track/track-1' },
+                duration_ms: 123456,
+                album: { images: [{ url: 'https://images.spotify.com/track-1.jpg' }] },
+              },
+            },
+          ],
+          next: null,
+        }),
     };
+    return fetchClient;
+  }
+
+  it('exposes playlist data and clears loading on success', async () => {
+    const fetchClient = makeSpotifySuccessClient();
 
     const { result } = renderHook(() => useImportPlaylist());
     let response;
@@ -32,23 +57,29 @@ describe('useImportPlaylist', () => {
       response = await result.current.importPlaylist(SPOTIFY_URL, { fetchClient });
     });
 
-    expect(fetchClient.getJson).toHaveBeenCalledTimes(1);
+    expect(fetchClient.getJson).toHaveBeenCalledTimes(3);
     expect(response.provider).toBe('spotify');
     expect(result.current.loading).toBe(false);
     expect(result.current.importBusyKind).toBe(null);
     expect(result.current.errorCode).toBe(null);
-    expect(result.current.tracks.length).toBeGreaterThan(0);
+    expect(result.current.tracks.length).toBe(1);
     expect(result.current.pageInfo?.hasMore).toBe(false);
     expect(result.current.pageInfo?.cursor).toBeNull();
   });
 
   it('maps 429 errors to ERR_RATE_LIMITED, returns fallback data, and resets loading', async () => {
+    const rateErr = new Error('HTTP_429');
+    rateErr.code = 'HTTP_429';
+    rateErr.details = { status: 429 };
+
     const fetchClient = {
-      getJson: vi.fn(async () => {
-        const err = new Error('HTTP_429');
-        err.code = 'HTTP_429';
-        throw err;
-      }),
+      getJson: vi
+        .fn()
+        .mockResolvedValueOnce({ access_token: 'token-abc', expires_in: 3600 })
+        .mockResolvedValueOnce({ name: 'Synthwave Decade' })
+        .mockImplementationOnce(async () => {
+          throw rateErr;
+        }),
     };
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -138,10 +169,29 @@ describe('useImportPlaylist', () => {
       }),
     };
     const fetchClientOk = {
-      getJson: vi.fn(async () => ({
-        title: 'Recovered Playlist',
-        thumbnail_url: 'https://images.spotify.com/mock.jpg',
-      })),
+      getJson: vi
+        .fn()
+        .mockResolvedValueOnce({ access_token: 'token-recover', expires_in: 3600 })
+        .mockResolvedValueOnce({
+          name: 'Recovered Playlist',
+          snapshot_id: 'snapshot-recover',
+          images: [{ url: 'https://images.spotify.com/recover.jpg' }],
+        })
+        .mockResolvedValueOnce({
+          items: [
+            {
+              track: {
+                id: 'recover-track',
+                name: 'Recovery Song',
+                artists: [{ name: 'Hopeful Artist' }],
+                external_urls: { spotify: 'https://open.spotify.com/track/recover' },
+                duration_ms: 220000,
+                album: { images: [{ url: 'https://images.spotify.com/recover-track.jpg' }] },
+              },
+            },
+          ],
+          next: null,
+        }),
     };
 
     const { result } = renderHook(() => useImportPlaylist());

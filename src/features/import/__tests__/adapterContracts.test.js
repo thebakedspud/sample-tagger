@@ -20,44 +20,102 @@ describe('adapter contracts', () => {
     });
 
     it('uses provided fetch client and returns normalized payload', async () => {
+      const tokenPayload = { access_token: 'token-123', expires_in: 3600 };
+      const metaPayload = {
+        name: 'Synthwave Decade',
+        snapshot_id: 'snapshot-1',
+        images: [{ url: 'https://images.spotify.com/meta.jpg' }],
+        external_urls: { spotify: SPOTIFY_URL },
+      };
+      const tracksPayload = {
+        items: [
+          {
+            track: {
+              id: 'track-1',
+              name: 'Night Drive',
+              duration_ms: 123456,
+              external_urls: { spotify: 'https://open.spotify.com/track/track-1' },
+              album: { images: [{ url: 'https://images.spotify.com/track-1.jpg' }] },
+              artists: [{ name: 'Synth Master' }],
+            },
+          },
+        ],
+        next: null,
+      };
+
       const fetchClient = {
-        getJson: vi.fn(async (url) => {
-          expect(url).toContain('https://open.spotify.com/oembed?url=');
-          return {
-            title: 'Synthwave Decade',
-            thumbnail_url: 'https://images.spotify.com/mock.jpg',
-          };
-        }),
+        getJson: vi
+          .fn()
+          .mockResolvedValueOnce(tokenPayload)
+          .mockResolvedValueOnce(metaPayload)
+          .mockResolvedValueOnce(tracksPayload),
       };
 
       const result = await importSpotify({ url: SPOTIFY_URL, fetchClient });
 
-      expect(fetchClient.getJson).toHaveBeenCalledTimes(1);
+      expect(fetchClient.getJson).toHaveBeenCalledTimes(3);
+      expect(fetchClient.getJson).toHaveBeenNthCalledWith(
+        1,
+        '/api/spotify/token',
+        expect.objectContaining({ method: 'GET' })
+      );
+      expect(fetchClient.getJson).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('https://api.spotify.com/v1/playlists/37i9dQZF1DXcBWIGoYBM5M?'),
+        expect.objectContaining({
+          headers: expect.objectContaining({ Authorization: 'Bearer token-123' }),
+        })
+      );
+      expect(fetchClient.getJson).toHaveBeenNthCalledWith(
+        3,
+        expect.stringContaining(
+          'https://api.spotify.com/v1/playlists/37i9dQZF1DXcBWIGoYBM5M/tracks?'
+        ),
+        expect.objectContaining({
+          headers: expect.objectContaining({ Authorization: 'Bearer token-123' }),
+        })
+      );
+
       expect(result.provider).toBe('spotify');
       expect(result.playlistId).toBe('37i9dQZF1DXcBWIGoYBM5M');
       expect(result.title).toBe('Synthwave Decade');
+      expect(result.snapshotId).toBe('snapshot-1');
       expect(result.sourceUrl).toBe(SPOTIFY_URL);
       expect(Array.isArray(result.tracks)).toBe(true);
-      expect(result.tracks.length).toBeGreaterThan(0);
+      expect(result.tracks).toHaveLength(1);
+      expect(result.tracks[0]).toMatchObject({
+        id: 'track-1',
+        title: 'Night Drive',
+        artist: 'Synth Master',
+        sourceUrl: 'https://open.spotify.com/track/track-1',
+        providerTrackId: 'track-1',
+      });
       expect(result.pageInfo).toEqual({ hasMore: false, cursor: null });
-      expect(result.debug?.source).toBe('oembed+mockTracks');
-      expect(result.debug?.oembed?.thumbnail_url).toBe('https://images.spotify.com/mock.jpg');
+      expect(result.debug?.source).toBe('spotify:web');
     });
 
-    it('maps HTTP_429 responses to ERR_RATE_LIMITED', async () => {
+    it('maps HTTP_429 responses from the tracks endpoint to ERR_RATE_LIMITED', async () => {
+      const tokenPayload = { access_token: 'token-789', expires_in: 3600 };
+      const metaPayload = { name: 'Test', snapshot_id: 'snap' };
+      const rateErr = new Error('HTTP_429');
+      rateErr.code = 'HTTP_429';
+      rateErr.details = { status: 429 };
+
       const fetchClient = {
-        getJson: vi.fn(async () => {
-          const err = new Error('HTTP_429');
-          err.code = 'HTTP_429';
-          throw err;
-        }),
+        getJson: vi
+          .fn()
+          .mockResolvedValueOnce(tokenPayload)
+          .mockResolvedValueOnce(metaPayload)
+          .mockImplementationOnce(async () => {
+            throw rateErr;
+          }),
       };
 
       await expect(importSpotify({ url: SPOTIFY_URL, fetchClient })).rejects.toMatchObject({
         code: CODES.ERR_RATE_LIMITED,
         details: expect.objectContaining({ status: 429 }),
       });
-      expect(fetchClient.getJson).toHaveBeenCalledTimes(1);
+      expect(fetchClient.getJson).toHaveBeenCalledTimes(3);
     });
   });
 

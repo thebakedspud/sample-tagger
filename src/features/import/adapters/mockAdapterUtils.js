@@ -54,7 +54,7 @@ function buildDataset(provider, baseTracks, totalCount = TOTAL_TRACKS) {
 
 /**
  * Parse the simple cursor format we emit ("page:<number>").
- * @param {string | undefined} cursor
+ * @param {string | null | undefined} cursor
  */
 function parseCursor(cursor) {
   if (!cursor) return 0;
@@ -95,7 +95,7 @@ export function createPagedMockAdapter({ provider, title, tracks, total = TOTAL_
     const pageTracks = dataset.slice(start, end).map((t) => ({ ...t }));
 
     const hasMore = end < dataset.length;
-    const nextCursor = hasMore ? `page:${pageIndex + 1}` : undefined;
+    const nextCursor = hasMore ? `page:${pageIndex + 1}` : null;
 
     return {
       provider,
