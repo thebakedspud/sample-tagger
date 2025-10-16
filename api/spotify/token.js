@@ -8,17 +8,21 @@
  * @typedef {import('http').ServerResponse} VercelResponse
  */
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-};
-
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const EXPIRY_SKEW_SECONDS = 60;
 const MIN_EXPIRES_SECONDS = 5;
 const RETRY_AFTER_MAX_MS = 5000;
 const isDevRuntime = process.env.NODE_ENV !== 'production';
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 100;
+
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'https://sample-tagger.vercel.app',
+];
+
+/** @type {Map<string, { count: number, resetAt: number }>} */
+const rateLimitState = new Map();
 
 /** @type {{ access_token: string, token_type: string, expires_at: number, fetched_at: number } | null} */
 let cachedToken = null;
@@ -29,9 +33,40 @@ let inFlightToken = null;
  * Attach shared CORS headers.
  * @param {VercelResponse} res
  */
-function applyCors(res) {
-  Object.entries(CORS_HEADERS).forEach(([name, value]) => {
-    res.setHeader(name, value);
+function isAllowedOrigin(origin) {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  try {
+    const url = new URL(origin);
+    if (url.hostname.endsWith('.vercel.app')) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function buildCorsHeaders(origin) {
+  const allowed = isAllowedOrigin(origin);
+  const headers = {
+    'Access-Control-Allow-Origin': allowed ? origin : '',
+    'Access-Control-Allow-Methods': 'GET,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
+  };
+  return { headers, allowed };
+}
+
+/**
+ * @param {VercelResponse} res
+ * @param {Record<string, string>} headers
+ */
+function applyHeaders(res, headers) {
+  Object.entries(headers).forEach(([key, value]) => {
+    if (value === '') return;
+    res.setHeader(key, value);
   });
 }
 
@@ -46,6 +81,35 @@ function sendJson(res, status, body) {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.end(JSON.stringify(body));
+}
+
+function getClientIp(req) {
+  const header = req.headers?.['x-forwarded-for'];
+  if (typeof header === 'string' && header.length > 0) {
+    return header.split(',')[0].trim() || 'unknown';
+  }
+  if (Array.isArray(header) && header.length > 0) {
+    return header[0].split(',')[0].trim() || 'unknown';
+  }
+  return req.socket?.remoteAddress || 'unknown';
+}
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = rateLimitState.get(ip);
+
+  if (!entry || entry.resetAt <= now) {
+    rateLimitState.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS - 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return { allowed: false, remaining: 0, resetAt: entry.resetAt };
+  }
+
+  entry.count += 1;
+  rateLimitState.set(ip, entry);
+  return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS - entry.count, resetAt: entry.resetAt };
 }
 
 /**
@@ -162,7 +226,9 @@ async function fetchSpotifyToken(clientId, clientSecret) {
  * @param {VercelResponse} res
  */
 export default async function handler(req, res) {
-  applyCors(res);
+  const originHeader = typeof req.headers?.origin === 'string' ? req.headers.origin : '';
+  const { headers: corsHeaders, allowed: originAllowed } = buildCorsHeaders(originHeader);
+  applyHeaders(res, corsHeaders);
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
@@ -172,6 +238,25 @@ export default async function handler(req, res) {
 
   if (req.method !== 'GET') {
     sendJson(res, 405, { error: 'method_not_allowed' });
+    return;
+  }
+
+  if (!originAllowed) {
+    sendJson(res, 403, { error: 'origin_not_allowed' });
+    return;
+  }
+
+  const clientIp = getClientIp(req);
+  const rate = checkRateLimit(clientIp);
+
+  res.setHeader('X-RateLimit-Limit', String(RATE_LIMIT_MAX_REQUESTS));
+  res.setHeader('X-RateLimit-Remaining', String(Math.max(0, rate.remaining)));
+  res.setHeader('X-RateLimit-Reset', String(Math.ceil(rate.resetAt / 1000)));
+
+  if (!rate.allowed) {
+    const retryAfter = Math.max(0, Math.ceil((rate.resetAt - Date.now()) / 1000));
+    res.setHeader('Retry-After', String(retryAfter));
+    sendJson(res, 429, { error: 'rate_limited' });
     return;
   }
 
