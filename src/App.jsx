@@ -8,6 +8,7 @@ import './styles/tokens.css';
 import './styles/primitives.css';
 import './styles/app.css';
 import useAnnounce from './features/a11y/useAnnounce.js'
+import { Analytics } from "@vercel/analytics/next"
 
 // NEW: inline undo
 import useInlineUndo from './features/undo/useInlineUndo.js'
