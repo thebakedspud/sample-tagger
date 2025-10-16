@@ -8,7 +8,7 @@ import './styles/tokens.css';
 import './styles/primitives.css';
 import './styles/app.css';
 import useAnnounce from './features/a11y/useAnnounce.js'
-import { Analytics } from "@vercel/analytics/next"
+import { Analytics } from '@vercel/analytics/react'
 
 // NEW: inline undo
 import useInlineUndo from './features/undo/useInlineUndo.js'
@@ -563,6 +563,7 @@ export default function App() {
       <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)' }}>
         <small>Prototype - Keyboard-first, accessible-by-default</small>
       </footer>
+      <Analytics />
     </div>
   )
 }
