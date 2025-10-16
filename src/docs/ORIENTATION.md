@@ -13,7 +13,7 @@ A 1-page map of what connects to what. Use this to re-anchor quickly after a bre
 | **Playlist title + chip** | `App.jsx` – reads from `importMeta` |
 | **Re-import / Clear / Back** | `App.jsx` – `handleReimport`, `handleClearAll`, `handleBack` |
 | **Track list + “Add note”** | `App.jsx` / `src/components/TrackList.jsx` |
-| **Undo placeholder** | `src/components/UndoPlaceholder.jsx` + `src/features/undo/usePendingDelete.js` |
+| **Undo placeholder** | `src/components/UndoPlaceholder.jsx` + `src/features/undo/useInlineUndo.js` |
 | **“Load more” button** | `App.jsx` → `handleLoadMore()` |
 | **Live announcements (screen reader)** | `src/components/LiveRegion.jsx` |
 | **Focus helpers** | `src/utils/focusById.js` |
