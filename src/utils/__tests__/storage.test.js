@@ -73,5 +73,28 @@ describe('storage cursors', () => {
     const restored = loadAppState();
     expect(restored?.importMeta.cursor).toBeNull();
   });
-});
 
+  it('persists notesByTrack independently of tracks', () => {
+    saveAppState({
+      theme: 'dark',
+      playlistTitle: 'Notes Test',
+      tracks: [],
+      notesByTrack: {
+        'sp:track:1': ['First note'],
+        'sp:track:2': ['Second note'],
+      },
+      importMeta: {},
+      lastImportUrl: '',
+      importedAt: null,
+    });
+
+    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v3'));
+    expect(parsed.notesByTrack['sp:track:1']).toEqual(['First note']);
+    expect(parsed.notesByTrack['sp:track:2']).toEqual(['Second note']);
+
+    const restored = loadAppState();
+    expect(restored?.notesByTrack['sp:track:1']).toEqual(['First note']);
+    expect(restored?.notesByTrack['sp:track:2']).toEqual(['Second note']);
+    expect(Array.isArray(restored?.tracks)).toBe(true);
+  });
+});

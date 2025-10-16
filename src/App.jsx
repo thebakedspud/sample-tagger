@@ -24,6 +24,7 @@ import { ERROR_MAP } from './features/import/errors.js'
 
 // -- Derive initial state from storage (v3 structured: { importMeta, tracks, ... })
 const persisted = loadAppState()
+const INITIAL_NOTES_MAP = createInitialNotesMap(persisted)
 const HAS_VALID_PLAYLIST = !!(persisted?.importMeta?.provider && persisted?.tracks?.length)
 const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
 
@@ -41,6 +42,87 @@ const EMPTY_IMPORT_META = {
 // Handy helper so we never explode on undefined notes
 function getNotes(t) {
   return Array.isArray(t?.notes) ? t.notes : [];
+}
+
+function normalizeNotesList(value) {
+  if (!Array.isArray(value)) return [];
+  /** @type {string[]} */
+  const out = [];
+  value.forEach((note) => {
+    if (typeof note !== 'string') return;
+    const trimmed = note.trim();
+    if (!trimmed) return;
+    out.push(trimmed);
+  });
+  return out;
+}
+
+function hasOwn(map, key) {
+  return Object.prototype.hasOwnProperty.call(map, key);
+}
+
+function cloneNotesMap(source) {
+  const out = Object.create(null);
+  if (!source || typeof source !== 'object') return out;
+  Object.entries(source).forEach(([key, raw]) => {
+    const id = typeof key === 'string' ? key : String(key);
+    if (!id) return;
+    const cleaned = normalizeNotesList(raw);
+    if (cleaned.length > 0) {
+      out[id] = cleaned;
+    }
+  });
+  return out;
+}
+
+function createInitialNotesMap(state) {
+  const fromState = cloneNotesMap(state?.notesByTrack);
+  if (Array.isArray(state?.tracks)) {
+    state.tracks.forEach((track) => {
+      if (!track || typeof track !== 'object') return;
+      const id = track.id;
+      if (!id || hasOwn(fromState, id)) return;
+      const cleaned = normalizeNotesList(track.notes);
+      if (cleaned.length > 0) {
+        fromState[id] = cleaned;
+      }
+    });
+  }
+  return fromState;
+}
+
+function ensureNotesEntries(baseMap, tracks) {
+  const next = cloneNotesMap(baseMap);
+  if (!Array.isArray(tracks)) return next;
+  tracks.forEach((track) => {
+    if (!track || typeof track !== 'object') return;
+    const id = track.id;
+    if (!id || hasOwn(next, id)) return;
+    next[id] = [];
+  });
+  return next;
+}
+
+function attachNotesToTracks(trackList, notesMap) {
+  if (!Array.isArray(trackList)) return [];
+  const safeMap = notesMap || Object.create(null);
+  return trackList.map((track) => {
+    if (!track || typeof track !== 'object') return track;
+    const id = track.id;
+    const mappedNotes = id && hasOwn(safeMap, id) ? [...safeMap[id]] : normalizeNotesList(track.notes);
+    return { ...track, notes: mappedNotes };
+  });
+}
+
+function updateNotesMap(baseMap, trackId, nextNotes) {
+  const map = cloneNotesMap(baseMap);
+  if (!trackId) return map;
+  if (Array.isArray(nextNotes) && nextNotes.length > 0) {
+    map[trackId] = [...nextNotes];
+  } else if (hasOwn(map, trackId)) {
+    delete map[trackId];
+  }
+  return map;
 }
 
 export default function App() {
@@ -71,9 +153,11 @@ export default function App() {
     persisted?.lastImportUrl ?? (persisted?.importMeta?.sourceUrl ?? '')
   )
 
+  const [notesByTrack, setNotesByTrack] = useState(() => ensureNotesEntries(INITIAL_NOTES_MAP, persisted?.tracks ?? []))
+
   // DATA - normalize persisted tracks so notes always exist
-  const [tracks, setTracks] = useState(
-    (persisted?.tracks ?? []).map(t => ({ ...t, notes: getNotes(t) }))
+  const [tracks, setTracks] = useState(() =>
+    attachNotesToTracks(persisted?.tracks ?? [], notesByTrack)
   )
 
   const [editingId, setEditingId] = useState(null)
@@ -82,6 +166,12 @@ export default function App() {
 
   // Remember which button opened the editor
   const editorInvokerRef = useRef(null)
+  const notesByTrackRef = useRef(notesByTrack)
+  const backupFileInputRef = useRef(null)
+
+  useEffect(() => {
+    notesByTrackRef.current = notesByTrack
+  }, [notesByTrack])
 
   const {
     pending,
@@ -95,15 +185,20 @@ export default function App() {
     onUndo: (meta) => {
       if (!meta) return
       const { trackId, note, index, restoreFocusId, fallbackFocusId } = meta
+      const currentMap = notesByTrackRef.current
+      const existing = trackId && currentMap && hasOwn(currentMap, trackId)
+        ? [...currentMap[trackId]]
+        : []
+      const insertAt = Math.min(Math.max(index, 0), existing.length + 1)
+      if (note != null) {
+        existing.splice(insertAt, 0, note)
+      }
+      const updatedMap = updateNotesMap(currentMap, trackId, existing)
+      setNotesByTrack(updatedMap)
       setTracks(prev =>
         prev.map(t => {
           if (t.id !== trackId) return t
-          const notes = [...getNotes(t)]
-          const insertAt = Math.min(Math.max(index, 0), notes.length + 1)
-          if (note != null) {
-            notes.splice(insertAt, 0, note)
-          }
-          return { ...t, notes }
+          return { ...t, notes: [...existing] }
         })
       )
       announce('Note restored')
@@ -126,6 +221,12 @@ export default function App() {
   })
 
   // REIMPORT focus pattern
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator?.storage?.persist) {
+      navigator.storage.persist().catch(() => { /* best effort */ })
+    }
+  }, [])
+
   const reimportBtnRef = useRef(null)
   const loadMoreBtnRef = useRef(null)
 
@@ -137,8 +238,9 @@ export default function App() {
       lastImportUrl,
       tracks,
       importMeta,
+      notesByTrack,
     })
-  }, [playlistTitle, importedAt, lastImportUrl, tracks, importMeta])
+  }, [playlistTitle, importedAt, lastImportUrl, tracks, importMeta, notesByTrack])
 
   // Safety: close editor if its track disappears or changes
   useEffect(() => {
@@ -240,7 +342,9 @@ export default function App() {
       }
 
       const { tracks: mapped, meta, title, importedAt: importedTimestamp } = result.data
-      setTracks(mapped)
+      const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, mapped)
+      setNotesByTrack(nextNotesMap)
+      setTracks(attachNotesToTracks(mapped, nextNotesMap))
       setImportMeta({
         ...EMPTY_IMPORT_META,
         ...meta,
@@ -292,7 +396,9 @@ export default function App() {
       }
 
       const { tracks: mapped, meta, title, importedAt: importedTimestamp } = result.data
-      setTracks(mapped)
+      const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, mapped)
+      setNotesByTrack(nextNotesMap)
+      setTracks(attachNotesToTracks(mapped, nextNotesMap))
       setImportMeta({
         ...EMPTY_IMPORT_META,
         ...meta,
@@ -354,7 +460,10 @@ export default function App() {
         return
       }
 
-      setTracks(prev => [...prev, ...additions])
+      const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, additions)
+      setNotesByTrack(nextNotesMap)
+      const additionsWithNotes = attachNotesToTracks(additions, nextNotesMap)
+      setTracks(prev => [...prev, ...additionsWithNotes])
       setImportMeta(prev => ({
         ...prev,
         ...meta,
@@ -380,6 +489,94 @@ export default function App() {
     }
   }
 
+  const handleExportNotes = async () => {
+    try {
+      const payload = {
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        playlist: {
+          title: playlistTitle,
+          provider: importMeta?.provider ?? null,
+          playlistId: importMeta?.playlistId ?? null,
+          snapshotId: importMeta?.snapshotId ?? null,
+          sourceUrl: importMeta?.sourceUrl ?? lastImportUrl ?? '',
+        },
+        notesByTrack: cloneNotesMap(notesByTrackRef.current),
+      }
+      const json = JSON.stringify(payload, null, 2)
+      const blob = new Blob([json], { type: 'application/json' })
+      const timestamp = new Date().toISOString().replace(/[:]/g, '-')
+      const suggestedName = `sample-tagger-notes-${timestamp}.json`
+
+      if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+        try {
+          const picker = /** @type {any} */ (window).showSaveFilePicker
+          const handle = await picker({
+            suggestedName,
+            types: [
+              {
+                description: 'Sample Tagger notes backup',
+                accept: { 'application/json': ['.json'] },
+              },
+            ],
+          })
+          const writable = await handle.createWritable()
+          await writable.write(blob)
+          await writable.close()
+          announce('Notes exported to the selected file.')
+          return
+        } catch (err) {
+          if (err?.name === 'AbortError') {
+            announce('Export cancelled.')
+            return
+          }
+          throw err
+        }
+      }
+
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = suggestedName
+      document.body.appendChild(anchor)
+      anchor.click()
+      document.body.removeChild(anchor)
+      URL.revokeObjectURL(url)
+      announce('Notes exported.')
+    } catch (err) {
+      console.error('[notes export error]', err)
+      announce('Export failed. Please try again.')
+    }
+  }
+
+  const handleImportNotesRequest = () => {
+    backupFileInputRef.current?.click()
+  }
+
+  const handleImportNotesFromFile = async (event) => {
+    const input = event.target
+    const file = input?.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const parsed = JSON.parse(text)
+      const importedMap = cloneNotesMap(parsed?.notesByTrack)
+      const merged = cloneNotesMap(notesByTrackRef.current)
+      Object.entries(importedMap).forEach(([id, notes]) => {
+        merged[id] = [...notes]
+      })
+      const nextMap = ensureNotesEntries(merged, tracks)
+      setNotesByTrack(nextMap)
+      setTracks(prev => attachNotesToTracks(prev, nextMap))
+      announce('Notes import complete.')
+    } catch (err) {
+      console.error('[notes import error]', err)
+      announce('Notes import failed. Please verify the file.')
+    } finally {
+      if (input) input.value = ''
+    }
+  }
+
   const handleClearAll = () => {
     // Reset transient UI and timers
     clearInlineUndo()
@@ -389,6 +586,7 @@ export default function App() {
     clearAppState()
 
     // Reset in-memory app state
+    setNotesByTrack(Object.create(null))
     setTracks([])
     setImportMeta({ ...EMPTY_IMPORT_META })
     setPlaylistTitle('My Playlist')
@@ -417,11 +615,17 @@ export default function App() {
       setError('Note cannot be empty.')
       return
     }
+    const trimmed = draft.trim()
+    const existing = trackId && hasOwn(notesByTrack, trackId)
+      ? [...notesByTrack[trackId]]
+      : []
+    existing.push(trimmed)
+    const nextMap = updateNotesMap(notesByTrack, trackId, existing)
+    setNotesByTrack(nextMap)
     setTracks(prev =>
       prev.map(t => {
         if (t.id !== trackId) return t
-        const notes = getNotes(t)
-        return { ...t, notes: [...notes, draft.trim()] }
+        return { ...t, notes: [...existing] }
       })
     )
     setEditingId(null); setDraft(''); setError(null)
@@ -445,11 +649,16 @@ export default function App() {
     const noteToDelete = notes[noteIndex]
     if (noteToDelete == null) return
 
+    const existing = trackId && hasOwn(notesByTrack, trackId)
+      ? [...notesByTrack[trackId]]
+      : [...notes]
+    const updated = existing.filter((_, i) => i !== noteIndex)
+    const nextMap = updateNotesMap(notesByTrack, trackId, updated)
+    setNotesByTrack(nextMap)
     setTracks(prev =>
       prev.map(t => {
         if (t.id !== trackId) return t
-        const n = getNotes(t)
-        return { ...t, notes: n.filter((_, i) => i !== noteIndex) }
+        return { ...t, notes: [...updated] }
       })
     )
 
@@ -556,6 +765,8 @@ export default function App() {
             reimportBtnRef={reimportBtnRef}
             loadMoreBtnRef={loadMoreBtnRef}
             onLoadMore={handleLoadMore}
+            onExportNotes={handleExportNotes}
+            onImportNotes={handleImportNotesRequest}
           />
         )}
       </main>
@@ -564,6 +775,15 @@ export default function App() {
         <small>Prototype - Keyboard-first, accessible-by-default</small>
       </footer>
       <Analytics />
+      <input
+        ref={backupFileInputRef}
+        type="file"
+        accept="application/json"
+        style={{ display: 'none' }}
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={handleImportNotesFromFile}
+      />
     </div>
   )
 }

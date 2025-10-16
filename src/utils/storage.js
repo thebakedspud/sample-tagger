@@ -22,6 +22,8 @@
  * @property {string} artist
  * @property {string[]} notes
  *
+ * @typedef {Record<string, string[]>} NotesByTrack
+ *
  * @typedef {Object} PersistedState
  * @property {number} version
  * @property {Theme} theme
@@ -30,6 +32,7 @@
  * @property {string} lastImportUrl
  * @property {PersistedTrack[]} tracks
  * @property {ImportMeta} importMeta
+ * @property {NotesByTrack} notesByTrack
  */
 
 const STORAGE_VERSION = 3;
@@ -86,6 +89,7 @@ export function saveAppState(state) {
       lastImportUrl: typeof state?.lastImportUrl === 'string' ? state.lastImportUrl : '',
       tracks: sanitizeTracks(state?.tracks),
       importMeta: sanitizeImportMeta(state?.importMeta),
+      notesByTrack: sanitizeNotesMap(state?.notesByTrack, state?.tracks),
     };
     localStorage.setItem(LS_KEY, JSON.stringify(payload));
   } catch {
@@ -123,6 +127,7 @@ function createEmptyState(theme = 'dark') {
     lastImportUrl: '',
     tracks: [],
     importMeta: { ...EMPTY_META },
+    notesByTrack: Object.create(null),
   };
 }
 
@@ -139,6 +144,7 @@ function normalizeState(data) {
     lastImportUrl: typeof data?.lastImportUrl === 'string' ? data.lastImportUrl : base.lastImportUrl,
     tracks: sanitizeTracks(data?.tracks),
     importMeta: sanitizeImportMeta(data?.importMeta),
+    notesByTrack: sanitizeNotesMap(data?.notesByTrack, data?.tracks),
   };
 }
 
@@ -167,6 +173,7 @@ function migrateLegacy(v2) {
     lastImportUrl,
     tracks,
     importMeta,
+    notesByTrack: sanitizeNotesMap(null, tracks),
   };
 }
 
@@ -217,6 +224,43 @@ function sanitizeTracks(list) {
 }
 
 /**
+ * @param {unknown} input
+ * @param {unknown} fallbackTracks
+ * @returns {NotesByTrack}
+ */
+function sanitizeNotesMap(input, fallbackTracks) {
+  /** @type {NotesByTrack} */
+  const out = Object.create(null);
+
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    for (const [rawId, rawNotes] of Object.entries(/** @type {Record<string, unknown>} */ (input))) {
+      const id = safeString(rawId);
+      if (!id) continue;
+      const cleaned = normalizeNotesArray(rawNotes);
+      if (cleaned.length > 0) {
+        out[id] = cleaned;
+      }
+    }
+  }
+
+  if (Array.isArray(fallbackTracks)) {
+    fallbackTracks.forEach((t, idx) => {
+      if (!t || typeof t !== 'object') return;
+      const id =
+        safeString(/** @type {any} */ (t).id) ||
+        `track-${idx + 1}`;
+      if (!id || out[id]) return;
+      const cleaned = normalizeNotesArray(/** @type {any} */ (t).notes);
+      if (cleaned.length > 0) {
+        out[id] = cleaned;
+      }
+    });
+  }
+
+  return out;
+}
+
+/**
  * @param {any} meta
  * @returns {ImportMeta}
  */
@@ -261,4 +305,21 @@ function safeString(value) {
   if (typeof value !== 'string') return '';
   const trimmed = value.trim();
   return trimmed || '';
+}
+
+/**
+ * @param {unknown} maybeNotes
+ * @returns {string[]}
+ */
+function normalizeNotesArray(maybeNotes) {
+  if (!Array.isArray(maybeNotes)) return [];
+  /** @type {string[]} */
+  const out = [];
+  maybeNotes.forEach((note) => {
+    if (typeof note !== 'string') return;
+    const trimmed = note.trim();
+    if (!trimmed) return;
+    out.push(trimmed);
+  });
+  return out;
 }
