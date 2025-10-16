@@ -7,6 +7,21 @@ function createResponse(body, init) {
   return new Response(body ?? '', init);
 }
 
+function createReq(overrides = {}) {
+  const headers = {
+    origin: 'http://localhost:5173',
+    'x-forwarded-for': '127.0.0.1',
+    ...(overrides.headers ?? {}),
+  };
+
+  return {
+    method: overrides.method ?? 'GET',
+    headers,
+    socket: overrides.socket ?? { remoteAddress: '127.0.0.1' },
+    ...overrides,
+  };
+}
+
 function createRes() {
   let body = '';
   const headers = new Map();
@@ -74,13 +89,13 @@ describe('api/spotify/token', () => {
     const { default: handler, __resetTokenCacheForTests } = await loadHandler();
 
     const res1 = createRes();
-    await handler({ method: 'GET' }, res1);
+    await handler(createReq(), res1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(res1.json()).toMatchObject({ access_token: 'token-A', token_type: 'Bearer' });
 
     now += 1_000; // still before expiry
     const res2 = createRes();
-    await handler({ method: 'GET' }, res2);
+    await handler(createReq(), res2);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     const body2 = res2.json();
@@ -111,7 +126,7 @@ describe('api/spotify/token', () => {
     const { default: handler, __resetTokenCacheForTests } = await loadHandler();
 
     const res = createRes();
-    await handler({ method: 'GET' }, res);
+    await handler(createReq(), res);
 
     const cacheHeader = res.getHeader('cache-control');
     expect(cacheHeader).toMatch(/no-store/i);
@@ -155,8 +170,8 @@ describe('api/spotify/token', () => {
     const resA = createRes();
     const resB = createRes();
 
-    const promiseA = handler({ method: 'GET' }, resA);
-    const promiseB = handler({ method: 'GET' }, resB);
+    const promiseA = handler(createReq(), resA);
+    const promiseB = handler(createReq(), resB);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -199,7 +214,7 @@ describe('api/spotify/token', () => {
     const { default: handler, __resetTokenCacheForTests } = await loadHandler();
 
     const res = createRes();
-    const promise = handler({ method: 'GET' }, res);
+    const promise = handler(createReq(), res);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -246,7 +261,7 @@ describe('api/spotify/token', () => {
     const { default: handler, __resetTokenCacheForTests } = await loadHandler();
 
     const res = createRes();
-    const promise = handler({ method: 'GET' }, res);
+    const promise = handler(createReq(), res);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -291,14 +306,14 @@ describe('api/spotify/token', () => {
     const { default: handler, __resetTokenCacheForTests } = await loadHandler();
 
     const res1 = createRes();
-    await handler({ method: 'GET' }, res1);
+    await handler(createReq(), res1);
     expect(res1.json().access_token).toBe('token-old');
 
     // Advance beyond skew-adjusted minimum expiry (skew yields 5s floor)
     now += 6_000;
 
     const res2 = createRes();
-    await handler({ method: 'GET' }, res2);
+    await handler(createReq(), res2);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(res2.json().access_token).toBe('token-new');
 
