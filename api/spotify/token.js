@@ -8,18 +8,34 @@
  * @typedef {import('http').ServerResponse} VercelResponse
  */
 
+import { isOriginAllowed } from './originConfig.js';
+
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const EXPIRY_SKEW_SECONDS = 60;
 const MIN_EXPIRES_SECONDS = 5;
 const RETRY_AFTER_MAX_MS = 5000;
 const isDevRuntime = process.env.NODE_ENV !== 'production';
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-const RATE_LIMIT_MAX_REQUESTS = 100;
 
-const ALLOWED_ORIGINS = [
-  'http://localhost:5173',
-  'https://sample-tagger.vercel.app',
-];
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 100;
+
+function parsePositiveInt(value, fallback) {
+  if (typeof value !== 'string') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return fallback;
+}
+
+const RATE_LIMIT_WINDOW_MS = parsePositiveInt(
+  process.env.SPOTIFY_TOKEN_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_RATE_LIMIT_WINDOW_MS
+);
+const RATE_LIMIT_MAX_REQUESTS = parsePositiveInt(
+  process.env.SPOTIFY_TOKEN_RATE_LIMIT_MAX,
+  DEFAULT_RATE_LIMIT_MAX_REQUESTS
+);
 
 /** @type {Map<string, { count: number, resetAt: number }>} */
 const rateLimitState = new Map();
@@ -33,29 +49,17 @@ let inFlightToken = null;
  * Attach shared CORS headers.
  * @param {VercelResponse} res
  */
-function isAllowedOrigin(origin) {
-  if (!origin) return false;
-  if (ALLOWED_ORIGINS.includes(origin)) return true;
-  try {
-    const url = new URL(origin);
-    if (url.hostname.endsWith('.vercel.app')) {
-      return true;
-    }
-  } catch {
-    return false;
-  }
-  return false;
-}
-
 function buildCorsHeaders(origin) {
-  const allowed = isAllowedOrigin(origin);
+  const allowed = isOriginAllowed(origin);
   const headers = {
-    'Access-Control-Allow-Origin': allowed ? origin : '',
     'Access-Control-Allow-Methods': 'GET,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
+  if (allowed && origin) {
+    headers['Access-Control-Allow-Origin'] = origin;
+  }
   return { headers, allowed };
 }
 
@@ -322,4 +326,8 @@ export default async function handler(req, res) {
 export function __resetTokenCacheForTests() {
   cachedToken = null;
   inFlightToken = null;
+}
+
+export function __resetRateLimitStateForTests() {
+  rateLimitState.clear();
 }

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+import { getAllowedOrigins } from '../originConfig.js';
+
 const ORIGINAL_FETCH = global.fetch;
 const ORIGINAL_ENV = { ...process.env };
 
@@ -7,18 +9,38 @@ function createResponse(body, init) {
   return new Response(body ?? '', init);
 }
 
-function createReq(overrides = {}) {
-  const headers = {
-    origin: 'http://localhost:5173',
-    'x-forwarded-for': '127.0.0.1',
-    ...(overrides.headers ?? {}),
-  };
+function createReq(options = {}) {
+  const allowedOrigins = getAllowedOrigins();
+  const defaultOrigin = allowedOrigins[0] ?? 'http://localhost:5173';
+  const clientIp = options.ip ?? '127.0.0.1';
+
+  const headers = { ...(options.headers ?? {}) };
+
+  let originValue;
+  if (Object.prototype.hasOwnProperty.call(options, 'origin')) {
+    originValue = options.origin;
+  } else if (Object.prototype.hasOwnProperty.call(headers, 'origin')) {
+    originValue = headers.origin;
+  } else {
+    originValue = defaultOrigin;
+  }
+
+  if (originValue === null) {
+    delete headers.origin;
+  } else if (originValue !== undefined) {
+    headers.origin = originValue;
+  }
+
+  if (!headers['x-forwarded-for']) {
+    headers['x-forwarded-for'] = clientIp;
+  }
+
+  const socket = options.socket ?? { remoteAddress: clientIp };
 
   return {
-    method: overrides.method ?? 'GET',
+    method: options.method ?? 'GET',
     headers,
-    socket: overrides.socket ?? { remoteAddress: '127.0.0.1' },
-    ...overrides,
+    socket,
   };
 }
 
@@ -55,12 +77,18 @@ beforeEach(() => {
   vi.resetModules();
   process.env.SPOTIFY_CLIENT_ID = 'id';
   process.env.SPOTIFY_CLIENT_SECRET = 'secret';
+  process.env.SPOTIFY_TOKEN_ALLOWED_ORIGINS = 'http://localhost:5173,https://sample-tagger.vercel.app';
   vi.spyOn(console, 'debug').mockImplementation(() => {});
 });
 
 afterEach(() => {
   global.fetch = ORIGINAL_FETCH;
   vi.useRealTimers();
+  Object.keys(process.env).forEach((key) => {
+    if (!(key in ORIGINAL_ENV)) {
+      delete process.env[key];
+    }
+  });
   Object.assign(process.env, ORIGINAL_ENV);
 });
 
@@ -86,7 +114,11 @@ describe('api/spotify/token', () => {
 
     global.fetch = fetchMock;
 
-    const { default: handler, __resetTokenCacheForTests } = await loadHandler();
+    const {
+      default: handler,
+      __resetTokenCacheForTests,
+      __resetRateLimitStateForTests,
+    } = await loadHandler();
 
     const res1 = createRes();
     await handler(createReq(), res1);
@@ -103,6 +135,7 @@ describe('api/spotify/token', () => {
     expect(body2.expires_in).toBeGreaterThan(0);
 
     __resetTokenCacheForTests();
+    __resetRateLimitStateForTests();
   });
 
   it('emits cache headers and expires_at when issuing a token', async () => {
@@ -123,7 +156,11 @@ describe('api/spotify/token', () => {
 
     global.fetch = fetchMock;
 
-    const { default: handler, __resetTokenCacheForTests } = await loadHandler();
+    const {
+      default: handler,
+      __resetTokenCacheForTests,
+      __resetRateLimitStateForTests,
+    } = await loadHandler();
 
     const res = createRes();
     await handler(createReq(), res);
@@ -140,6 +177,30 @@ describe('api/spotify/token', () => {
     expect(body.expires_at).toBeGreaterThan(Date.now());
 
     __resetTokenCacheForTests();
+    __resetRateLimitStateForTests();
+  });
+
+  it('rejects requests from disallowed origins', async () => {
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock;
+
+    const {
+      default: handler,
+      __resetTokenCacheForTests,
+      __resetRateLimitStateForTests,
+    } = await loadHandler();
+
+    const res = createRes();
+    await handler(createReq({ origin: 'https://evil.example.com' }), res);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: 'origin_not_allowed' });
+    expect(res.getHeader('access-control-allow-origin')).toBeUndefined();
+    expect(res.getHeader('vary')).toBe('Origin');
+
+    __resetTokenCacheForTests();
+    __resetRateLimitStateForTests();
   });
 
   it('dedupes concurrent requests while fetching a fresh token', async () => {
@@ -165,7 +226,11 @@ describe('api/spotify/token', () => {
 
     global.fetch = fetchMock;
 
-    const { default: handler, __resetTokenCacheForTests } = await loadHandler();
+    const {
+      default: handler,
+      __resetTokenCacheForTests,
+      __resetRateLimitStateForTests,
+    } = await loadHandler();
 
     const resA = createRes();
     const resB = createRes();
@@ -183,6 +248,58 @@ describe('api/spotify/token', () => {
     expect(resB.json().access_token).toBe('token-concurrent');
 
     __resetTokenCacheForTests();
+    __resetRateLimitStateForTests();
+  });
+
+  it('enforces rate limiting per IP address', async () => {
+    process.env.SPOTIFY_TOKEN_RATE_LIMIT_MAX = '2';
+    process.env.SPOTIFY_TOKEN_RATE_LIMIT_WINDOW_MS = '1000';
+
+    const payload = {
+      access_token: 'token-limited',
+      token_type: 'Bearer',
+      expires_in: 3600,
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        createResponse(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+    global.fetch = fetchMock;
+
+    const {
+      default: handler,
+      __resetTokenCacheForTests,
+      __resetRateLimitStateForTests,
+    } = await loadHandler();
+
+    const ip = '203.0.113.42';
+
+    const res1 = createRes();
+    await handler(createReq({ ip }), res1);
+    expect(res1.statusCode).toBe(200);
+
+    const res2 = createRes();
+    await handler(createReq({ ip }), res2);
+    expect(res2.statusCode).toBe(200);
+
+    const res3 = createRes();
+    await handler(createReq({ ip }), res3);
+    expect(res3.statusCode).toBe(429);
+    expect(res3.json()).toMatchObject({ error: 'rate_limited' });
+    expect(res3.getHeader('retry-after')).toBeDefined();
+    expect(res3.getHeader('x-ratelimit-limit')).toBe('2');
+    expect(res3.getHeader('x-ratelimit-remaining')).toBe('0');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    __resetTokenCacheForTests();
+    __resetRateLimitStateForTests();
   });
 
   it('retries once on 429 with retry-after seconds', async () => {
@@ -211,7 +328,11 @@ describe('api/spotify/token', () => {
 
     global.fetch = fetchMock;
 
-    const { default: handler, __resetTokenCacheForTests } = await loadHandler();
+    const {
+      default: handler,
+      __resetTokenCacheForTests,
+      __resetRateLimitStateForTests,
+    } = await loadHandler();
 
     const res = createRes();
     const promise = handler(createReq(), res);
@@ -225,6 +346,7 @@ describe('api/spotify/token', () => {
     expect(res.json().access_token).toBe('token-retry');
 
     __resetTokenCacheForTests();
+    __resetRateLimitStateForTests();
     vi.useRealTimers();
   });
 
@@ -258,7 +380,11 @@ describe('api/spotify/token', () => {
 
     global.fetch = fetchMock;
 
-    const { default: handler, __resetTokenCacheForTests } = await loadHandler();
+    const {
+      default: handler,
+      __resetTokenCacheForTests,
+      __resetRateLimitStateForTests,
+    } = await loadHandler();
 
     const res = createRes();
     const promise = handler(createReq(), res);
@@ -273,6 +399,7 @@ describe('api/spotify/token', () => {
     expect(res.json().access_token).toBe('token-clamp');
 
     __resetTokenCacheForTests();
+    __resetRateLimitStateForTests();
     vi.useRealTimers();
   });
 
@@ -303,7 +430,11 @@ describe('api/spotify/token', () => {
 
     global.fetch = fetchMock;
 
-    const { default: handler, __resetTokenCacheForTests } = await loadHandler();
+    const {
+      default: handler,
+      __resetTokenCacheForTests,
+      __resetRateLimitStateForTests,
+    } = await loadHandler();
 
     const res1 = createRes();
     await handler(createReq(), res1);
@@ -318,5 +449,6 @@ describe('api/spotify/token', () => {
     expect(res2.json().access_token).toBe('token-new');
 
     __resetTokenCacheForTests();
+    __resetRateLimitStateForTests();
   });
 });
