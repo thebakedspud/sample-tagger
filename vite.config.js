@@ -12,6 +12,16 @@ export default defineConfig({
     setupFiles: './vitest.setup.js',
     globals: true,
     css: false,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json-summary', 'lcov'],
+      thresholds: {
+        statements: 60,
+        branches: 55,
+        functions: 70,
+        lines: 60,
+      },
+    },
   },
   server: {
     proxy: {
