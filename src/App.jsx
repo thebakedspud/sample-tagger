@@ -489,7 +489,7 @@ export default function App() {
     }
   }
 
-  const handleExportNotes = async () => {
+  const handleBackupNotes = async () => {
     try {
       const payload = {
         version: 1,
@@ -527,11 +527,11 @@ export default function App() {
           return
         } catch (err) {
           if (err?.name === 'AbortError') {
-            announce('Export cancelled.')
-            return
-          }
-          throw err
+          announce('Backup cancelled.')
+          return
         }
+        throw err
+      }
       }
 
       const url = URL.createObjectURL(blob)
@@ -542,14 +542,14 @@ export default function App() {
       anchor.click()
       document.body.removeChild(anchor)
       URL.revokeObjectURL(url)
-      announce('Notes exported.')
+      announce('Notes backup downloaded.')
     } catch (err) {
-      console.error('[notes export error]', err)
-      announce('Export failed. Please try again.')
+      console.error('[notes backup error]', err)
+      announce('Backup failed. Please try again.')
     }
   }
 
-  const handleImportNotesRequest = () => {
+  const handleRestoreNotesRequest = () => {
     backupFileInputRef.current?.click()
   }
 
@@ -568,10 +568,10 @@ export default function App() {
       const nextMap = ensureNotesEntries(merged, tracks)
       setNotesByTrack(nextMap)
       setTracks(prev => attachNotesToTracks(prev, nextMap))
-      announce('Notes import complete.')
+      announce('Notes restored from backup.')
     } catch (err) {
-      console.error('[notes import error]', err)
-      announce('Notes import failed. Please verify the file.')
+      console.error('[notes restore error]', err)
+      announce('Restore failed. Please verify the file.')
     } finally {
       if (input) input.value = ''
     }
@@ -686,7 +686,7 @@ export default function App() {
         </div>
       </header>
 
-      <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px' }}>
+      <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px', paddingBottom: 128 }}>
         {screen === 'landing' && (
           <section aria-labelledby="landing-title">
             <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
@@ -765,15 +765,39 @@ export default function App() {
             reimportBtnRef={reimportBtnRef}
             loadMoreBtnRef={loadMoreBtnRef}
             onLoadMore={handleLoadMore}
-            onExportNotes={handleExportNotes}
-            onImportNotes={handleImportNotesRequest}
           />
         )}
       </main>
 
-      <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)' }}>
+      <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)', paddingBottom: 96 }}>
         <small>Prototype - Keyboard-first, accessible-by-default</small>
       </footer>
+      <div
+        role="region"
+        aria-label="Note backup controls"
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          width: '100%',
+          background: 'var(--surface, #0f1115)',
+          borderTop: '1px solid var(--border, rgba(255,255,255,0.1))',
+          padding: '12px 16px',
+          display: 'flex',
+          justifyContent: 'center',
+          gap: 16,
+          zIndex: 10,
+        }}
+      >
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button type="button" className="btn" onClick={handleBackupNotes}>
+            Backup Notes
+          </button>
+          <button type="button" className="btn" onClick={handleRestoreNotesRequest}>
+            Restore Notes
+          </button>
+        </div>
+      </div>
       <Analytics />
       <input
         ref={backupFileInputRef}

@@ -26,8 +26,6 @@ import TrackCard from './TrackCard.jsx'
  * @param {import('react').RefObject<HTMLButtonElement>} props.reimportBtnRef
  * @param {import('react').RefObject<HTMLButtonElement>} props.loadMoreBtnRef
  * @param {() => void} props.onLoadMore
- * @param {() => void} props.onExportNotes
- * @param {() => void} props.onImportNotes
  */
 export default function PlaylistView({
   playlistTitle,
@@ -54,8 +52,6 @@ export default function PlaylistView({
   reimportBtnRef,
   loadMoreBtnRef,
   onLoadMore,
-  onExportNotes,
-  onImportNotes,
 }) {
   const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
   const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
@@ -91,12 +87,6 @@ export default function PlaylistView({
               {showReimportSpinner ? 'Re-importing...' : 'Re-import'}
             </button>
           )}
-          <button type="button" className="btn" onClick={onExportNotes}>
-            Export
-          </button>
-          <button type="button" className="btn" onClick={onImportNotes}>
-            Import
-          </button>
           <button type="button" className="btn" onClick={onClear} aria-label="Clear all data">
             Clear
           </button>
