@@ -14,12 +14,21 @@ export default function UndoPlaceholder({
   const rafRef = useRef(null)
   const remainingRef = useRef(windowMs)
   const lastTickRef = useRef(0)
+  const durationRef = useRef(windowMs)
   const hoveredRef = useRef(false) // ref so RAF loop reads the current value
+
+  // Restart the countdown only when the requested window length changes.
+  useEffect(() => {
+    if (durationRef.current !== windowMs) {
+      durationRef.current = windowMs
+      remainingRef.current = windowMs
+    }
+  }, [windowMs])
 
   // Start/stop the countdown, pausing while focused or hovered
   useEffect(() => {
-    btnRef.current?.focus()
     lastTickRef.current = performance.now()
+    btnRef.current?.focus()
 
     function isDomFocused() {
       return document.activeElement === btnRef.current
