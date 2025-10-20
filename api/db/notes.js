@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   let payload
   try {
     payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
-  } catch (err) {
+  } catch (_err) {
     return res.status(400).json({ error: 'Invalid JSON payload' })
   }
 
@@ -49,4 +49,3 @@ export default async function handler(req, res) {
 
   return res.status(200).json({ note: data })
 }
-

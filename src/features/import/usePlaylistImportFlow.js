@@ -2,6 +2,11 @@ import { useCallback, useRef, useState } from 'react'
 import useImportPlaylist from './useImportPlaylist.js'
 import { extractErrorCode, CODES } from './adapters/types.js'
 
+/**
+ * @typedef {'idle' | 'importing' | 'reimporting' | 'loadingMore'} ImportStatus
+ */
+
+/** @type {{ IDLE: ImportStatus, IMPORTING: ImportStatus, REIMPORTING: ImportStatus, LOADING_MORE: ImportStatus }} */
 export const ImportFlowStatus = Object.freeze({
   IDLE: 'idle',
   IMPORTING: 'importing',
@@ -76,10 +81,11 @@ function buildMeta(res, fallback = {}) {
 
 export default function usePlaylistImportFlow() {
   const { importPlaylist, importNext, loading, reset: resetImportSession } = useImportPlaylist()
-  const [status, setStatus] = useState(ImportFlowStatus.IDLE)
+  const [status, setStatus] = useState(/** @type {ImportStatus} */ (ImportFlowStatus.IDLE))
   const [errorCode, setErrorCode] = useState(null)
   const requestIdRef = useRef(0)
 
+  /** @param {ImportStatus} nextStatus */
   const beginRequest = useCallback((nextStatus) => {
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
