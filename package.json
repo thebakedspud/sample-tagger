@@ -14,6 +14,7 @@
     "test:ci": "cross-env CI=1 vitest run --reporter=basic --maxWorkers=50%"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
     "@supabase/supabase-js": "^2.75.1",
     "@vercel/analytics": "^1.5.0",
     "react": "^19.1.1",
