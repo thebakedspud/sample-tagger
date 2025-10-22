@@ -91,6 +91,26 @@ $$;
 alter table public.notes
   add column if not exists last_active timestamptz not null default timezone('utc', now());
 
+-- SAFETY: ensure track_id is text so non-uuid provider IDs are allowed
+alter table public.notes drop constraint if exists notes_track_id_fkey;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name   = 'notes'
+      and column_name  = 'track_id'
+      and data_type   <> 'text'
+  ) then
+    alter table public.notes
+      alter column track_id type text
+      using track_id::text;
+  end if;
+end;
+$$;
+
 -- Identity fingerprint for fast recovery lookups
 alter table public.anon_identities
   add column if not exists recovery_code_fingerprint text;
