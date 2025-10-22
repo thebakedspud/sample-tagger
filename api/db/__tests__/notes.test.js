@@ -18,6 +18,11 @@ vi.mock('../../_lib/supabase.js', () => ({
   getAnonContext: getAnonContextMock,
   touchLastActive: touchLastActiveMock,
   withCors: withCorsMock,
+  getDeviceIdFromRequest: (req) => {
+    const raw = req?.headers?.['x-device-id'];
+    if (Array.isArray(raw)) return raw[0];
+    return typeof raw === 'string' ? raw : null;
+  },
   get hasSupabaseConfig() {
     return hasConfig;
   },

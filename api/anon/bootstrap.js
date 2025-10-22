@@ -5,80 +5,64 @@ import {
   touchLastActive,
   withCors,
   hasSupabaseConfig,
+  getDeviceIdFromRequest,
 } from '../_lib/supabase.js';
+import {
+  generateRecoveryCode,
+  hashRecoveryCode,
+  fingerprintRecoveryCode,
+} from '../_lib/recovery.js';
 
 const supabaseAdmin = getAdminClient();
-let argonHash;
-
-async function getArgonHash() {
-  if (argonHash) return argonHash;
-  try {
-    const mod = await import('@node-rs/argon2');
-    argonHash = mod.hash;
-  } catch (err) {
-    console.error('[bootstrap] failed to load argon2 module', err);
-    throw new Error('argon2 module unavailable');
-  }
-  return argonHash;
-}
-
-function getDeviceId(req) {
-  const raw = req.headers['x-device-id'];
-  if (Array.isArray(raw)) return raw[0];
-  if (typeof raw === 'string') return raw.trim();
-  return null;
-}
-
-function generateRecoveryCode() {
-  const raw = randomUUID().replace(/-/g, '').toUpperCase();
-  const short = raw.slice(0, 20);
-  return short.match(/.{1,5}/g)?.join('-') ?? short;
-}
 
 async function provisionIdentity(adminClient) {
-  const recoveryCode = generateRecoveryCode();
   const nowIso = new Date().toISOString();
 
-  const argon2hash = await getArgonHash();
-  const recoveryHash = await argon2hash(recoveryCode, {
-    memoryCost: 19_456,
-    timeCost: 2,
-    parallelism: 1,
-    hashLength: 32,
-  });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const recoveryCode = generateRecoveryCode();
+    const fingerprint = fingerprintRecoveryCode(recoveryCode);
+    const recoveryHash = await hashRecoveryCode(recoveryCode);
 
-  const { data, error } = await adminClient
-    .from('anon_identities')
-    .insert({
-      recovery_code_hash: recoveryHash,
-      last_active: nowIso,
-    })
-    .select('anon_id')
-    .single();
+    const { data, error } = await adminClient
+      .from('anon_identities')
+      .insert({
+        recovery_code_hash: recoveryHash,
+        recovery_code_fingerprint: fingerprint,
+        last_active: nowIso,
+      })
+      .select('anon_id')
+      .single();
 
-  if (error || !data?.anon_id) {
-    throw new Error(error?.message ?? 'Failed to create anon identity');
+    if (error || !data?.anon_id) {
+      if (error?.code === '23505') {
+        // Collision on fingerprint; retry with a fresh code.
+        continue;
+      }
+      throw new Error(error?.message ?? 'Failed to create anon identity');
+    }
+
+    const deviceId = randomUUID();
+    const { error: linkError } = await adminClient
+      .from('anon_device_links')
+      .insert({
+        device_id: deviceId,
+        anon_id: data.anon_id,
+        last_active: nowIso,
+      });
+
+    if (linkError) {
+      console.error('[bootstrap] failed to create device link', linkError);
+      throw new Error('Failed to create device link');
+    }
+
+    return {
+      anonId: data.anon_id,
+      deviceId,
+      recoveryCode,
+    };
   }
 
-  const deviceId = randomUUID();
-  const { error: linkError } = await adminClient
-    .from('anon_device_links')
-    .insert({
-      device_id: deviceId,
-      anon_id: data.anon_id,
-      last_active: nowIso,
-    });
-
-  if (linkError) {
-    console.error('[bootstrap] failed to create device link', linkError);
-    throw new Error('Failed to create device link');
-  }
-
-  return {
-    anonId: data.anon_id,
-    deviceId,
-    recoveryCode,
-  };
+  throw new Error('Failed to mint recovery code after multiple attempts');
 }
 
 export default async function handler(req, res) {
@@ -99,7 +83,7 @@ export default async function handler(req, res) {
       .json({ error: 'Supabase configuration missing server-side' });
   }
 
-  const deviceId = getDeviceId(req);
+  const deviceId = getDeviceIdFromRequest(req);
 
   if (!deviceId) {
     try {

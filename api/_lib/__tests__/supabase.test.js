@@ -157,4 +157,15 @@ describe('api/_lib/supabase helpers', () => {
     expect(res.headers['Access-Control-Allow-Headers']).toContain('x-device-id');
     expect(res.headers['Access-Control-Allow-Methods']).toContain('GET');
   });
+
+  it('extracts device id from request headers', async () => {
+    const mod = await import('../supabase.js');
+    const req = { headers: { 'x-device-id': ' device-42 ' } };
+    expect(mod.getDeviceIdFromRequest(req)).toBe('device-42');
+
+    const reqArray = { headers: { 'x-device-id': ['abc', 'def'] } };
+    expect(mod.getDeviceIdFromRequest(reqArray)).toBe('abc');
+
+    expect(mod.getDeviceIdFromRequest({ headers: {} })).toBeNull();
+  });
 });

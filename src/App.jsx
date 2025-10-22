@@ -1,7 +1,9 @@
 // src/App.jsx
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
+import RecoveryModal from './components/RecoveryModal.jsx'
+import RestoreDialog from './components/RestoreDialog.jsx'
 import { loadAppState, saveAppState, clearAppState } from './utils/storage.js'
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
@@ -27,7 +29,10 @@ import {
   setDeviceId,
   getAnonId,
   setAnonId,
-  storeRecoveryCodeOnce,
+  saveRecoveryCode,
+  getStoredRecoveryCode,
+  hasAcknowledgedRecovery,
+  markRecoveryAcknowledged,
   clearDeviceContext,
 } from './lib/deviceState.js'
 
@@ -164,6 +169,17 @@ export default function App() {
     deviceId: getDeviceId(),
     anonId: getAnonId(),
   }))
+  const initialRecoveryCode = getStoredRecoveryCode()
+  const initialRecoveryAcknowledged = initialRecoveryCode
+    ? hasAcknowledgedRecovery(initialRecoveryCode)
+    : false
+  const [recoveryCode, setRecoveryCode] = useState(initialRecoveryCode)
+  const [showRecoveryModal, setShowRecoveryModal] = useState(
+    Boolean(initialRecoveryCode) && !initialRecoveryAcknowledged
+  )
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
+  const [restoreBusy, setRestoreBusy] = useState(false)
+  const [restoreError, setRestoreError] = useState(null)
   const [bootstrapError, setBootstrapError] = useState(null)
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState(INITIAL_SCREEN)
@@ -193,6 +209,13 @@ export default function App() {
   )
 
   const [notesByTrack, setNotesByTrack] = useState(() => ensureNotesEntries(INITIAL_NOTES_MAP, persisted?.tracks ?? []))
+  const hasLocalNotes = useMemo(
+    () =>
+      Object.values(notesByTrack || {}).some(
+        (value) => Array.isArray(value) && value.length > 0
+      ),
+    [notesByTrack]
+  )
 
   // DATA - normalize persisted tracks so notes always exist
   const [tracks, setTracks] = useState(() =>
@@ -264,6 +287,15 @@ export default function App() {
     },
   })
 
+  const {
+    status: importStatus,
+    loading: importLoading,
+    importInitial,
+    reimport: reimportPlaylist,
+    loadMore: loadMoreTracks,
+    resetFlow: resetImportFlow,
+  } = usePlaylistImportFlow()
+
   const bootstrapDevice = useCallback(async (allowRetry = true) => {
     const existingDeviceId = getDeviceId()
     try {
@@ -274,6 +306,8 @@ export default function App() {
       if (response.status === 404 && existingDeviceId && allowRetry) {
         clearDeviceContext()
         setAnonContext({ deviceId: null, anonId: null })
+        setRecoveryCode(null)
+        setShowRecoveryModal(false)
         return bootstrapDevice(false)
       }
       if (!response.ok) {
@@ -288,7 +322,14 @@ export default function App() {
         setAnonId(payload.anonId)
       }
       if (payload?.recoveryCode) {
-        storeRecoveryCodeOnce(payload.recoveryCode)
+        const normalizedCode = payload.recoveryCode
+        saveRecoveryCode(normalizedCode)
+        setRecoveryCode(normalizedCode)
+        if (hasAcknowledgedRecovery(normalizedCode)) {
+          setShowRecoveryModal(false)
+        } else {
+          setShowRecoveryModal(true)
+        }
       }
       setAnonContext({
         deviceId: getDeviceId(),
@@ -300,6 +341,82 @@ export default function App() {
       setBootstrapError('Failed to reach bootstrap endpoint')
     }
   }, [])
+
+  const handleRecoveryModalConfirm = useCallback(() => {
+    if (!recoveryCode) return
+    markRecoveryAcknowledged(recoveryCode)
+    setShowRecoveryModal(false)
+    announce('Recovery code saved. You can now continue.')
+  }, [announce, recoveryCode])
+
+  const openRestoreDialog = useCallback(() => {
+    setRestoreError(null)
+    setRestoreDialogOpen(true)
+  }, [])
+
+  const closeRestoreDialog = useCallback(() => {
+    if (restoreBusy) return
+    setRestoreDialogOpen(false)
+    setRestoreError(null)
+  }, [restoreBusy])
+
+  const handleRestoreSubmit = useCallback(
+    async (rawCode) => {
+      const normalized = rawCode?.trim().toUpperCase()
+      if (!normalized) return
+      setRestoreBusy(true)
+      setRestoreError(null)
+      try {
+        const response = await apiFetch('/api/anon/restore', {
+          method: 'POST',
+          body: JSON.stringify({ recoveryCode: normalized }),
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          let message = payload?.error ?? 'Restore failed. Please try again.'
+          if (response.status === 401) {
+            message = 'Recovery code was not recognised.'
+          } else if (response.status === 429) {
+            message = 'Too many attempts. Wait a bit and try again.'
+          }
+          setRestoreError(message)
+          return
+        }
+
+        const latestDeviceId = getDeviceId()
+        setAnonId(payload?.anonId ?? '')
+        setAnonContext({
+          deviceId: latestDeviceId,
+          anonId: payload?.anonId ?? null,
+        })
+        saveRecoveryCode(normalized)
+        markRecoveryAcknowledged(normalized)
+        setRecoveryCode(normalized)
+        setShowRecoveryModal(false)
+
+        clearAppState()
+        setNotesByTrack(Object.create(null))
+        setTracks([])
+        setImportMeta({ ...EMPTY_IMPORT_META })
+        setPlaylistTitle('My Playlist')
+        setImportedAt(null)
+        setLastImportUrl('')
+        setImportUrl('')
+        resetImportFlow()
+        setScreen('landing')
+
+        announce('Recovery successful. This device is now linked to your notes.')
+        setRestoreDialogOpen(false)
+        setRestoreError(null)
+      } catch (err) {
+        console.error('[restore] request failed', err)
+        setRestoreError('Restore failed. Check your connection and try again.')
+      } finally {
+        setRestoreBusy(false)
+      }
+    },
+    [announce, resetImportFlow]
+  )
 
   // REIMPORT focus pattern
   useEffect(() => {
@@ -408,15 +525,6 @@ export default function App() {
   function handleImportUrlChange(e) { setImportUrl(e.target.value); setImportError(null) }
   const handleDraftChange = (value) => { setDraft(value) }
   function handleBackToLanding() { setScreen('landing') }
-
-  const {
-    status: importStatus,
-    loading: importLoading,
-    importInitial,
-    reimport: reimportPlaylist,
-    loadMore: loadMoreTracks,
-    resetFlow: resetImportFlow,
-  } = usePlaylistImportFlow()
 
   const isInitialImportBusy = importStatus === ImportFlowStatus.IMPORTING
   const isReimportBusy = importStatus === ImportFlowStatus.REIMPORTING
@@ -719,6 +827,11 @@ export default function App() {
     clearAppState()
     clearDeviceContext()
     setAnonContext({ deviceId: null, anonId: null })
+    setRecoveryCode(null)
+    setShowRecoveryModal(false)
+    setRestoreDialogOpen(false)
+    setRestoreError(null)
+    setRestoreBusy(false)
     bootstrapDevice()
 
     // Reset in-memory app state
@@ -836,7 +949,12 @@ export default function App() {
       <header style={{ maxWidth: 880, margin: '20px auto 0', padding: '0 16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1 style={{ margin: 0 }}>Sample Tagger</h1>
-          <ThemeToggle />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button type="button" className="btn" onClick={openRestoreDialog}>
+              Have a code?
+            </button>
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 
@@ -952,6 +1070,22 @@ export default function App() {
           </button>
         </div>
       </div>
+      <RecoveryModal
+        open={showRecoveryModal}
+        code={recoveryCode}
+        onAcknowledge={handleRecoveryModalConfirm}
+        onCopy={() => announce('Recovery code copied to clipboard.')}
+        onDownload={() => announce('Recovery code downloaded.')}
+      />
+      <RestoreDialog
+        open={restoreDialogOpen}
+        onClose={closeRestoreDialog}
+        onSubmit={handleRestoreSubmit}
+        onRequestBackup={handleBackupNotes}
+        busy={restoreBusy}
+        error={restoreError}
+        hasLocalNotes={hasLocalNotes}
+      />
       <Analytics />
       <input
         ref={backupFileInputRef}

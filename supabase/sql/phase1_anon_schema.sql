@@ -91,6 +91,13 @@ $$;
 alter table public.notes
   add column if not exists last_active timestamptz not null default timezone('utc', now());
 
+-- Identity fingerprint for fast recovery lookups
+alter table public.anon_identities
+  add column if not exists recovery_code_fingerprint text;
+
+create index if not exists anon_identities_recovery_fingerprint_idx
+  on public.anon_identities (recovery_code_fingerprint);
+
 -- Helpful indexes
 create index if not exists notes_anon_track_idx on public.notes (anon_id, track_id);
 create index if not exists anon_device_links_anon_idx on public.anon_device_links (anon_id);

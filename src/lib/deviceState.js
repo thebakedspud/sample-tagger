@@ -1,6 +1,7 @@
 const DEVICE_KEY = 'sta:device-id';
 const ANON_KEY = 'sta:anon-id';
 const RECOVERY_KEY = 'sta:recovery-code';
+const RECOVERY_ACK_KEY = 'sta:recovery-ack';
 
 let runtimeDeviceId = null;
 let runtimeAnonId = null;
@@ -41,17 +42,45 @@ export function setAnonId(anonId) {
   }
 }
 
-export function storeRecoveryCodeOnce(recoveryCode) {
+export function saveRecoveryCode(recoveryCode) {
   if (typeof recoveryCode !== 'string' || !recoveryCode) return;
   if (!isBrowser()) return;
-  if (!window.localStorage.getItem(RECOVERY_KEY)) {
-    window.localStorage.setItem(RECOVERY_KEY, recoveryCode);
-  }
+  window.localStorage.setItem(RECOVERY_KEY, recoveryCode);
 }
 
 export function getStoredRecoveryCode() {
   if (!isBrowser()) return null;
   return window.localStorage.getItem(RECOVERY_KEY);
+}
+
+export function hasAcknowledgedRecovery(recoveryCode) {
+  if (!isBrowser()) return false;
+  const serialized = window.localStorage.getItem(RECOVERY_ACK_KEY);
+  if (!serialized || typeof serialized !== 'string') return false;
+  try {
+    const parsed = JSON.parse(serialized);
+    if (!recoveryCode) {
+      return Boolean(parsed?.code);
+    }
+    return parsed?.code === recoveryCode;
+  } catch (_err) {
+    return false;
+  }
+}
+
+export function markRecoveryAcknowledged(recoveryCode) {
+  if (!isBrowser() || typeof recoveryCode !== 'string' || !recoveryCode) return;
+  const payload = {
+    code: recoveryCode,
+    acknowledgedAt: Date.now(),
+  };
+  window.localStorage.setItem(RECOVERY_ACK_KEY, JSON.stringify(payload));
+}
+
+export function clearRecoveryState() {
+  if (!isBrowser()) return;
+  window.localStorage.removeItem(RECOVERY_KEY);
+  window.localStorage.removeItem(RECOVERY_ACK_KEY);
 }
 
 export function clearDeviceContext() {
@@ -61,4 +90,5 @@ export function clearDeviceContext() {
     window.localStorage.removeItem(DEVICE_KEY);
     window.localStorage.removeItem(ANON_KEY);
   }
+  clearRecoveryState();
 }

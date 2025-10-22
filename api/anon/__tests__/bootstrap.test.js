@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const hashMock = vi.fn(async () => 'hashed-code');
+const generateRecoveryCodeMock = vi.fn(() => 'AAAAA-BBBBB-CCCCC-DDDDD');
+const hashRecoveryCodeMock = vi.fn(async () => 'hashed-code');
+const fingerprintRecoveryCodeMock = vi.fn(() => 'fingerprint-1');
 const getAnonContextMock = vi.fn();
 const touchLastActiveMock = vi.fn();
 const withCorsMock = vi.fn((res) => res);
@@ -14,8 +16,10 @@ let deviceInsertPayload;
 let identityInsertMock;
 let deviceInsertMock;
 
-vi.mock('@node-rs/argon2', () => ({
-  hash: hashMock,
+vi.mock('../../_lib/recovery.js', () => ({
+  generateRecoveryCode: generateRecoveryCodeMock,
+  hashRecoveryCode: hashRecoveryCodeMock,
+  fingerprintRecoveryCode: fingerprintRecoveryCodeMock,
 }));
 
 vi.mock('../../_lib/supabase.js', () => ({
@@ -23,6 +27,11 @@ vi.mock('../../_lib/supabase.js', () => ({
   getAnonContext: getAnonContextMock,
   touchLastActive: touchLastActiveMock,
   withCors: withCorsMock,
+  getDeviceIdFromRequest: (req) => {
+    const raw = req?.headers?.['x-device-id'];
+    if (Array.isArray(raw)) return raw[0];
+    return typeof raw === 'string' ? raw : null;
+  },
   hasSupabaseConfig: true,
 }));
 
@@ -91,7 +100,9 @@ function createMockReq(overrides = {}) {
 
 beforeEach(async () => {
   vi.resetModules();
-  hashMock.mockClear();
+  generateRecoveryCodeMock.mockClear();
+  hashRecoveryCodeMock.mockClear();
+  fingerprintRecoveryCodeMock.mockClear();
   getAnonContextMock.mockReset();
   touchLastActiveMock.mockReset();
   withCorsMock.mockClear();
@@ -115,6 +126,7 @@ describe('api/anon/bootstrap', () => {
     expect(deviceInsertMock).toHaveBeenCalledTimes(1);
     expect(anonInsertPayload).toMatchObject({
       recovery_code_hash: 'hashed-code',
+      recovery_code_fingerprint: 'fingerprint-1',
     });
     expect(deviceInsertPayload).toMatchObject({
       anon_id: 'anon-123',
@@ -128,6 +140,60 @@ describe('api/anon/bootstrap', () => {
     expect(res.body.recoveryCode).toMatch(/^[A-Z0-9]{5}(?:-[A-Z0-9]{5}){3}$/);
     expect(getAnonContextMock).not.toHaveBeenCalled();
     expect(touchLastActiveMock).not.toHaveBeenCalled();
+  });
+
+  it('retries provisioning when fingerprint collides', async () => {
+    fingerprintRecoveryCodeMock
+      .mockReturnValueOnce('duplicate')
+      .mockReturnValueOnce('fingerprint-unique');
+    anonInsertResult = { data: { anon_id: 'anon-123' }, error: null };
+
+    const originalFrom = adminClient.from;
+    adminClient.from = vi.fn((table) => {
+      if (table === 'anon_identities') {
+        return {
+          insert: vi.fn((payload) => {
+            anonInsertPayload = payload;
+            const response =
+              payload.recovery_code_fingerprint === 'duplicate'
+                ? {
+                    select: () => ({
+                      single: () =>
+                        Promise.resolve({
+                          data: null,
+                          error: { code: '23505', message: 'duplicate' },
+                        }),
+                    }),
+                  }
+                : {
+                    select: () => ({
+                      single: () =>
+                        Promise.resolve({
+                          data: { anon_id: 'anon-unique' },
+                          error: null,
+                        }),
+                    }),
+                  };
+            return response;
+          }),
+        };
+      }
+      if (table === 'anon_device_links') {
+        return {
+          insert: vi.fn(() => Promise.resolve({ error: null })),
+        };
+      }
+      return originalFrom(table);
+    });
+
+    const res = createMockRes();
+    await handler(createMockReq(), res);
+
+    expect(generateRecoveryCodeMock).toHaveBeenCalledTimes(2);
+    expect(res.body.anonId).toEqual('anon-unique');
+
+    // Restore original behaviour for subsequent tests
+    adminClient.from = originalFrom;
   });
 
   it('returns existing anon context when header present', async () => {

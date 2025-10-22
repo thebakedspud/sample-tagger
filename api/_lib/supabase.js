@@ -74,3 +74,12 @@ export function withCors(res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   return res;
 }
+
+export function getDeviceIdFromRequest(req) {
+  if (!req || typeof req !== 'object') return null;
+  const raw = req.headers?.['x-device-id'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}

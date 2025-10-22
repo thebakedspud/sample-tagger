@@ -4,16 +4,10 @@ import {
   touchLastActive,
   withCors,
   hasSupabaseConfig,
+  getDeviceIdFromRequest,
 } from '../_lib/supabase.js';
 
 const supabaseAdmin = getAdminClient();
-
-function getDeviceId(req) {
-  const raw = req.headers['x-device-id'];
-  if (Array.isArray(raw)) return raw[0];
-  if (typeof raw === 'string') return raw.trim();
-  return null;
-}
 
 function getTrackId(req) {
   const fromQuery =
@@ -42,7 +36,7 @@ export default async function handler(req, res) {
       .json({ error: 'Supabase configuration missing server-side' });
   }
 
-  const deviceId = getDeviceId(req);
+  const deviceId = getDeviceIdFromRequest(req);
   if (!deviceId) {
     return res.status(400).json({ error: 'Missing x-device-id header' });
   }
