@@ -865,10 +865,28 @@ export default function App() {
       return
     }
     const trimmed = draft.trim()
+    const existing = trackId && hasOwn(notesByTrack, trackId)
+      ? [...notesByTrack[trackId]]
+      : []
+    const rollbackMap = updateNotesMap(notesByTrack, trackId, existing)
+    const optimistic = [...existing, trimmed]
+    const nextMap = updateNotesMap(notesByTrack, trackId, optimistic)
+    setNotesByTrack(nextMap)
+    setTracks(prev =>
+      prev.map(t => {
+        if (t.id !== trackId) return t
+        return { ...t, notes: [...optimistic] }
+      })
+    )
+    setEditingId(null); setDraft(''); setError(null)
+    announce('Note added.')
+    editorInvokerRef.current?.focus()
+
     if (!anonContext?.deviceId) {
-      setError('Still preparing secure storage. Please try again in a moment.')
+      console.warn('[note save] missing device id, skipping sync')
       return
     }
+
     try {
       const response = await apiFetch('/api/db/notes', {
         method: 'POST',
@@ -880,24 +898,16 @@ export default function App() {
       }
     } catch (err) {
       console.error('[note save] error', err)
-      setError('Failed to save note. Please try again.')
-      return
+      setError('Failed to save note. Restored previous notes.')
+      setNotesByTrack(rollbackMap)
+      setTracks(prev =>
+        prev.map(t => {
+          if (t.id !== trackId) return t
+          return { ...t, notes: [...existing] }
+        })
+      )
+      announce('Note save failed. Restored previous note list.')
     }
-    const existing = trackId && hasOwn(notesByTrack, trackId)
-      ? [...notesByTrack[trackId]]
-      : []
-    existing.push(trimmed)
-    const nextMap = updateNotesMap(notesByTrack, trackId, existing)
-    setNotesByTrack(nextMap)
-    setTracks(prev =>
-      prev.map(t => {
-        if (t.id !== trackId) return t
-        return { ...t, notes: [...existing] }
-      })
-    )
-    setEditingId(null); setDraft(''); setError(null)
-    announce('Note added.')
-    editorInvokerRef.current?.focus()
   }
 
   const onCancelNote = () => {
