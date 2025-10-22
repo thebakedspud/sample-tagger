@@ -43,7 +43,7 @@ describe('storage cursors', () => {
       importedAt: null,
     });
 
-    const raw = globalThis.localStorage.getItem('sta:v3');
+    const raw = globalThis.localStorage.getItem('sta:v4');
     expect(raw).toBeTypeOf('string');
 
     const parsed = JSON.parse(raw);
@@ -67,7 +67,7 @@ describe('storage cursors', () => {
       importedAt: null,
     });
 
-    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v3'));
+    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v4'));
     expect(parsed.importMeta.cursor).toBeNull();
 
     const restored = loadAppState();
@@ -88,7 +88,7 @@ describe('storage cursors', () => {
       importedAt: null,
     });
 
-    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v3'));
+    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v4'));
     expect(parsed.notesByTrack['sp:track:1']).toEqual(['First note']);
     expect(parsed.notesByTrack['sp:track:2']).toEqual(['Second note']);
 

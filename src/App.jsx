@@ -4,7 +4,15 @@ import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
 import RecoveryModal from './components/RecoveryModal.jsx'
 import RestoreDialog from './components/RestoreDialog.jsx'
-import { loadAppState, saveAppState, clearAppState } from './utils/storage.js'
+import {
+  loadAppState,
+  saveAppState,
+  clearAppState,
+  getPendingMigrationSnapshot,
+  clearPendingMigrationSnapshot,
+  writeAutoBackupSnapshot,
+  stashPendingMigrationSnapshot,
+} from './utils/storage.js'
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
@@ -38,6 +46,7 @@ import {
 
 // -- Derive initial state from storage (v3 structured: { importMeta, tracks, ... })
 const persisted = loadAppState()
+const pendingMigrationSnapshot = getPendingMigrationSnapshot()
 const INITIAL_NOTES_MAP = createInitialNotesMap(persisted)
 const HAS_VALID_PLAYLIST = !!(persisted?.importMeta?.provider && persisted?.tracks?.length)
 const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
@@ -181,6 +190,8 @@ export default function App() {
   const [restoreBusy, setRestoreBusy] = useState(false)
   const [restoreError, setRestoreError] = useState(null)
   const [bootstrapError, setBootstrapError] = useState(null)
+  const [showMigrationNotice, setShowMigrationNotice] = useState(Boolean(pendingMigrationSnapshot))
+  const migrationSnapshotRef = useRef(pendingMigrationSnapshot)
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState(INITIAL_SCREEN)
 
@@ -428,6 +439,117 @@ export default function App() {
   useEffect(() => {
     bootstrapDevice()
   }, [bootstrapDevice])
+
+  useEffect(() => {
+    const snapshot = migrationSnapshotRef.current
+    if (!snapshot) return
+    if (!anonContext?.anonId || !anonContext?.deviceId) return
+
+    let cancelled = false
+    setShowMigrationNotice(true)
+    announce('Finishing upgrade in the background...')
+
+    const runMigration = async () => {
+      try {
+        console.info('[storage:migration] starting v4 migration')
+        writeAutoBackupSnapshot(snapshot)
+
+        const response = await apiFetch('/api/db/notes')
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          throw new Error(payload?.error ?? 'Failed to fetch existing notes')
+        }
+
+        const remoteList = Array.isArray(payload?.notes) ? payload.notes : []
+        /** @type {Map<string, Set<string>>} */
+        const remoteMap = new Map()
+        remoteList.forEach((row) => {
+          if (!row || typeof row !== 'object') return
+          const trackId = typeof row.trackId === 'string' ? row.trackId : null
+          const body = typeof row.body === 'string' ? row.body.trim() : ''
+          if (!trackId || !body) return
+          if (!remoteMap.has(trackId)) {
+            remoteMap.set(trackId, new Set())
+          }
+          remoteMap.get(trackId)?.add(body)
+        })
+
+        const combinedLocal = cloneNotesMap(snapshot.notesByTrack || {})
+        if (Array.isArray(snapshot.tracks)) {
+          snapshot.tracks.forEach((track) => {
+            if (!track || typeof track !== 'object') return
+            const id = track.id
+            if (!id) return
+            const existing = Array.isArray(combinedLocal[id]) ? [...combinedLocal[id]] : []
+            const cleaned = normalizeNotesList(track.notes)
+            cleaned.forEach((note) => {
+              if (!existing.includes(note)) existing.push(note)
+            })
+            if (existing.length > 0) {
+              combinedLocal[id] = existing
+            }
+          })
+        }
+
+        /** @type {{ trackId: string, body: string }[]} */
+        const uploads = []
+        Object.entries(combinedLocal).forEach(([trackId, notes]) => {
+          const remoteSet = remoteMap.get(trackId) ?? new Set()
+          notes.forEach((note) => {
+            const clean = typeof note === 'string' ? note.trim() : ''
+            if (!clean) return
+            if (!remoteSet.has(clean)) {
+              uploads.push({ trackId, body: clean })
+              remoteSet.add(clean)
+            }
+          })
+        })
+
+        const localNoteCount = Object.values(combinedLocal).reduce(
+          (acc, arr) => acc + (Array.isArray(arr) ? arr.length : 0),
+          0
+        )
+
+        console.info('[storage:migration] dry-run summary', {
+          localTracks: snapshot.tracks?.length ?? 0,
+          localNotes: localNoteCount,
+          remoteNotes: remoteList.length,
+          toUpload: uploads.length,
+        })
+
+        for (const job of uploads) {
+          if (cancelled) return
+          const res = await apiFetch('/api/db/notes', {
+            method: 'POST',
+            body: JSON.stringify(job),
+          })
+          if (!res.ok) {
+            const errPayload = await res.json().catch(() => ({}))
+            throw new Error(errPayload?.error ?? 'Failed to sync note')
+          }
+        }
+
+        if (!cancelled) {
+          clearPendingMigrationSnapshot()
+          migrationSnapshotRef.current = null
+          console.info('[storage:migration] completed successfully')
+          setShowMigrationNotice(false)
+          announce('Upgrade complete.')
+        }
+      } catch (err) {
+        if (cancelled) return
+        console.error('[storage:migration] failed', err)
+        stashPendingMigrationSnapshot(snapshot)
+        setShowMigrationNotice(false)
+      }
+    }
+
+    runMigration()
+
+    return () => {
+      cancelled = true
+    }
+  }, [anonContext?.anonId, anonContext?.deviceId, announce])
 
   useEffect(() => {
     if (!bootstrapError) return
@@ -955,6 +1077,27 @@ export default function App() {
     <div className="app">
       {/* Screen reader announcements */}
       <LiveRegion message={announceMsg} />
+
+      {showMigrationNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            top: 16,
+            right: 16,
+            background: 'var(--surface, #0f1115)',
+            color: 'var(--fg, #ffffff)',
+            padding: '12px 16px',
+            borderRadius: 8,
+            boxShadow: '0 12px 32px rgba(0, 0, 0, 0.35)',
+            border: '1px solid var(--border, rgba(255, 255, 255, 0.16))',
+            zIndex: 30,
+          }}
+        >
+          Finishing upgrade in the background...
+        </div>
+      )}
 
       <header style={{ maxWidth: 880, margin: '20px auto 0', padding: '0 16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

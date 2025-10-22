@@ -121,6 +121,7 @@ create index if not exists anon_identities_recovery_fingerprint_idx
 -- Helpful indexes
 create index if not exists notes_anon_track_idx on public.notes (anon_id, track_id);
 create index if not exists anon_device_links_anon_idx on public.anon_device_links (anon_id);
+create unique index if not exists notes_device_track_unique on public.notes (device_id, track_id);
 
 -- Enable RLS
 alter table public.anon_identities enable row level security;

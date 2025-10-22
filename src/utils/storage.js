@@ -35,9 +35,11 @@
  * @property {NotesByTrack} notesByTrack
  */
 
-const STORAGE_VERSION = 3;
-const LS_KEY = 'sta:v3';
-const LEGACY_KEYS = ['sta:v2'];
+const STORAGE_VERSION = 4;
+const LS_KEY = 'sta:v4';
+const LEGACY_KEYS = ['sta:v3', 'sta:v2'];
+const PENDING_MIGRATION_KEY = 'sta:v4:pending-migration';
+const AUTO_BACKUP_KEY = 'sta:v4:auto-backup';
 const VALID_PROVIDERS = new Set(['spotify', 'youtube', 'soundcloud']);
 
 const EMPTY_META = Object.freeze({
@@ -58,6 +60,13 @@ export function loadAppState() {
       const parsed = JSON.parse(raw);
       if (parsed?.version === STORAGE_VERSION) {
         return normalizeState(parsed);
+      }
+      if (typeof parsed?.version === 'number' && parsed.version < STORAGE_VERSION) {
+        const normalized = normalizeState(parsed);
+        setPendingMigrationSnapshot(normalized);
+        const upgraded = { ...normalized, version: STORAGE_VERSION };
+        localStorage.setItem(LS_KEY, JSON.stringify(upgraded));
+        return upgraded;
       }
     }
 
@@ -165,7 +174,7 @@ function migrateLegacy(v2) {
     sourceUrl: lastImportUrl,
   });
 
-  return {
+  const next = {
     version: STORAGE_VERSION,
     theme,
     playlistTitle: playlistTitle ?? 'My Playlist',
@@ -175,6 +184,8 @@ function migrateLegacy(v2) {
     importMeta,
     notesByTrack: sanitizeNotesMap(null, tracks),
   };
+  setPendingMigrationSnapshot(next);
+  return next;
 }
 
 /**
@@ -322,4 +333,67 @@ function normalizeNotesArray(maybeNotes) {
     out.push(trimmed);
   });
   return out;
+}
+
+function setPendingMigrationSnapshot(state) {
+  try {
+    localStorage.setItem(PENDING_MIGRATION_KEY, JSON.stringify(state));
+  } catch {
+    // ignore
+  }
+}
+
+export function getPendingMigrationSnapshot() {
+  try {
+    const raw = localStorage.getItem(PENDING_MIGRATION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return normalizeState(parsed);
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingMigrationSnapshot() {
+  try {
+    localStorage.removeItem(PENDING_MIGRATION_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export function stashPendingMigrationSnapshot(state) {
+  if (!state) return;
+  setPendingMigrationSnapshot(state);
+}
+
+export function writeAutoBackupSnapshot(state) {
+  try {
+    if (!state) return;
+    const payload = {
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      playlist: {
+        title: sanitizeTitle(state.playlistTitle),
+        provider: sanitizeImportMeta(state.importMeta).provider,
+        playlistId: safeString(state.importMeta?.playlistId),
+        snapshotId: safeString(state.importMeta?.snapshotId),
+        sourceUrl: safeString(state.importMeta?.sourceUrl ?? state.lastImportUrl),
+      },
+      notesByTrack: sanitizeNotesMap(state.notesByTrack, state.tracks),
+    };
+    localStorage.setItem(AUTO_BACKUP_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore
+  }
+}
+
+export function getAutoBackupSnapshot() {
+  try {
+    const raw = localStorage.getItem(AUTO_BACKUP_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
