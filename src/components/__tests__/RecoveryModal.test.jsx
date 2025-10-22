@@ -1,14 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import RecoveryModal from '../RecoveryModal.jsx';
 
-const originalClipboard = global.navigator?.clipboard;
+const originalClipboard = globalThis.navigator?.clipboard;
 
 describe('RecoveryModal', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    Object.assign(global.navigator, {
+    Object.assign(globalThis.navigator, {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
       },
@@ -17,7 +17,7 @@ describe('RecoveryModal', () => {
 
   afterEach(() => {
     if (originalClipboard) {
-      global.navigator.clipboard = originalClipboard;
+      globalThis.navigator.clipboard = originalClipboard;
     }
   });
 
@@ -39,7 +39,7 @@ describe('RecoveryModal', () => {
     expect(screen.getByText('AAAAA-BBBBB-CCCCC-DDDDD')).toBeVisible();
 
     await userEvent.click(screen.getByRole('button', { name: /copy to clipboard/i }));
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    expect(globalThis.navigator.clipboard.writeText).toHaveBeenCalledWith(
       'AAAAA-BBBBB-CCCCC-DDDDD',
     );
 
