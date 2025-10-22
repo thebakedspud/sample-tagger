@@ -241,7 +241,10 @@ describe('api/db/notes handler', () => {
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(500);
-    expect(res.body).toEqual({ error: 'Failed to load notes' });
+    expect(res.body).toEqual({
+      error: 'Failed to load notes',
+      details: 'nope',
+    });
     expect(touchLastActiveMock).not.toHaveBeenCalled();
   });
 
