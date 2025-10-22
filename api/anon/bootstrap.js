@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { hash } from '@node-rs/argon2';
 import {
   getAdminClient,
   getAnonContext,
@@ -9,6 +8,19 @@ import {
 } from '../_lib/supabase.js';
 
 const supabaseAdmin = getAdminClient();
+let argonHash;
+
+async function getArgonHash() {
+  if (argonHash) return argonHash;
+  try {
+    const mod = await import('@node-rs/argon2');
+    argonHash = mod.hash;
+  } catch (err) {
+    console.error('[bootstrap] failed to load argon2 module', err);
+    throw new Error('argon2 module unavailable');
+  }
+  return argonHash;
+}
 
 function getDeviceId(req) {
   const raw = req.headers['x-device-id'];
@@ -27,7 +39,8 @@ async function provisionIdentity(adminClient) {
   const recoveryCode = generateRecoveryCode();
   const nowIso = new Date().toISOString();
 
-  const recoveryHash = await hash(recoveryCode, {
+  const argon2hash = await getArgonHash();
+  const recoveryHash = await argon2hash(recoveryCode, {
     memoryCost: 19_456,
     timeCost: 2,
     parallelism: 1,

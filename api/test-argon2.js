@@ -1,8 +1,16 @@
-import { hash } from '@node-rs/argon2';
+let argonHash;
+
+async function getArgonHash() {
+  if (argonHash) return argonHash;
+  const mod = await import('@node-rs/argon2');
+  argonHash = mod.hash;
+  return argonHash;
+}
 
 export default async function handler(req, res) {
   const start = Date.now();
 
+  const hash = await getArgonHash();
   const testHash = await hash('TEST-1234-5678-9012', {
     memoryCost: 19_456,
     timeCost: 2,
