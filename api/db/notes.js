@@ -1,51 +1,140 @@
-import { createClient } from '@supabase/supabase-js'
+import {
+  getAdminClient,
+  getAnonContext,
+  touchLastActive,
+  withCors,
+  hasSupabaseConfig,
+} from '../_lib/supabase.js';
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const supabaseAdmin = getAdminClient();
 
-const supabaseAdmin =
-  SUPABASE_URL && SERVICE_ROLE_KEY
-    ? createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
-    : null
+function getDeviceId(req) {
+  const raw = req.headers['x-device-id'];
+  if (Array.isArray(raw)) return raw[0];
+  if (typeof raw === 'string') return raw.trim();
+  return null;
+}
+
+function getTrackId(req) {
+  const fromQuery =
+    typeof req.query?.trackId === 'string' ? req.query.trackId : null;
+  if (fromQuery) return fromQuery;
+
+  try {
+    const url = new URL(req.url, 'http://localhost');
+    const param = url.searchParams.get('trackId');
+    return param ?? null;
+  } catch (_err) {
+    return null;
+  }
+}
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', ['POST'])
-    return res.status(405).json({ error: 'Use POST' })
+  withCors(res);
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
   }
 
-  if (!supabaseAdmin) {
-    return res.status(500).json({ error: 'Supabase admin client not configured' })
+  if (!hasSupabaseConfig || !supabaseAdmin) {
+    return res
+      .status(500)
+      .json({ error: 'Supabase configuration missing server-side' });
   }
 
-  let payload
-  try {
-    payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
-  } catch (_err) {
-    return res.status(400).json({ error: 'Invalid JSON payload' })
+  const deviceId = getDeviceId(req);
+  if (!deviceId) {
+    return res.status(400).json({ error: 'Missing x-device-id header' });
   }
 
-  const deviceId = payload?.deviceId
-  const trackId = payload?.trackId
-  const body = payload?.body
-
-  if (!deviceId || !trackId || !body) {
-    return res.status(400).json({ error: 'Missing fields' })
+  const context = await getAnonContext(supabaseAdmin, deviceId);
+  if (!context) {
+    return res.status(404).json({ error: 'Unknown device' });
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('notes')
-    .insert({
-      device_id: deviceId,
-      track_id: trackId,
-      body,
-    })
-    .select()
-    .single()
+  if (req.method === 'GET') {
+    const trackId = getTrackId(req);
 
-  if (error) {
-    return res.status(500).json({ error: error.message })
+    let builder = supabaseAdmin
+      .from('notes')
+      .select('id, track_id, body, created_at, updated_at')
+      .eq('anon_id', context.anonId)
+      .order('created_at', { ascending: true });
+
+    if (trackId) {
+      builder = builder.eq('track_id', trackId);
+    }
+
+    const { data, error } = await builder;
+
+    if (error) {
+      console.error('[notes:get] supabase error', error);
+      return res.status(500).json({ error: 'Failed to load notes' });
+    }
+
+    await touchLastActive(supabaseAdmin, context.anonId, deviceId);
+
+    return res.status(200).json({
+      notes:
+        data?.map((row) => ({
+          id: row.id,
+          trackId: row.track_id,
+          body: row.body,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        })) ?? [],
+    });
   }
 
-  return res.status(200).json({ note: data })
+  if (req.method === 'POST') {
+    let payload = req.body;
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch (_err) {
+        return res.status(400).json({ error: 'Invalid JSON payload' });
+      }
+    }
+
+    const trackId = typeof payload?.trackId === 'string' ? payload.trackId : '';
+    const body = typeof payload?.body === 'string' ? payload.body.trim() : '';
+
+    if (!trackId || !body) {
+      return res.status(400).json({ error: 'Missing trackId or body' });
+    }
+
+    const nowIso = new Date().toISOString();
+
+    const { data, error } = await supabaseAdmin
+      .from('notes')
+      .insert({
+        anon_id: context.anonId,
+        device_id: deviceId,
+        track_id: trackId,
+        body,
+        last_active: nowIso,
+      })
+      .select('id, track_id, body, created_at, updated_at')
+      .single();
+
+    if (error) {
+      console.error('[notes:post] supabase error', error);
+      return res.status(500).json({ error: 'Failed to create note' });
+    }
+
+    await touchLastActive(supabaseAdmin, context.anonId, deviceId);
+
+    return res.status(201).json({
+      note: {
+        id: data.id,
+        trackId: data.track_id,
+        body: data.body,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at,
+      },
+    });
+  }
+
+  res.setHeader('Allow', ['GET', 'POST', 'OPTIONS']);
+  return res.status(405).json({ error: 'Method not allowed' });
 }

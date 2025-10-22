@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
 import { loadAppState, saveAppState, clearAppState } from './utils/storage.js'
@@ -21,6 +21,15 @@ import usePlaylistImportFlow, { ImportFlowStatus } from './features/import/usePl
 // NEW: centralised error helpers/messages
 import { extractErrorCode, CODES } from './features/import/adapters/types.js'
 import { ERROR_MAP } from './features/import/errors.js'
+import { apiFetch } from './lib/apiClient.js'
+import {
+  getDeviceId,
+  setDeviceId,
+  getAnonId,
+  setAnonId,
+  storeRecoveryCodeOnce,
+  clearDeviceContext,
+} from './lib/deviceState.js'
 
 // -- Derive initial state from storage (v3 structured: { importMeta, tracks, ... })
 const persisted = loadAppState()
@@ -103,6 +112,31 @@ function ensureNotesEntries(baseMap, tracks) {
   return next;
 }
 
+function groupNotesByTrack(rows) {
+  const map = Object.create(null);
+  if (!Array.isArray(rows)) return map;
+  rows.forEach((row) => {
+    if (!row || typeof row !== 'object') return;
+    const trackId = typeof row.trackId === 'string' ? row.trackId : row.track_id;
+    const body = typeof row.body === 'string' ? row.body : null;
+    if (!trackId || !body) return;
+    if (!Array.isArray(map[trackId])) map[trackId] = [];
+    map[trackId].push(body);
+  });
+  return map;
+}
+
+function mergeRemoteNotes(localMap, remoteMap) {
+  const merged = cloneNotesMap(localMap);
+  Object.entries(remoteMap).forEach(([trackId, remoteNotes]) => {
+    if (!Array.isArray(remoteNotes) || remoteNotes.length === 0) return;
+    if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
+      merged[trackId] = [...remoteNotes];
+    }
+  });
+  return merged;
+}
+
 function attachNotesToTracks(trackList, notesMap) {
   if (!Array.isArray(trackList)) return [];
   const safeMap = notesMap || Object.create(null);
@@ -126,6 +160,12 @@ function updateNotesMap(baseMap, trackId, nextNotes) {
 }
 
 export default function App() {
+  const [anonContext, setAnonContext] = useState(() => ({
+    deviceId: getDeviceId(),
+    anonId: getAnonId(),
+  }))
+  const [bootstrapStatus, setBootstrapStatus] = useState('idle')
+  const [bootstrapError, setBootstrapError] = useState(null)
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState(INITIAL_SCREEN)
 
@@ -159,6 +199,7 @@ export default function App() {
   const [tracks, setTracks] = useState(() =>
     attachNotesToTracks(persisted?.tracks ?? [], notesByTrack)
   )
+  const tracksRef = useRef(tracks)
 
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
@@ -172,6 +213,10 @@ export default function App() {
   useEffect(() => {
     notesByTrackRef.current = notesByTrack
   }, [notesByTrack])
+
+  useEffect(() => {
+    tracksRef.current = tracks
+  }, [tracks])
 
   const {
     pending,
@@ -220,12 +265,104 @@ export default function App() {
     },
   })
 
+  const bootstrapDevice = useCallback(async (allowRetry = true) => {
+    setBootstrapStatus('pending')
+    const existingDeviceId = getDeviceId()
+    try {
+      const response = await apiFetch('/api/anon/bootstrap', {
+        method: 'POST',
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (response.status === 404 && existingDeviceId && allowRetry) {
+        clearDeviceContext()
+        setAnonContext({ deviceId: null, anonId: null })
+        return bootstrapDevice(false)
+      }
+      if (!response.ok) {
+        setBootstrapError(payload?.error ?? 'Failed to bootstrap device')
+        return
+      }
+      const headerDeviceId = response.headers.get('x-device-id')
+      if (headerDeviceId) {
+        setDeviceId(headerDeviceId)
+      }
+      if (payload?.anonId) {
+        setAnonId(payload.anonId)
+      }
+      if (payload?.recoveryCode) {
+        storeRecoveryCodeOnce(payload.recoveryCode)
+      }
+      setAnonContext({
+        deviceId: getDeviceId(),
+        anonId: payload?.anonId ?? getAnonId(),
+      })
+      setBootstrapError(null)
+    } catch (err) {
+      console.error('[bootstrap] error', err)
+      setBootstrapError('Failed to reach bootstrap endpoint')
+    } finally {
+      setBootstrapStatus('done')
+    }
+  }, [])
+
   // REIMPORT focus pattern
   useEffect(() => {
     if (typeof navigator !== 'undefined' && navigator?.storage?.persist) {
       navigator.storage.persist().catch(() => { /* best effort */ })
     }
   }, [])
+
+  useEffect(() => {
+    bootstrapDevice()
+  }, [bootstrapDevice])
+
+  useEffect(() => {
+    if (!bootstrapError) return
+    console.warn('[bootstrap] client warning', bootstrapError)
+  }, [bootstrapError])
+
+  useEffect(() => {
+    if (!anonContext?.anonId) return
+    let cancelled = false
+
+    const syncNotes = async () => {
+      try {
+        const response = await apiFetch('/api/db/notes')
+        const payload = await response.json().catch(() => ({}))
+        if (cancelled) return
+        if (!response.ok) {
+          console.error('[notes sync] failed', payload)
+          return
+        }
+        const remoteMap = groupNotesByTrack(payload?.notes)
+        if (!remoteMap || Object.keys(remoteMap).length === 0) {
+          return
+        }
+        setNotesByTrack((prev) =>
+          ensureNotesEntries(mergeRemoteNotes(prev, remoteMap), tracksRef.current)
+        )
+        setTracks((prev) =>
+          prev.map((track) => {
+            const remoteNotes = remoteMap[track.id]
+            if (!remoteNotes || remoteNotes.length === 0) return track
+            const existingNotes = Array.isArray(track.notes) ? track.notes : []
+            if (existingNotes.length > 0) return track
+            return { ...track, notes: [...remoteNotes] }
+          })
+        )
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[notes sync] error', err)
+        }
+      }
+    }
+
+    syncNotes()
+
+    return () => {
+      cancelled = true
+    }
+  }, [anonContext?.anonId])
 
   const reimportBtnRef = useRef(null)
   const loadMoreBtnRef = useRef(null)
@@ -584,6 +721,9 @@ export default function App() {
     setImportError(null)
     // Clear persisted data
     clearAppState()
+    clearDeviceContext()
+    setAnonContext({ deviceId: null, anonId: null })
+    bootstrapDevice()
 
     // Reset in-memory app state
     setNotesByTrack(Object.create(null))
@@ -609,13 +749,31 @@ export default function App() {
     setTimeout(() => { focusById(`note-input-${trackId}`) }, 0)
   }
 
-  const onSaveNote = (trackId) => {
+  const onSaveNote = async (trackId) => {
     if (!draft.trim()) {
       announce('Note not saved. The note is empty.')
       setError('Note cannot be empty.')
       return
     }
     const trimmed = draft.trim()
+    if (!anonContext?.deviceId) {
+      setError('Still preparing secure storage. Please try again in a moment.')
+      return
+    }
+    try {
+      const response = await apiFetch('/api/db/notes', {
+        method: 'POST',
+        body: JSON.stringify({ trackId, body: trimmed }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.error ?? 'Failed to save note')
+      }
+    } catch (err) {
+      console.error('[note save] error', err)
+      setError('Failed to save note. Please try again.')
+      return
+    }
     const existing = trackId && hasOwn(notesByTrack, trackId)
       ? [...notesByTrack[trackId]]
       : []

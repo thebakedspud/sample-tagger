@@ -1,0 +1,216 @@
+-- Phase 1 bootstrap for anonymous identities + notes RLS
+-- This script is idempotent so it can run via the Supabase SQL editor or CLI.
+
+create extension if not exists "pgcrypto" with schema public;
+
+create or replace function public.request_device_id()
+returns text
+language sql
+stable
+as $$
+select nullif(current_setting('request.headers.x-device-id', true), '');
+$$;
+
+create or replace function public.touch_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = timezone('utc', now());
+  return new;
+end;
+$$;
+
+create table if not exists public.anon_identities (
+  anon_id uuid primary key default gen_random_uuid(),
+  recovery_code_hash text,
+  last_active timestamptz not null default timezone('utc', now()),
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  user_id uuid references auth.users(id)
+);
+
+create table if not exists public.anon_device_links (
+  device_id text primary key,
+  anon_id uuid not null references public.anon_identities(anon_id) on delete cascade,
+  last_active timestamptz not null default timezone('utc', now()),
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_trigger
+    where tgname = 'set_updated_at_anon_identities'
+  ) then
+    create trigger set_updated_at_anon_identities
+      before update on public.anon_identities
+      for each row execute procedure public.touch_updated_at();
+  end if;
+  if not exists (
+    select 1
+    from pg_trigger
+    where tgname = 'set_updated_at_anon_device_links'
+  ) then
+    create trigger set_updated_at_anon_device_links
+      before update on public.anon_device_links
+      for each row execute procedure public.touch_updated_at();
+  end if;
+end;
+$$;
+
+alter table public.notes
+  add column if not exists anon_id uuid references public.anon_identities(anon_id) on delete cascade;
+
+alter table public.notes
+  add column if not exists device_id text;
+
+alter table public.notes
+  add column if not exists last_active timestamptz not null default timezone('utc', now());
+
+create index if not exists notes_anon_track_idx on public.notes (anon_id, track_id);
+create index if not exists anon_device_links_anon_idx on public.anon_device_links (anon_id);
+
+alter table public.anon_identities enable row level security;
+alter table public.anon_device_links enable row level security;
+alter table public.notes enable row level security;
+
+create policy if not exists "anon identities linked user read"
+on public.anon_identities
+for select
+using (
+  auth.role() = 'service_role'
+  or (
+    auth.uid() is not null
+    and user_id = auth.uid()
+  )
+);
+
+create policy if not exists "anon identities linked user write"
+on public.anon_identities
+for all
+using (
+  auth.role() = 'service_role'
+  or (
+    auth.uid() is not null
+    and user_id = auth.uid()
+  )
+)
+with check (
+  auth.role() = 'service_role'
+  or (
+    auth.uid() is not null
+    and user_id = auth.uid()
+  )
+);
+
+create policy if not exists "device self access"
+on public.anon_device_links
+for select
+using (
+  auth.role() = 'service_role'
+  or (
+    request_device_id() is not null
+    and request_device_id() = device_id
+  )
+  or (
+    auth.uid() is not null
+    and exists (
+      select 1
+      from public.anon_identities ai
+      where ai.anon_id = anon_device_links.anon_id
+        and ai.user_id = auth.uid()
+    )
+  )
+);
+
+create policy if not exists "device self write"
+on public.anon_device_links
+for insert
+with check (
+  auth.role() = 'service_role'
+  or (
+    request_device_id() is not null
+    and request_device_id() = device_id
+  )
+);
+
+create policy if not exists "device self update"
+on public.anon_device_links
+for update
+using (
+  auth.role() = 'service_role'
+  or (
+    request_device_id() is not null
+    and request_device_id() = device_id
+  )
+)
+with check (
+  auth.role() = 'service_role'
+  or (
+    request_device_id() is not null
+    and request_device_id() = device_id
+  )
+);
+
+create policy if not exists "notes device select"
+on public.notes
+for select
+using (
+  auth.role() = 'service_role'
+  or (
+    request_device_id() is not null
+    and request_device_id() = device_id
+  )
+  or (
+    auth.uid() is not null
+    and exists (
+      select 1
+      from public.anon_device_links dl
+      where dl.anon_id = public.notes.anon_id
+        and dl.device_id = request_device_id()
+    )
+  )
+);
+
+create policy if not exists "notes device insert"
+on public.notes
+for insert
+with check (
+  auth.role() = 'service_role'
+  or (
+    request_device_id() is not null
+    and request_device_id() = device_id
+  )
+);
+
+create policy if not exists "notes device update"
+on public.notes
+for update
+using (
+  auth.role() = 'service_role'
+  or (
+    request_device_id() is not null
+    and request_device_id() = device_id
+  )
+)
+with check (
+  auth.role() = 'service_role'
+  or (
+    request_device_id() is not null
+    and request_device_id() = device_id
+  )
+);
+
+create policy if not exists "notes device delete"
+on public.notes
+for delete
+using (
+  auth.role() = 'service_role'
+  or (
+    request_device_id() is not null
+    and request_device_id() = device_id
+  )
+);
