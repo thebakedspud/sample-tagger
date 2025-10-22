@@ -77,140 +77,248 @@ alter table public.anon_identities enable row level security;
 alter table public.anon_device_links enable row level security;
 alter table public.notes enable row level security;
 
-create policy if not exists "anon identities linked user read"
-on public.anon_identities
-for select
-using (
-  auth.role() = 'service_role'
-  or (
-    auth.uid() is not null
-    and user_id = auth.uid()
-  )
-);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'anon_identities'
+      and policyname = 'anon identities linked user read'
+  ) then
+    create policy "anon identities linked user read"
+      on public.anon_identities
+      for select
+      using (
+        auth.role() = 'service_role'
+        or (
+          auth.uid() is not null
+          and user_id = auth.uid()
+        )
+      );
+  end if;
+end;
+$$;
 
-create policy if not exists "anon identities linked user write"
-on public.anon_identities
-for all
-using (
-  auth.role() = 'service_role'
-  or (
-    auth.uid() is not null
-    and user_id = auth.uid()
-  )
-)
-with check (
-  auth.role() = 'service_role'
-  or (
-    auth.uid() is not null
-    and user_id = auth.uid()
-  )
-);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'anon_identities'
+      and policyname = 'anon identities linked user write'
+  ) then
+    create policy "anon identities linked user write"
+      on public.anon_identities
+      for all
+      using (
+        auth.role() = 'service_role'
+        or (
+          auth.uid() is not null
+          and user_id = auth.uid()
+        )
+      )
+      with check (
+        auth.role() = 'service_role'
+        or (
+          auth.uid() is not null
+          and user_id = auth.uid()
+        )
+      );
+  end if;
+end;
+$$;
 
-create policy if not exists "device self access"
-on public.anon_device_links
-for select
-using (
-  auth.role() = 'service_role'
-  or (
-    request_device_id() is not null
-    and request_device_id() = device_id
-  )
-  or (
-    auth.uid() is not null
-    and exists (
-      select 1
-      from public.anon_identities ai
-      where ai.anon_id = anon_device_links.anon_id
-        and ai.user_id = auth.uid()
-    )
-  )
-);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'anon_device_links'
+      and policyname = 'device self access'
+  ) then
+    create policy "device self access"
+      on public.anon_device_links
+      for select
+      using (
+        auth.role() = 'service_role'
+        or (
+          request_device_id() is not null
+          and request_device_id() = device_id
+        )
+        or (
+          auth.uid() is not null
+          and exists (
+            select 1
+            from public.anon_identities ai
+            where ai.anon_id = anon_device_links.anon_id
+              and ai.user_id = auth.uid()
+          )
+        )
+      );
+  end if;
+end;
+$$;
 
-create policy if not exists "device self write"
-on public.anon_device_links
-for insert
-with check (
-  auth.role() = 'service_role'
-  or (
-    request_device_id() is not null
-    and request_device_id() = device_id
-  )
-);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'anon_device_links'
+      and policyname = 'device self write'
+  ) then
+    create policy "device self write"
+      on public.anon_device_links
+      for insert
+      with check (
+        auth.role() = 'service_role'
+        or (
+          request_device_id() is not null
+          and request_device_id() = device_id
+        )
+      );
+  end if;
+end;
+$$;
 
-create policy if not exists "device self update"
-on public.anon_device_links
-for update
-using (
-  auth.role() = 'service_role'
-  or (
-    request_device_id() is not null
-    and request_device_id() = device_id
-  )
-)
-with check (
-  auth.role() = 'service_role'
-  or (
-    request_device_id() is not null
-    and request_device_id() = device_id
-  )
-);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'anon_device_links'
+      and policyname = 'device self update'
+  ) then
+    create policy "device self update"
+      on public.anon_device_links
+      for update
+      using (
+        auth.role() = 'service_role'
+        or (
+          request_device_id() is not null
+          and request_device_id() = device_id
+        )
+      )
+      with check (
+        auth.role() = 'service_role'
+        or (
+          request_device_id() is not null
+          and request_device_id() = device_id
+        )
+      );
+  end if;
+end;
+$$;
 
-create policy if not exists "notes device select"
-on public.notes
-for select
-using (
-  auth.role() = 'service_role'
-  or (
-    request_device_id() is not null
-    and request_device_id() = device_id
-  )
-  or (
-    auth.uid() is not null
-    and exists (
-      select 1
-      from public.anon_device_links dl
-      where dl.anon_id = public.notes.anon_id
-        and dl.device_id = request_device_id()
-    )
-  )
-);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'notes'
+      and policyname = 'notes device select'
+  ) then
+    create policy "notes device select"
+      on public.notes
+      for select
+      using (
+        auth.role() = 'service_role'
+        or (
+          request_device_id() is not null
+          and request_device_id() = device_id
+        )
+        or (
+          auth.uid() is not null
+          and exists (
+            select 1
+            from public.anon_device_links dl
+            where dl.anon_id = public.notes.anon_id
+              and dl.device_id = request_device_id()
+          )
+        )
+      );
+  end if;
+end;
+$$;
 
-create policy if not exists "notes device insert"
-on public.notes
-for insert
-with check (
-  auth.role() = 'service_role'
-  or (
-    request_device_id() is not null
-    and request_device_id() = device_id
-  )
-);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'notes'
+      and policyname = 'notes device insert'
+  ) then
+    create policy "notes device insert"
+      on public.notes
+      for insert
+      with check (
+        auth.role() = 'service_role'
+        or (
+          request_device_id() is not null
+          and request_device_id() = device_id
+        )
+      );
+  end if;
+end;
+$$;
 
-create policy if not exists "notes device update"
-on public.notes
-for update
-using (
-  auth.role() = 'service_role'
-  or (
-    request_device_id() is not null
-    and request_device_id() = device_id
-  )
-)
-with check (
-  auth.role() = 'service_role'
-  or (
-    request_device_id() is not null
-    and request_device_id() = device_id
-  )
-);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'notes'
+      and policyname = 'notes device update'
+  ) then
+    create policy "notes device update"
+      on public.notes
+      for update
+      using (
+        auth.role() = 'service_role'
+        or (
+          request_device_id() is not null
+          and request_device_id() = device_id
+        )
+      )
+      with check (
+        auth.role() = 'service_role'
+        or (
+          request_device_id() is not null
+          and request_device_id() = device_id
+        )
+      );
+  end if;
+end;
+$$;
 
-create policy if not exists "notes device delete"
-on public.notes
-for delete
-using (
-  auth.role() = 'service_role'
-  or (
-    request_device_id() is not null
-    and request_device_id() = device_id
-  )
-);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'notes'
+      and policyname = 'notes device delete'
+  ) then
+    create policy "notes device delete"
+      on public.notes
+      for delete
+      using (
+        auth.role() = 'service_role'
+        or (
+          request_device_id() is not null
+          and request_device_id() = device_id
+        )
+      );
+  end if;
+end;
+$$;
