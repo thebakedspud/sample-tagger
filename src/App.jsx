@@ -164,7 +164,6 @@ export default function App() {
     deviceId: getDeviceId(),
     anonId: getAnonId(),
   }))
-  const [bootstrapStatus, setBootstrapStatus] = useState('idle')
   const [bootstrapError, setBootstrapError] = useState(null)
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState(INITIAL_SCREEN)
@@ -266,7 +265,6 @@ export default function App() {
   })
 
   const bootstrapDevice = useCallback(async (allowRetry = true) => {
-    setBootstrapStatus('pending')
     const existingDeviceId = getDeviceId()
     try {
       const response = await apiFetch('/api/anon/bootstrap', {
@@ -300,8 +298,6 @@ export default function App() {
     } catch (err) {
       console.error('[bootstrap] error', err)
       setBootstrapError('Failed to reach bootstrap endpoint')
-    } finally {
-      setBootstrapStatus('done')
     }
   }, [])
 
