@@ -1,5 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { loadAppState, saveAppState } from '../storage.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  loadAppState,
+  loadRecent,
+  saveAppState,
+  saveRecent,
+  upsertRecent,
+} from '../storage.js';
 
 class MemoryStorage {
   constructor() {
@@ -26,6 +32,10 @@ class MemoryStorage {
 describe('storage cursors', () => {
   beforeEach(() => {
     globalThis.localStorage = new MemoryStorage();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('persists a null cursor through save/load', () => {
@@ -96,5 +106,127 @@ describe('storage cursors', () => {
     expect(restored?.notesByTrack['sp:track:1']).toEqual(['First note']);
     expect(restored?.notesByTrack['sp:track:2']).toEqual(['Second note']);
     expect(Array.isArray(restored?.tracks)).toBe(true);
+  });
+});
+
+describe('recent playlists storage', () => {
+  beforeEach(() => {
+    globalThis.localStorage = new MemoryStorage();
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function baseRecentData() {
+    return {
+      id: 'spotify:abc123',
+      provider: 'spotify',
+      playlistId: 'abc123',
+      title: 'Focus Mix',
+      sourceUrl: 'https://open.spotify.com/playlist/abc123',
+    };
+  }
+
+  it('upserts recents with dedupe and preserves importedAt', () => {
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(2000);
+    const first = upsertRecent([], baseRecentData(), 6);
+    expect(first).toHaveLength(1);
+    expect(first[0].importedAt).toBe(2000);
+    expect(first[0].lastUsedAt).toBe(2000);
+
+    spy.mockReturnValue(5000);
+    const updated = upsertRecent(first, {
+      ...baseRecentData(),
+      title: 'Focus Mix (updated)',
+    });
+
+    expect(updated).toHaveLength(1);
+    expect(updated[0].title).toBe('Focus Mix (updated)');
+    expect(updated[0].importedAt).toBe(2000);
+    expect(updated[0].lastUsedAt).toBe(5000);
+  });
+
+  it('trims to max while keeping pinned entries first', () => {
+    let list = [];
+    for (let i = 0; i < 5; i += 1) {
+      list = upsertRecent(
+        list,
+        {
+          id: `spotify:${i}`,
+          provider: 'spotify',
+          playlistId: String(i),
+          title: `Playlist ${i}`,
+          sourceUrl: `https://example.com/${i}`,
+          importedAt: i + 1,
+          lastUsedAt: i + 1,
+        },
+        5,
+      );
+    }
+
+    list = list.map((item) => {
+      if (item.playlistId === '1' || item.playlistId === '3') {
+        return { ...item, pinned: true };
+      }
+      return item;
+    });
+
+    const result = upsertRecent(list, {
+      id: 'spotify:new',
+      provider: 'spotify',
+      playlistId: 'new',
+      title: 'Newest',
+      sourceUrl: 'https://example.com/new',
+      importedAt: 999,
+      lastUsedAt: 999,
+      pinned: false,
+    }, 5);
+
+    expect(result).toHaveLength(5);
+    const pinnedFirst = result.slice(0, 2);
+    expect(pinnedFirst.every((item) => item.pinned === true)).toBe(true);
+    expect(result.some((item) => item.id === 'spotify:new')).toBe(true);
+  });
+
+  it('preserves recents when saveAppState runs without providing them', () => {
+    saveRecent([baseRecentData()]);
+    saveAppState({
+      theme: 'dark',
+      playlistTitle: 'Notes Test',
+      tracks: [],
+      importMeta: {},
+      lastImportUrl: '',
+      importedAt: null,
+      notesByTrack: {},
+    });
+    const stored = loadRecent();
+    expect(stored).toHaveLength(1);
+    expect(stored[0].id).toBe('spotify:abc123');
+  });
+
+  it('migrates v3 storage and seeds recents when data exists', () => {
+    const legacy = {
+      version: 3,
+      theme: 'dark',
+      playlistTitle: 'Legacy Mix',
+      importedAt: '2023-04-01T12:00:00.000Z',
+      lastImportUrl: 'https://open.spotify.com/playlist/legacy',
+      provider: 'spotify',
+      playlistId: 'legacy',
+      tracks: [],
+    };
+    globalThis.localStorage.setItem('sta:v3', JSON.stringify(legacy));
+
+    const migrated = loadAppState();
+    expect(migrated).not.toBeNull();
+    const recents = migrated?.recentPlaylists ?? [];
+    expect(recents).toHaveLength(1);
+    expect(recents[0].id).toBe('spotify:legacy');
+    expect(recents[0].title).toBe('Legacy Mix');
+    expect(recents[0].sourceUrl).toBe('https://open.spotify.com/playlist/legacy');
+    expect(typeof recents[0].importedAt).toBe('number');
+    expect(typeof recents[0].lastUsedAt).toBe('number');
   });
 });
