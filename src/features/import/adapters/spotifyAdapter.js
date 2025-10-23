@@ -492,6 +492,8 @@ export async function importPlaylist(options = {}) {
         typeof tracksPayload?.total === 'number' && Number.isFinite(tracksPayload.total)
           ? tracksPayload.total
           : undefined;
+      const coverImage =
+        Array.isArray(meta?.images) && meta.images[0]?.url ? meta.images[0].url : undefined;
 
       const canonicalUrl = buildCanonicalPlaylistUrl(playlistId);
 
@@ -501,6 +503,7 @@ export async function importPlaylist(options = {}) {
         title: typeof meta?.name === 'string' ? meta.name : `Spotify playlist ${playlistId}`,
         snapshotId: typeof meta?.snapshot_id === 'string' ? meta.snapshot_id : undefined,
         sourceUrl: canonicalUrl,
+        coverUrl: coverImage,
         total: totalTracks,
         tracks,
         pageInfo: {

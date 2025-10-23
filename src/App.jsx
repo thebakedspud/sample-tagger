@@ -4,6 +4,7 @@ import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
 import RecoveryModal from './components/RecoveryModal.jsx'
 import RestoreDialog from './components/RestoreDialog.jsx'
+import RecentPlaylists from './features/recent/RecentPlaylists.jsx'
 import {
   loadAppState,
   saveAppState,
@@ -12,6 +13,9 @@ import {
   clearPendingMigrationSnapshot,
   writeAutoBackupSnapshot,
   stashPendingMigrationSnapshot,
+  loadRecent,
+  saveRecent,
+  upsertRecent,
 } from './utils/storage.js'
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
@@ -50,6 +54,9 @@ const pendingMigrationSnapshot = getPendingMigrationSnapshot()
 const INITIAL_NOTES_MAP = createInitialNotesMap(persisted)
 const HAS_VALID_PLAYLIST = !!(persisted?.importMeta?.provider && persisted?.tracks?.length)
 const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
+const persistedRecents = Array.isArray(persisted?.recentPlaylists) ? [...persisted.recentPlaylists] : null
+const loadedRecents = persistedRecents ?? loadRecent()
+const INITIAL_RECENTS = Array.isArray(loadedRecents) ? [...loadedRecents] : []
 
 // Safe default importMeta shape (mirrors storage v3)
 const EMPTY_IMPORT_META = {
@@ -173,6 +180,70 @@ function updateNotesMap(baseMap, trackId, nextNotes) {
   return map;
 }
 
+function normalizeTimestamp(value) {
+  if (value == null) return null
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value)
+  }
+  if (value instanceof Date) {
+    const ms = value.getTime()
+    return Number.isFinite(ms) ? Math.trunc(ms) : null
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    return Number.isNaN(parsed) ? null : Math.trunc(parsed)
+  }
+  return null
+}
+
+function createRecentCandidate(meta, options = {}) {
+  if (!meta || typeof meta !== 'object') return null
+  const provider =
+    typeof meta.provider === 'string' && meta.provider.trim()
+      ? meta.provider.trim().toLowerCase()
+      : null
+  const playlistId =
+    typeof meta.playlistId === 'string' && meta.playlistId.trim()
+      ? meta.playlistId.trim()
+      : null
+  const fallbackUrl =
+    typeof meta.sourceUrl === 'string' && meta.sourceUrl.trim()
+      ? meta.sourceUrl.trim()
+      : null
+  const sourceCandidate =
+    typeof options.sourceUrl === 'string' && options.sourceUrl.trim()
+      ? options.sourceUrl.trim()
+      : fallbackUrl
+  if (!provider || !playlistId || !sourceCandidate) return null
+
+  const next = {
+    provider,
+    playlistId,
+    title:
+      typeof options.title === 'string' && options.title.trim()
+        ? options.title.trim()
+        : 'Imported Playlist',
+    sourceUrl: sourceCandidate,
+  }
+
+  const importedAt = normalizeTimestamp(options.importedAt)
+  if (importedAt != null) next.importedAt = importedAt
+  const lastUsedAt = normalizeTimestamp(options.lastUsedAt)
+  if (lastUsedAt != null) next.lastUsedAt = lastUsedAt
+
+  if (typeof options.total === 'number' && Number.isFinite(options.total) && options.total >= 0) {
+    next.total = Math.round(options.total)
+  }
+  if (typeof options.coverUrl === 'string' && options.coverUrl.trim()) {
+    next.coverUrl = options.coverUrl.trim()
+  }
+  if (options.pinned) {
+    next.pinned = true
+  }
+
+  return next
+}
+
 export default function App() {
   const [anonContext, setAnonContext] = useState(() => ({
     deviceId: getDeviceId(),
@@ -233,6 +304,126 @@ export default function App() {
     attachNotesToTracks(persisted?.tracks ?? [], notesByTrack)
   )
   const tracksRef = useRef(tracks)
+
+  const [recentPlaylists, setRecentPlaylists] = useState(() => INITIAL_RECENTS)
+  const recentRef = useRef(recentPlaylists)
+  useEffect(() => {
+    recentRef.current = recentPlaylists
+  }, [recentPlaylists])
+
+  const [recentCardState, setRecentCardState] = useState(() => ({}))
+  const updateRecentCardState = useCallback((id, updater) => {
+    if (!id) return
+    setRecentCardState((prev) => {
+      const next = { ...prev }
+      if (typeof updater === 'function') {
+        const draft = updater(next[id] ?? {})
+        if (draft && Object.keys(draft).length > 0) {
+          next[id] = draft
+        } else {
+          delete next[id]
+        }
+      } else if (updater && Object.keys(updater).length > 0) {
+        next[id] = { ...(next[id] ?? {}), ...updater }
+      } else {
+        delete next[id]
+      }
+      return next
+    })
+  }, [])
+
+  const pushRecentPlaylist = useCallback((meta, options = {}) => {
+    const candidate = createRecentCandidate(meta, options)
+    if (!candidate) return
+    const next = upsertRecent(recentRef.current, candidate)
+    recentRef.current = next
+    setRecentPlaylists(next)
+    saveRecent(next)
+  }, [])
+
+  useEffect(() => {
+    setRecentCardState((prev) => {
+      const activeIds = new Set(recentPlaylists.map((item) => item.id))
+      const next = {}
+      Object.entries(prev).forEach(([id, state]) => {
+        if (activeIds.has(id)) {
+          next[id] = state
+        }
+      })
+      return next
+    })
+  }, [recentPlaylists])
+
+  const applyImportResult = useCallback(
+    (
+      payload,
+      {
+        sourceUrl,
+        announceMessage,
+        fallbackTitle,
+        focusBehavior = 'first-track',
+        recents,
+        updateLastImportUrl = true,
+      } = {}
+    ) => {
+      const mapped = Array.isArray(payload?.tracks) ? payload.tracks : []
+      const meta = payload?.meta ?? {}
+      const importedTimestamp = payload?.importedAt ?? null
+      const resolvedTitle = payload?.title || fallbackTitle || 'Imported Playlist'
+
+      const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, mapped)
+      setNotesByTrack(nextNotesMap)
+      setTracks(attachNotesToTracks(mapped, nextNotesMap))
+      setImportMeta({
+        ...EMPTY_IMPORT_META,
+        ...meta,
+      })
+      setPlaylistTitle(resolvedTitle)
+      setImportedAt(importedTimestamp)
+      if (updateLastImportUrl && typeof sourceUrl === 'string') {
+        setLastImportUrl(sourceUrl)
+      }
+      setScreen('playlist')
+
+      const trackCount = mapped.length
+      const message =
+        typeof announceMessage === 'string'
+          ? announceMessage
+          : `Playlist imported. ${trackCount} tracks.`
+      announce(message)
+
+      requestAnimationFrame(() => {
+        if (focusBehavior === 'heading') {
+          focusById('playlist-title')
+          return
+        }
+        if (trackCount > 0 && mapped[0]?.id) {
+          focusById('add-note-btn-' + mapped[0].id)
+        } else {
+          focusById('playlist-title')
+        }
+      })
+
+      if (recents) {
+        const importedAtMs =
+          recents.importedAt != null
+            ? normalizeTimestamp(recents.importedAt)
+            : normalizeTimestamp(importedTimestamp)
+        pushRecentPlaylist(meta, {
+          title: resolvedTitle,
+          sourceUrl: sourceUrl ?? meta?.sourceUrl ?? '',
+          total: typeof recents.total === 'number' ? recents.total : trackCount,
+          coverUrl: recents.coverUrl,
+          importedAt: importedAtMs ?? undefined,
+          lastUsedAt: recents.lastUsedAt,
+          pinned: recents.pinned,
+        })
+      }
+
+      return { trackCount, title: resolvedTitle }
+    },
+    [announce, pushRecentPlaylist]
+  )
 
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
@@ -704,24 +895,18 @@ export default function App() {
         return
       }
 
-      const { tracks: mapped, meta, title, importedAt: importedTimestamp } = result.data
-      const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, mapped)
-      setNotesByTrack(nextNotesMap)
-      setTracks(attachNotesToTracks(mapped, nextNotesMap))
-      setImportMeta({
-        ...EMPTY_IMPORT_META,
-        ...meta,
-      })
-      setPlaylistTitle(title || 'Imported Playlist')
-      setImportedAt(importedTimestamp)
-      setLastImportUrl(trimmedUrl)
-      setScreen('playlist')
-      announce('Playlist imported. ' + mapped.length + ' tracks.')
-
-      requestAnimationFrame(() => {
-        if (mapped.length > 0) {
-          focusById('add-note-btn-' + mapped[0].id)
-        }
+      applyImportResult(result.data, {
+        sourceUrl: trimmedUrl,
+        recents: {
+          importedAt: result.data?.importedAt ?? null,
+          total:
+            typeof result.data?.total === 'number'
+              ? result.data.total
+              : Array.isArray(result.data?.tracks)
+                ? result.data.tracks.length
+                : null,
+          coverUrl: result.data?.coverUrl ?? null,
+        },
       })
     } catch (err) {
       if (err?.name === 'AbortError') return
@@ -731,6 +916,84 @@ export default function App() {
       setImportError(msg)
       announce('Import failed. ' + msg)
       importInputRef.current?.focus(); importInputRef.current?.select()
+    }
+  }
+
+  const handleSelectRecent = async (recent) => {
+    if (!recent || !recent.id) {
+      return { ok: false, error: 'Unknown playlist' }
+    }
+    if (isAnyImportBusy) {
+      const msg = 'Finish the current import before loading another playlist.'
+      updateRecentCardState(recent.id, { error: msg, loading: false })
+      announce(msg)
+      return { ok: false, error: msg }
+    }
+
+    const trimmedUrl = typeof recent.sourceUrl === 'string' ? recent.sourceUrl.trim() : ''
+    if (!trimmedUrl) {
+      const msg = "Can't load - link changed."
+      updateRecentCardState(recent.id, { error: msg, loading: false })
+      announce(msg)
+      return { ok: false, error: msg }
+    }
+
+    setImportUrl(trimmedUrl)
+    setImportError(null)
+    updateRecentCardState(recent.id, { loading: true, error: null })
+    announce(`Loading playlist ${recent.title ? `"${recent.title}"` : ''}.`)
+
+    try {
+      const result = await importInitial(trimmedUrl, {
+        providerHint: recent.provider,
+        sourceUrl: trimmedUrl,
+      })
+
+      if (result?.stale) {
+        updateRecentCardState(recent.id, {})
+        return { ok: false, stale: true }
+      }
+
+      if (!result.ok) {
+        const code = result.code ?? CODES.ERR_UNKNOWN
+        const msg = msgFromCode(code)
+        console.log('[recent import error]', { code, raw: result.error })
+        updateRecentCardState(recent.id, { loading: false, error: msg })
+        setImportError(msg)
+        announce(msg)
+        return { ok: false, error: msg }
+      }
+
+      applyImportResult(result.data, {
+        sourceUrl: trimmedUrl,
+        focusBehavior: 'heading',
+        announceMessage: `Playlist loaded: ${recent.title || result.data?.title || 'Imported playlist'}.`,
+        recents: {
+          importedAt: result.data?.importedAt ?? null,
+          total:
+            typeof result.data?.total === 'number'
+              ? result.data.total
+              : Array.isArray(result.data?.tracks)
+                ? result.data.tracks.length
+                : null,
+          coverUrl: result.data?.coverUrl ?? recent.coverUrl,
+          lastUsedAt: Date.now(),
+        },
+      })
+      updateRecentCardState(recent.id, null)
+      return { ok: true }
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        updateRecentCardState(recent.id, {})
+        throw err
+      }
+      const code = extractErrorCode(err)
+      const msg = msgFromCode(code)
+      console.log('[recent import error]', { code, raw: err })
+      updateRecentCardState(recent.id, { loading: false, error: msg })
+      setImportError(msg)
+      announce(msg)
+      return { ok: false, error: msg }
     }
   }
 
@@ -758,17 +1021,25 @@ export default function App() {
         return
       }
 
-      const { tracks: mapped, meta, title, importedAt: importedTimestamp } = result.data
-      const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, mapped)
-      setNotesByTrack(nextNotesMap)
-      setTracks(attachNotesToTracks(mapped, nextNotesMap))
-      setImportMeta({
-        ...EMPTY_IMPORT_META,
-        ...meta,
+      const resolvedTotal =
+        typeof result.data?.total === 'number'
+          ? result.data.total
+          : Array.isArray(result.data?.tracks)
+            ? result.data.tracks.length
+            : null
+
+      applyImportResult(result.data, {
+        sourceUrl: lastImportUrl,
+        fallbackTitle: playlistTitle,
+        announceMessage: `Playlist re-imported. ${resolvedTotal ?? 0} tracks available.`,
+        recents: {
+          importedAt: result.data?.importedAt ?? null,
+          total: resolvedTotal,
+          coverUrl: result.data?.coverUrl ?? null,
+          lastUsedAt: Date.now(),
+        },
+        updateLastImportUrl: false,
       })
-      setPlaylistTitle(title || playlistTitle || 'Imported Playlist')
-      setImportedAt(importedTimestamp)
-      announce('Playlist re-imported. ' + mapped.length + ' tracks available.')
       if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
     } catch (err) {
       if (err?.name === 'AbortError') {
@@ -1161,6 +1432,13 @@ export default function App() {
                 </div>
               </div>
             </form>
+
+            <RecentPlaylists
+              items={recentPlaylists}
+              onSelect={handleSelectRecent}
+              cardState={recentCardState}
+              disabled={isAnyImportBusy}
+            />
           </section>
         )}
 

@@ -46,12 +46,29 @@ function buildTracks(res, providerHint, startIndex = 0, existingIds) {
     if (seen && seen.has(candidateId)) return
     if (seen) seen.add(candidateId)
 
-    mapped.push({
+    const thumbnail = ensureString(track?.thumbnailUrl ?? track?.artworkUrl ?? '')
+    const sourceUrl = ensureString(track?.sourceUrl ?? '')
+    const normalizedTrack = {
       id: candidateId,
       title: ensureString(track?.title || ''),
       artist: ensureString(track?.artist || ''),
       notes: [],
-    })
+    }
+
+    if (thumbnail) {
+      normalizedTrack.thumbnailUrl = thumbnail
+    }
+    if (sourceUrl) {
+      normalizedTrack.sourceUrl = sourceUrl
+    }
+    if (typeof track?.durationMs === 'number' && Number.isFinite(track.durationMs)) {
+      normalizedTrack.durationMs = track.durationMs
+    }
+    if (track?.provider || provider) {
+      normalizedTrack.provider = track?.provider ?? provider ?? undefined
+    }
+
+    mapped.push(normalizedTrack)
   })
 
   return mapped
@@ -128,6 +145,8 @@ export default function usePlaylistImportFlow() {
           meta,
           title: res?.title || DEFAULT_TITLE,
           importedAt: toIsoNow(),
+          coverUrl: res?.coverUrl ?? null,
+          total: typeof res?.total === 'number' ? res.total : tracks.length,
         },
       }
     } catch (err) {
@@ -178,6 +197,8 @@ export default function usePlaylistImportFlow() {
           meta,
           title: res?.title || options.fallbackTitle || DEFAULT_TITLE,
           importedAt: toIsoNow(),
+          coverUrl: res?.coverUrl ?? null,
+          total: typeof res?.total === 'number' ? res.total : tracks.length,
         },
       }
     } catch (err) {

@@ -71,8 +71,9 @@ function parseCursor(cursor) {
  * @param {string} config.title
  * @param {Array<any>} config.tracks
  * @param {number} [config.total]
+ * @param {string} [config.coverUrl]
  */
-export function createPagedMockAdapter({ provider, title, tracks, total = TOTAL_TRACKS }) {
+export function createPagedMockAdapter({ provider, title, tracks, total = TOTAL_TRACKS, coverUrl }) {
   const dataset = buildDataset(provider, tracks, total);
   const playlistId = `${provider}-mock-playlist`;
   const snapshotId = `${provider}-mock-snapshot-${dataset.length}`;
@@ -103,6 +104,7 @@ export function createPagedMockAdapter({ provider, title, tracks, total = TOTAL_
       snapshotId,
       title,
       sourceUrl: url,
+      coverUrl: typeof coverUrl === 'string' ? coverUrl : undefined,
       tracks: pageTracks,
       pageInfo: {
         cursor: nextCursor,

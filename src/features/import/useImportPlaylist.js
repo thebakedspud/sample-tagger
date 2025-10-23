@@ -122,6 +122,12 @@ function coerceResult(provider, url, payload, meta = {}) {
   const playlistId = payload?.playlistId || payload?.id || `${provider}-playlist`;
 
   const pageInfo = normalizePageInfo(payload?.pageInfo);
+  const coverUrlCandidate =
+    typeof payload?.coverUrl === 'string' && payload.coverUrl.trim()
+      ? payload.coverUrl.trim()
+      : Array.isArray(payload?.images) && payload.images[0]?.url
+        ? String(payload.images[0].url)
+        : null;
 
   /** @type {any} */
   const result = {
@@ -134,6 +140,10 @@ function coerceResult(provider, url, payload, meta = {}) {
     tracks,
     pageInfo,
   };
+
+  if (coverUrlCandidate) {
+    result.coverUrl = coverUrlCandidate;
+  }
 
   if (meta.isFallback || meta.lastErrorCode) {
     result.debug = {

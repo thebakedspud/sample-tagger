@@ -21,6 +21,9 @@
  * @property {string} title
  * @property {string} artist
  * @property {string[]} notes
+ * @property {string=} thumbnailUrl
+ * @property {string=} sourceUrl
+ * @property {number=} durationMs
  *
  * @typedef {Record<string, string[]>} NotesByTrack
  *
@@ -322,12 +325,21 @@ function sanitizeTracks(list) {
     const id = safeString(/** @type {any} */(t).id) || `track-${idx + 1}`;
     if (seen.has(id)) return;
     seen.add(id);
-    out.push({
+    const record = {
       id,
       title: safeString(/** @type {any} */(t).title) || `Track ${idx + 1}`,
       artist: safeString(/** @type {any} */(t).artist) || 'Unknown Artist',
-      notes: Array.isArray(/** @type {any} */(t).notes) ? [.../** @type {any} */(t).notes] : [],
-    });
+      notes: normalizeNotesArray(/** @type {any} */(t).notes),
+    };
+    const thumb = safeString(/** @type {any} */(t).thumbnailUrl);
+    if (thumb) record.thumbnailUrl = thumb;
+    const sourceUrl = safeString(/** @type {any} */(t).sourceUrl);
+    if (sourceUrl) record.sourceUrl = sourceUrl;
+    const duration = Number(/** @type {any} */(t).durationMs);
+    if (Number.isFinite(duration) && duration > 0) {
+      record.durationMs = Math.round(duration);
+    }
+    out.push(record);
   });
 
   return out;

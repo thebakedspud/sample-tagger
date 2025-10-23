@@ -109,6 +109,39 @@ describe('storage cursors', () => {
   });
 });
 
+describe('track persistence', () => {
+  beforeEach(() => {
+    globalThis.localStorage = new MemoryStorage();
+  });
+
+  it('keeps thumbnail and metadata when saving and loading', () => {
+    saveAppState({
+      theme: 'dark',
+      playlistTitle: 'Thumb Test',
+      tracks: [
+        {
+          id: 'track-1',
+          title: 'First',
+          artist: 'Artist One',
+          notes: ['Great intro'],
+          thumbnailUrl: 'https://example.com/thumb.jpg',
+          sourceUrl: 'https://example.com/track',
+          durationMs: 123456,
+        },
+      ],
+      importMeta: {},
+      lastImportUrl: '',
+      importedAt: null,
+    });
+
+    const restored = loadAppState();
+    expect(restored?.tracks?.[0]?.thumbnailUrl).toBe('https://example.com/thumb.jpg');
+    expect(restored?.tracks?.[0]?.sourceUrl).toBe('https://example.com/track');
+    expect(restored?.tracks?.[0]?.durationMs).toBe(123456);
+    expect(restored?.tracks?.[0]?.notes).toEqual(['Great intro']);
+  });
+});
+
 describe('recent playlists storage', () => {
   beforeEach(() => {
     globalThis.localStorage = new MemoryStorage();

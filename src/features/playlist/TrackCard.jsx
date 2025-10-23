@@ -53,6 +53,11 @@ export default function TrackCard({
       </span>
     ) : null
 
+  const fallbackInitial =
+    typeof track.title === 'string' && track.title.trim()
+      ? track.title.trim()[0].toUpperCase()
+      : '#'
+
   return (
     <li
       id={`track-${track.id}`}
@@ -66,14 +71,53 @@ export default function TrackCard({
         marginBottom: 12,
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 id={`t-${track.id}`} style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>
-          <span aria-hidden="true">{index + 1}. </span>
-          <span id={`title-${track.id}`}>{track.title}</span>
-          {' - '}
-          <span aria-hidden="true">{track.artist}</span>
-          {noteBadge}
-        </h3>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <div className="track-thumb" aria-hidden="true">
+            {track.thumbnailUrl ? (
+              <img
+                src={track.thumbnailUrl}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                width={40}
+                height={40}
+              />
+            ) : (
+              <span className="track-thumb__fallback">{fallbackInitial}</span>
+            )}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <h3
+              id={`t-${track.id}`}
+              style={{
+                margin: 0,
+                fontSize: '1rem',
+                fontWeight: 600,
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 4,
+                alignItems: 'center',
+              }}
+            >
+              <span className="sr-only">Track {index + 1}</span>
+              <span aria-hidden="true">{index + 1}.</span>
+              <span id={`title-${track.id}`} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {track.title}
+              </span>
+              <span className="sr-only">by {track.artist}</span>
+              <span aria-hidden="true">— {track.artist}</span>
+              {noteBadge}
+            </h3>
+          </div>
+        </div>
 
         <div style={{ display: 'flex', gap: 8 }}>
           <button
