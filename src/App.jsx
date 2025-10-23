@@ -354,18 +354,37 @@ export default function App() {
     })
   }, [recentPlaylists])
 
+/**
+ * @typedef {Object} ApplyImportResultOptions
+ * @property {string} [sourceUrl]
+ * @property {string} [announceMessage]
+ * @property {string} [fallbackTitle]
+ * @property {'first-track' | 'heading'} [focusBehavior]
+ * @property {boolean} [updateLastImportUrl]
+ * @property {{
+ *   importedAt?: string | number | Date | null,
+ *   total?: number | null,
+ *   coverUrl?: string | null,
+ *   lastUsedAt?: string | number | Date | null,
+ *   pinned?: boolean
+ * }} [recents]
+ */
+
   const applyImportResult = useCallback(
     (
       payload,
-      {
+      options = {}
+    ) => {
+      /** @type {ApplyImportResultOptions} */
+      const {
         sourceUrl,
         announceMessage,
         fallbackTitle,
         focusBehavior = 'first-track',
         recents,
         updateLastImportUrl = true,
-      } = {}
-    ) => {
+      } = options || {}
+
       const mapped = Array.isArray(payload?.tracks) ? payload.tracks : []
       const meta = payload?.meta ?? {}
       const importedTimestamp = payload?.importedAt ?? null

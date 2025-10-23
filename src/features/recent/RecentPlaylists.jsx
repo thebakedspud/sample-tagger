@@ -66,10 +66,12 @@ export default function RecentPlaylists({
   cardState = {},
   disabled = false,
 }) {
-  const list = Array.isArray(items) ? items : []
   const buttonsRef = useRef(new Map())
 
-  const sorted = useMemo(() => list.slice(0), [list])
+  const sorted = useMemo(
+    () => (Array.isArray(items) ? items.slice(0) : []),
+    [items],
+  )
 
   if (!sorted.length) return null
 
@@ -128,7 +130,7 @@ export default function RecentPlaylists({
                 disabled={disableCard}
                 aria-busy={isLoading ? 'true' : 'false'}
                 aria-describedby={ariaDescribedBy}
-                aria-label={`Load playlist “${displayTitle}” from ${providerLabel}${
+                aria-label={`Load playlist "${displayTitle}" from ${providerLabel}${
                   totalLabel ? `, ${totalLabel}` : ''
                 }`}
               >
@@ -145,7 +147,7 @@ export default function RecentPlaylists({
                   ) : (
                     <div className="recent-card__fallback">
                       <span aria-hidden="true">
-                        {displayTitle ? displayTitle[0].toUpperCase() : '•'}
+                        {displayTitle ? displayTitle[0].toUpperCase() : '*'}
                       </span>
                     </div>
                   )}
@@ -156,7 +158,7 @@ export default function RecentPlaylists({
                   </p>
                   <p className="recent-card__meta">
                     <span className="recent-card__provider">{providerLabel}</span>
-                    {totalLabel ? <span> • {totalLabel}</span> : null}
+                    {totalLabel ? <span> - {totalLabel}</span> : null}
                   </p>
                   {recency ? (
                     <p className="recent-card__recency" title={recency.title}>
@@ -164,7 +166,7 @@ export default function RecentPlaylists({
                     </p>
                   ) : null}
                   {isLoading ? (
-                    <span className="recent-card__loading">Loading…</span>
+                    <span className="recent-card__loading">Loading...</span>
                   ) : null}
                 </div>
               </button>
