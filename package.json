@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
-    "@supabase/supabase-js": "^2.75.1",
+    "@supabase/supabase-js": "^2.76.1",
     "@vercel/analytics": "^1.5.0",
     "@vercel/speed-insights": "^1.2.0",
     "prop-types": "^15.8.1",
