@@ -128,7 +128,13 @@ describe('usePlaylistImportFlow', () => {
     expect(importNextMock).toHaveBeenCalledTimes(1)
     expect(response.ok).toBe(true)
     expect(response.data.tracks).toEqual([
-      { id: 'track-2', title: 'New', artist: 'B', notes: [] },
+      expect.objectContaining({
+        id: 'track-2',
+        title: 'New',
+        artist: 'B',
+        notes: [],
+        provider: 'spotify',
+      }),
     ])
     expect(response.data.meta.cursor).toBe('cursor-2')
   })
