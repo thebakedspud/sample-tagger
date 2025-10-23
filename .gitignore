@@ -34,6 +34,9 @@ node_modules
 # production build
 dist
 
+# test coverage output
+coverage
+
 # misc
 .DS_Store
 *.log
@@ -41,3 +44,4 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+.vercel

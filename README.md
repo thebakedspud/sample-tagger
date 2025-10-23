@@ -2,46 +2,53 @@
 
 [![Tests](https://github.com/thebakedspud/sample-tagger/actions/workflows/test.yml/badge.svg)](https://github.com/thebakedspud/sample-tagger/actions/workflows/test.yml)
 
-Bare-bones prototype for importing a playlist and adding notes.
+Sample Tagger helps you import a playlist, annotate tracks, and keep those notes accessible across sessions. It started as a UX accessibility exercise and now includes recovery, recents, and backup tooling.
 
-As part of my UX/UI design course, I’ve been learning about accessibility, inclusion, and inclusive design.  
-This app is an attempt to deepen that understanding and put those principles into practice.
+Current capabilities:
 
-Below is a checklist of guidelines that have shaped development so far.  
-It will continue to evolve as the project grows.
+- Import public playlists from Spotify, YouTube, or SoundCloud through the adapter registry.
+- Normalize tracks, attach per-track notes, and undo accidental deletes inline.
+- Resume previous sessions via localStorage and a recent-playlists carousel.
+- Bootstrap anonymous device IDs and recovery codes with `/api/anon/bootstrap`, then restore notes on other browsers through `/api/anon/restore`.
+- Export/import JSON backups so notes survive outside the browser.
+
+> 22-10-2025: First Lighthouse run to hit 100 on the accessibility score.
 
 ---
 
-## ♿ Accessibility Checklist
+## Accessibility Checklist
 
-We aim to follow **WCAG principles** and good inclusive practices as we build.
+We aim to follow WCAG principles and inclusive design practices.
 
 ### Page Structure
-- Use landmarks (`header`, `main`, `footer`) so assistive tech users can jump around quickly.
-- Have **one `<h1>`** for the app title; use `<h2>`, `<h3>` for section headings to show hierarchy.
+- Use landmarks (`header`, `main`, `footer`) so assistive tech users can jump quickly.
+- Keep a single `<h1>` for the app title; rely on semantic headings for sections.
 
 ### Lists & Content
-- Use real lists (`<ul><li>`) for tracks and notes so users know how many items there are and where they are in the list.
+- Represent tracks and notes with real lists (`<ul><li>`) so counts and positions are announced.
 
 ### Buttons & Controls
-- All actions are real `<button>` elements, not hidden right-clicks.  
-- Every button has a clear label or an accessible name (`aria-label` if icon-only).  
-- Keep focus visible (don’t remove outlines).
+- All actions use `<button>` elements with visible focus treatment.
+- Each control has a clear accessible name (`aria-label` for icon-only buttons).
 
 ### Keyboard Use
-- Everything can be reached with **Tab** and activated with **Enter/Space**.  
-- When new inputs appear (like “Add note”), focus moves straight into them.  
-- When actions complete, focus returns to a sensible place (e.g., back to the triggering button).
+- Everything is reachable with Tab/Shift+Tab and activatable with Enter/Space.
+- New inputs (e.g., "Add note") receive focus automatically.
+- After actions complete, focus returns to a sensible place (often the invoking control).
 
 ### Feedback
-- Use a hidden **live region** (`role="status"`) to announce changes (e.g., “Imported 3 tracks”, “Note added”).  
-- Don’t rely on color alone — pair it with text or icons.
+- A hidden `role="status"` live region announces updates ("Imported 3 tracks", "Note added").
+- Color is never the only signal; we pair it with text or icons.
 
 ### Visuals
-- Text contrast: **≥ 4.5 : 1** for body text, **≥ 3 : 1** for large text and UI controls.  
-- Clickable areas are large enough (around 44 × 44 px).
+- Contrast targets >= 4.5:1 for body text and >= 3:1 for large text/controls.
+- Interactive targets stay roughly 44 x 44 px for comfortable activation.
 
 ---
 
-_This checklist is a living document and part of the project’s ongoing accessibility focus._
-14/10/2025 test
+## Running Log
+
+- 23-10-2025: Notes backup/export and recovery flows integrated into the app.
+- 15-10-2025: Spotify integration live via serverless token exchange and Web API - import public playlists directly.
+
+_This README evolves alongside the app. Update it whenever onboarding expectations or user-facing behavior change._

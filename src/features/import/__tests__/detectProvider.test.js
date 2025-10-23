@@ -2,9 +2,20 @@ import { describe, it, expect } from 'vitest';
 import detectProvider from '../detectProvider.js';
 
 describe('detectProvider', () => {
-  it('returns spotify for canonical playlist URLs', () => {
-    expect(detectProvider(' https://open.spotify.com/playlist/abc123 ')).toBe('spotify');
-    expect(detectProvider('HTTPS://OPEN.SPOTIFY.COM/PLAYLIST/XYZ')).toBe('spotify');
+  const VALID_ID = '37i9dQZF1DX4WYpdgoPlCD';
+
+  it('returns spotify for Spotify playlist URLs and URIs', () => {
+    expect(detectProvider(` https://open.spotify.com/playlist/${VALID_ID} `)).toBe('spotify');
+    expect(detectProvider(`HTTPS://OPEN.SPOTIFY.COM/PLAYLIST/${VALID_ID}`)).toBe('spotify');
+    expect(
+      detectProvider(`https://open.spotify.com/user/spotify/playlist/${VALID_ID}?si=abc`)
+    ).toBe('spotify');
+    expect(
+      detectProvider(`https://open.spotify.com/embed/playlist/${VALID_ID}?utm_source=generator`)
+    ).toBe('spotify');
+    expect(detectProvider(`spotify:playlist:${VALID_ID}`)).toBe('spotify');
+    expect(detectProvider(`Spotify:User:Someone:Playlist:${VALID_ID}`)).toBe('spotify');
+    expect(detectProvider(`spotify://playlist/${VALID_ID}`)).toBe('spotify');
   });
 
   it('returns youtube for playlist URLs that include list param', () => {

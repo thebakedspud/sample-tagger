@@ -8,19 +8,69 @@
  * @typedef {import('http').ServerResponse} VercelResponse
  */
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-};
+import { isOriginAllowed } from './originConfig.js';
+
+const TOKEN_URL = 'https://accounts.spotify.com/api/token';
+const EXPIRY_SKEW_SECONDS = 60;
+const MIN_EXPIRES_SECONDS = 5;
+const RETRY_AFTER_MAX_MS = 5000;
+const isDevRuntime = process.env.NODE_ENV !== 'production';
+
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 100;
+
+function parsePositiveInt(value, fallback) {
+  if (typeof value !== 'string') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return fallback;
+}
+
+const RATE_LIMIT_WINDOW_MS = parsePositiveInt(
+  process.env.SPOTIFY_TOKEN_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_RATE_LIMIT_WINDOW_MS
+);
+const RATE_LIMIT_MAX_REQUESTS = parsePositiveInt(
+  process.env.SPOTIFY_TOKEN_RATE_LIMIT_MAX,
+  DEFAULT_RATE_LIMIT_MAX_REQUESTS
+);
+
+/** @type {Map<string, { count: number, resetAt: number }>} */
+const rateLimitState = new Map();
+
+/** @type {{ access_token: string, token_type: string, expires_at: number, fetched_at: number } | null} */
+let cachedToken = null;
+/** @type {Promise<{ access_token: string, token_type: string, expires_at: number, fetched_at: number }> | null} */
+let inFlightToken = null;
 
 /**
  * Attach shared CORS headers.
  * @param {VercelResponse} res
  */
-function applyCors(res) {
-  Object.entries(CORS_HEADERS).forEach(([name, value]) => {
-    res.setHeader(name, value);
+function buildCorsHeaders(origin) {
+  const allowed = isOriginAllowed(origin);
+  const headers = {
+    'Access-Control-Allow-Methods': 'GET,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
+  };
+  if (allowed && origin) {
+    headers['Access-Control-Allow-Origin'] = origin;
+  }
+  return { headers, allowed };
+}
+
+/**
+ * @param {VercelResponse} res
+ * @param {Record<string, string>} headers
+ */
+function applyHeaders(res, headers) {
+  Object.entries(headers).forEach(([key, value]) => {
+    if (value === '') return;
+    res.setHeader(key, value);
   });
 }
 
@@ -33,7 +83,145 @@ function applyCors(res) {
 function sendJson(res, status, body) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.end(JSON.stringify(body));
+}
+
+function getClientIp(req) {
+  const header = req.headers?.['x-forwarded-for'];
+  if (typeof header === 'string' && header.length > 0) {
+    return header.split(',')[0].trim() || 'unknown';
+  }
+  if (Array.isArray(header) && header.length > 0) {
+    return header[0].split(',')[0].trim() || 'unknown';
+  }
+  return req.socket?.remoteAddress || 'unknown';
+}
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = rateLimitState.get(ip);
+
+  if (!entry || entry.resetAt <= now) {
+    rateLimitState.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS - 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return { allowed: false, remaining: 0, resetAt: entry.resetAt };
+  }
+
+  entry.count += 1;
+  rateLimitState.set(ip, entry);
+  return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS - entry.count, resetAt: entry.resetAt };
+}
+
+/**
+ * @param {{ access_token: string, token_type: string, expires_at: number, fetched_at: number } | null} token
+ */
+function isTokenValid(token) {
+  return Boolean(token && Date.now() < token.expires_at);
+}
+
+/**
+ * @param {string | null} header
+ * @returns {number | null}
+ */
+function parseRetryAfter(header) {
+  if (!header) return null;
+  const trimmed = header.trim();
+  if (!trimmed) return null;
+
+  const seconds = Number.parseFloat(trimmed);
+  if (!Number.isNaN(seconds)) {
+    return Math.max(0, Math.min(seconds * 1000, RETRY_AFTER_MAX_MS));
+  }
+
+  const retryDate = Date.parse(trimmed);
+  if (!Number.isNaN(retryDate)) {
+    const delta = retryDate - Date.now();
+    if (delta <= 0) return 0;
+    return Math.min(delta, RETRY_AFTER_MAX_MS);
+  }
+  return null;
+}
+
+/**
+ * @param {number} ms
+ */
+async function delay(ms) {
+  if (ms <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * @param {string} clientId
+ * @param {string} clientSecret
+ */
+async function fetchSpotifyToken(clientId, clientSecret) {
+  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+  const makeRequest = async () =>
+    fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    });
+
+  let attempt = 0;
+  let lastError = null;
+
+  while (attempt < 2) {
+    attempt += 1;
+    const response = await makeRequest();
+
+    if (response.ok) {
+      const data = await response.json();
+      const rawExpiresIn = typeof data?.expires_in === 'number' ? data.expires_in : 0;
+      const expiresInSeconds = Math.max(
+        MIN_EXPIRES_SECONDS,
+        rawExpiresIn - EXPIRY_SKEW_SECONDS
+      );
+      const now = Date.now();
+      const expiresAt = now + expiresInSeconds * 1000;
+
+      return {
+        access_token: data.access_token,
+        token_type: typeof data?.token_type === 'string' ? data.token_type : 'Bearer',
+        expires_at: expiresAt,
+        fetched_at: now,
+      };
+    }
+
+    if (response.status === 429 && attempt < 2) {
+      const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
+      if (retryAfter !== null) {
+        await delay(retryAfter);
+        continue;
+      }
+    }
+
+    let errorPayload = null;
+    try {
+      errorPayload = await response.json();
+    } catch {
+      // noop
+    }
+
+    lastError = {
+      status: response.status,
+      error: errorPayload?.error || 'spotify_error',
+    };
+    break;
+  }
+
+  if (lastError) {
+    throw Object.assign(new Error('spotify_error'), lastError);
+  }
+  throw new Error('spotify_error');
 }
 
 /**
@@ -42,7 +230,9 @@ function sendJson(res, status, body) {
  * @param {VercelResponse} res
  */
 export default async function handler(req, res) {
-  applyCors(res);
+  const originHeader = typeof req.headers?.origin === 'string' ? req.headers.origin : '';
+  const { headers: corsHeaders, allowed: originAllowed } = buildCorsHeaders(originHeader);
+  applyHeaders(res, corsHeaders);
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
@@ -55,6 +245,25 @@ export default async function handler(req, res) {
     return;
   }
 
+  if (!originAllowed) {
+    sendJson(res, 403, { error: 'origin_not_allowed' });
+    return;
+  }
+
+  const clientIp = getClientIp(req);
+  const rate = checkRateLimit(clientIp);
+
+  res.setHeader('X-RateLimit-Limit', String(RATE_LIMIT_MAX_REQUESTS));
+  res.setHeader('X-RateLimit-Remaining', String(Math.max(0, rate.remaining)));
+  res.setHeader('X-RateLimit-Reset', String(Math.ceil(rate.resetAt / 1000)));
+
+  if (!rate.allowed) {
+    const retryAfter = Math.max(0, Math.ceil((rate.resetAt - Date.now()) / 1000));
+    res.setHeader('Retry-After', String(retryAfter));
+    sendJson(res, 429, { error: 'rate_limited' });
+    return;
+  }
+
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 
@@ -63,43 +272,62 @@ export default async function handler(req, res) {
     return;
   }
 
-  const tokenUrl = 'https://accounts.spotify.com/api/token';
-  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-
   try {
-    const response = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${basicAuth}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: 'grant_type=client_credentials',
-    });
-
-    if (!response.ok) {
-      const status = response.status === 429 ? 503 : 502;
-      let errorPayload = null;
-      try {
-        errorPayload = await response.json();
-      } catch {
-        // ignore JSON parse issues
+    if (!isTokenValid(cachedToken)) {
+      if (!inFlightToken) {
+        inFlightToken = fetchSpotifyToken(clientId, clientSecret).then((token) => {
+          cachedToken = {
+            access_token: token.access_token,
+            token_type: token.token_type,
+            expires_at: token.expires_at,
+            fetched_at: token.fetched_at,
+          };
+          return cachedToken;
+        }).finally(() => {
+          inFlightToken = null;
+        });
       }
-
-      sendJson(res, status, {
-        error: errorPayload?.error || 'spotify_error',
-        status: response.status,
-      });
-      return;
+      await inFlightToken;
     }
 
-    const data = await response.json();
+    const token = cachedToken;
+    if (!token) {
+      throw new Error('token_unavailable');
+    }
+
+    if (isDevRuntime) {
+      console.debug('[spotify][token]', {
+        cacheHit: isTokenValid(cachedToken),
+        expiresAt: cachedToken?.expires_at ?? null,
+      });
+    }
+
+    const expiresIn = Math.max(
+      0,
+      Math.round((token.expires_at - Date.now()) / 1000)
+    );
+
     sendJson(res, 200, {
-      access_token: data.access_token,
-      expires_in: data.expires_in,
-      token_type: data.token_type ?? 'Bearer',
+      access_token: token.access_token,
+      token_type: token.token_type,
+      expires_in: expiresIn,
+      expires_at: token.expires_at,
     });
   } catch (err) {
-    console.error('[spotify][token] fetch failed', err);
-    sendJson(res, 503, { error: 'spotify_unavailable' });
+    const anyErr = /** @type {any} */ (err);
+    const status = anyErr?.status === 429 ? 503 : 503;
+    sendJson(res, status, {
+      error: anyErr?.error || 'spotify_unavailable',
+      status: anyErr?.status ?? 503,
+    });
   }
+}
+
+export function __resetTokenCacheForTests() {
+  cachedToken = null;
+  inFlightToken = null;
+}
+
+export function __resetRateLimitStateForTests() {
+  rateLimitState.clear();
 }

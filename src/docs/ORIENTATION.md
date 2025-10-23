@@ -1,111 +1,112 @@
-# ORIENTATION – Import Flow Overview
-_Last updated: 12 Oct 2025_
+# ORIENTATION - Import Flow Overview
+_Last updated: 23 Oct 2025_
 
-A 1-page map of what connects to what. Use this to re-anchor quickly after a break.
+A quick map of how the import, notes, and recovery pieces currently fit together. Use this to re-anchor after a break.
 
 ---
 
-## 🧭 Visual → Code Map
+## Visual + Code Map
 
 | UI Element | File / Function |
-|-------------|-----------------|
-| **Header / Theme toggle** | `src/components/ThemeToggle.jsx` |
-| **Playlist title + chip** | `App.jsx` – reads from `importMeta` |
-| **Re-import / Clear / Back** | `App.jsx` – `handleReimport`, `handleClearAll`, `handleBack` |
-| **Track list + “Add note”** | `App.jsx` / `src/components/TrackList.jsx` |
-| **Undo placeholder** | `src/components/UndoPlaceholder.jsx` + `src/features/undo/usePendingDelete.js` |
-| **“Load more” button** | `App.jsx` → `handleLoadMore()` |
-| **Live announcements (screen reader)** | `src/components/LiveRegion.jsx` |
-| **Focus helpers** | `src/utils/focusById.js` |
+|------------|-----------------|
+| Header + theme toggle | `src/components/ThemeToggle.jsx` |
+| Landing import form + provider chip | `src/App.jsx` (landing screen state) |
+| Recent playlists grid | `src/features/recent/RecentPlaylists.jsx` |
+| Playlist title, counters, action bar | `src/features/playlist/PlaylistView.jsx` |
+| Track cards + note editor | `src/features/playlist/TrackCard.jsx` / `src/features/playlist/NoteList.jsx` |
+| Inline undo toast | `src/components/UndoPlaceholder.jsx` + `src/features/undo/useInlineUndo.js` |
+| Load more button | `PlaylistView.jsx` -> `onLoadMore` |
+| Live announcements | `src/components/LiveRegion.jsx` |
+| Notes backup / restore controls | `src/App.jsx` (`handleBackupNotes`, `handleRestoreNotesRequest`) + `src/components/RecoveryModal.jsx`, `src/components/RestoreDialog.jsx` |
 
 ---
 
-## 🔄 Data Flow
+## Data Flow
 
-1. **App → useImportPlaylist**
-   - `const { runImport, importNext, loading, error, pageInfo } = useImportPlaylist()`
-
-2. **Provider detection**
-   - `src/features/import/detectProvider.js`
-
-3. **Adapter registry**
-   - `src/features/import/useImportPlaylist.js`
-   - ```js
-     const ADAPTER_REGISTRY = { spotify, youtube, soundcloud }
-     ```
-
-4. **Adapters**
-   - `src/features/import/adapters/{spotifyAdapter,youtubeAdapter,soundcloudAdapter}.js`
-   - All use shared util `mockAdapterUtils.js` for pagination.
-   - Page size controlled by `DEFAULT_PAGE_SIZE = 10`.
-
-5. **Normalization**
-   - `src/features/import/normalizeTrack.js` → creates stable `id/title/artist` etc.
-
-6. **Persistence**
-   - `src/utils/storage.js`
-   - Saves:
+1. **App + usePlaylistImportFlow**  
+   - `src/App.jsx` owns high-level state (screen routing, tracks, notes, recents, device context) and wires the import hook:  
      ```js
-     {
-       version: 3,
-       importMeta: {
-         provider, playlistId, title, snapshotId,
-         cursor, hasMore, sourceUrl, importedAt, debug
-       },
-       tracks: [ { id, title, artist, ... } ]
-     }
+     const {
+       status: importStatus,
+       loading: importLoading,
+       importInitial,
+       reimport: reimportPlaylist,
+       loadMore: loadMoreTracks,
+       resetFlow: resetImportFlow,
+     } = usePlaylistImportFlow()
      ```
-   - Restored on refresh to resume session.
+   - App persists via `saveAppState`, announces status changes, and bridges to storage/device helpers.
+
+2. **Provider detection and import hook**  
+   - `src/features/import/useImportPlaylist.js` detects providers with `detectProvider.js`, resolves the adapter from `ADAPTER_REGISTRY`, normalizes `pageInfo`, dedupes IDs, and exposes `importPlaylist`, `importNext`, `tracks`, `pageInfo`, `loading`, `errorCode`, and `progress`.
+
+3. **Adapter stack**  
+   - `src/features/import/adapters/{spotifyAdapter,youtubeAdapter,soundcloudAdapter}.js` implement provider-specific fetch logic.  
+   - `mockAdapterUtils.js` supplies deterministic paged mocks (`MOCK_PAGE_SIZE = 10`) and shared pagination helpers.  
+   - `src/data/mockPlaylists.js` feeds fallback data for dev or offline flows.
+
+4. **Track + meta normalization**  
+   - `src/features/import/normalizeTrack.js` plus `usePlaylistImportFlow` utilities (`buildTracks`, `buildMeta`) enforce stable `id`, `title`, `artist`, optional `thumbnailUrl/sourceUrl/durationMs`, and structured meta `{ provider, playlistId, snapshotId, cursor, hasMore, sourceUrl, debug }`.
+
+5. **Persistence, recents, backups**  
+   - `src/utils/storage.js` serializes `PersistedState` version 4 (`STORAGE_VERSION = 4`) under `sta:v4`, including theme, playlist title, `importMeta`, `tracks`, `notesByTrack`, and `recentPlaylists` (capped by `RECENT_DEFAULT_MAX = 8`).  
+   - Migration helpers (`getPendingMigrationSnapshot`, `stashPendingMigrationSnapshot`, `writeAutoBackupSnapshot`) protect data between schema updates and auto-backups.
+
+6. **Device + recovery context**  
+   - `src/lib/deviceState.js` caches anonymous device IDs, anon IDs, and recovery codes in `localStorage`.  
+   - `src/App.jsx` bootstraps the device via `apiFetch('/api/anon/bootstrap')`, surfaces new recovery codes with `RecoveryModal`, and calls `/api/anon/restore` when the user submits the recovery code in `RestoreDialog`.
 
 ---
 
-## 🧩 Core Handlers (App.jsx)
+## Core Handlers (`src/App.jsx`)
 
 | Handler | Purpose |
-|----------|----------|
-| `handleImport(url)` | Detect provider → runImport → save to storage |
-| `handleReimport()` | Re-fetch same playlist; announces and refocuses |
-| `handleLoadMore()` | Calls `importNext()` → appends tracks |
-| `onAddNote / onSaveNote / onDeleteNote` | Standard note lifecycle |
-| `onUndo` | Restores last deleted note (focus + announce) |
+|---------|---------|
+| `handleImport(url)` | Calls `importInitial`, builds playlist state, persists to storage, updates recents, and focuses the first track. |
+| `handleReimport()` | Reuses the stored URL/meta with `reimportPlaylist`, refreshes tracks and recents, and restores focus to the Re-import button. |
+| `handleLoadMore()` | Invokes `loadMoreTracks`, appends deduped pages, and moves focus to the first newly loaded track. |
+| `onAddNote / onSaveNote / onDeleteNote` | Manage per-track note drafts, persistence (`notesByTrack`), and inline undo metadata. |
+| `undoInline / expireInline` | Provided by `useInlineUndo` (10 minute timeout) to restore or finalize deleted notes. |
+| `handleBackupNotes()` | Exports notes JSON via the File System Access API when available, otherwise triggers a download. |
+| `handleRestoreNotesRequest()` | Opens the hidden file input and merges imported notes into the current session. |
+| `handleRestoreSubmit(code)` | Posts the recovery code to `/api/anon/restore`, syncs notes from the backend, and updates device context. |
+| `handleClearAll()` | Clears storage, resets device identifiers, wipes in-memory state, and re-runs `bootstrapDevice`. |
+| `handleBackToLanding()` | Returns to the landing screen and focuses the URL field for a fresh import. |
 
 ---
 
-## ⚙️ Feature Flags & Knobs
+## Feature Toggles & Tunables
 
-| Flag | Location | Description |
-|------|-----------|-------------|
-| `DEFAULT_PAGE_SIZE` | `mockAdapterUtils.js` | Number of tracks per mock page |
-| `ADAPTER_REGISTRY` | `useImportPlaylist.js` | Restrict active providers for focus |
-| `DEV_DEBUG` | `App.jsx` | Show/hide debug chips |
-| `focusById()` | `src/utils/focusById.js` | Moves focus after import/reimport/undo |
+| Flag / Constant | Location | Description |
+|-----------------|----------|-------------|
+| `ADAPTER_REGISTRY` | `src/features/import/useImportPlaylist.js` | Enables or disables provider adapters. |
+| `MOCK_PAGE_SIZE` | `src/features/import/adapters/mockAdapterUtils.js` | Number of tracks per mock page when simulating pagination. |
+| `ImportFlowStatus` | `src/features/import/usePlaylistImportFlow.js` | Source of the UI busy states (`idle`, `importing`, `reimporting`, `loadingMore`). |
+| `RECENT_DEFAULT_MAX` | `src/utils/storage.js` | Maximum saved entries in `recentPlaylists`. |
+| `timeoutMs` option | `src/features/undo/useInlineUndo.js` | Controls the inline undo window (defaults to 600000 ms). |
 
 ---
 
-## 📣 Behavior Traces
+## Behavior Traces
 
 | Event | Outcome |
-|--------|----------|
-| **Invalid URL** | Hook throws coded error → announce + select URL input |
-| **Undo delete** | Temporary state (5s) → restore or expire + focus safety |
-| **Load more** | Uses `pageInfo.cursor`; appends new page; keeps focus ring |
-| **Theme toggle** | Updates `<html data-theme>` + localStorage |
+|-------|---------|
+| Invalid URL or unsupported provider | `useImportPlaylist` throws a coded adapter error; App surfaces `importError`, announces the message, and re-focuses the URL input. |
+| Successful import | `applyImportResult` normalizes tracks, persists state (`saveAppState`), updates recents, and routes to the playlist screen. |
+| Re-import | Tracks are replaced with the latest payload, `importMeta` updates, and any new recovery code reopens `RecoveryModal`. |
+| Load more | Uses `importMeta.cursor` and `loadMoreTracks`; deduped tracks append to the list, focus moves to the first new card. |
+| Note delete | Schedules inline undo for up to 10 minutes; undo restores the note and focus, expiry announces deletion. |
+| Clear all | Wipes storage, pending migrations, device IDs, and local notes, then reboots the anonymous context. |
 
 ---
 
-## 🎯 What’s Stable vs. WIP
+## Stable vs. WIP
 
-✅  Architecture (hooks, adapters, storage)  
-✅  Accessibility flow (live region, focus)  
-✅  Pagination mock pipeline  
-🟡  Virtualized list (future)  
-🟡  Test coverage (future)  
+- Stable: hook -> adapter -> storage architecture, inline undo, accessibility flows.
+- Stable: pagination mocks and recent playlist UX.
+- WIP: virtualized list and richer analytics.
+- WIP: recovery API contract; expect adjustments.
 
 ---
 
-> 💡 **Remember:**  
-> _App handles the flow,_  
-> _the hook talks to the adapter,_  
-> _the adapter returns normalized data,_  
-> _storage remembers it all._
-
+> Reminder: App orchestrates the flow, `usePlaylistImportFlow` brokers the hook and adapters, adapters return normalized data, and storage plus device helpers remember it all.
