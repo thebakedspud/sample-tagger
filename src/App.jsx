@@ -179,18 +179,26 @@ function ensureNotesEntries(baseMap, tracks) {
   return next;
 }
 
-function groupNotesByTrack(rows) {
-  const map = Object.create(null);
-  if (!Array.isArray(rows)) return map;
+function groupRemoteNotes(rows) {
+  const noteMap = Object.create(null);
+  const tagMap = Object.create(null);
+  if (!Array.isArray(rows)) return { notes: noteMap, tags: tagMap };
   rows.forEach((row) => {
     if (!row || typeof row !== 'object') return;
-    const trackId = typeof row.trackId === 'string' ? row.trackId : row.track_id;
-    const body = typeof row.body === 'string' ? row.body : null;
-    if (!trackId || !body) return;
-    if (!Array.isArray(map[trackId])) map[trackId] = [];
-    map[trackId].push(body);
+    const trackId =
+      typeof row.trackId === 'string' ? row.trackId : row.track_id;
+    if (!trackId) return;
+    const body = typeof row.body === 'string' ? row.body.trim() : '';
+    if (body) {
+      if (!Array.isArray(noteMap[trackId])) noteMap[trackId] = [];
+      noteMap[trackId].push(body);
+    }
+    if ('tags' in row) {
+      const cleaned = normalizeTagList(row.tags);
+      tagMap[trackId] = cleaned;
+    }
   });
-  return map;
+  return { notes: noteMap, tags: tagMap };
 }
 
 function mergeRemoteNotes(localMap, remoteMap) {
@@ -200,6 +208,14 @@ function mergeRemoteNotes(localMap, remoteMap) {
     if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
       merged[trackId] = [...remoteNotes];
     }
+  });
+  return merged;
+}
+
+function mergeRemoteTags(localMap, remoteMap) {
+  const merged = cloneTagsMap(localMap);
+  Object.entries(remoteMap).forEach(([trackId, remoteTags]) => {
+    merged[trackId] = Array.isArray(remoteTags) ? [...remoteTags] : [];
   });
   return merged;
 }
@@ -763,17 +779,11 @@ export default function App() {
         }
 
         const remoteList = Array.isArray(payload?.notes) ? payload.notes : []
+        const { notes: remoteNoteMap, tags: remoteTagMap } = groupRemoteNotes(remoteList)
         /** @type {Map<string, Set<string>>} */
-        const remoteMap = new Map()
-        remoteList.forEach((row) => {
-          if (!row || typeof row !== 'object') return
-          const trackId = typeof row.trackId === 'string' ? row.trackId : null
-          const body = typeof row.body === 'string' ? row.body.trim() : ''
-          if (!trackId || !body) return
-          if (!remoteMap.has(trackId)) {
-            remoteMap.set(trackId, new Set())
-          }
-          remoteMap.get(trackId)?.add(body)
+        const remoteNoteSets = new Map()
+        Object.entries(remoteNoteMap).forEach(([trackId, noteList]) => {
+          remoteNoteSets.set(trackId, new Set(noteList))
         })
 
         const combinedLocal = cloneNotesMap(snapshot.notesByTrack || {})
@@ -796,7 +806,7 @@ export default function App() {
         /** @type {{ trackId: string, body: string }[]} */
         const uploads = []
         Object.entries(combinedLocal).forEach(([trackId, notes]) => {
-          const remoteSet = remoteMap.get(trackId) ?? new Set()
+          const remoteSet = remoteNoteSets.get(trackId) ?? new Set()
           notes.forEach((note) => {
             const clean = typeof note === 'string' ? note.trim() : ''
             if (!clean) return
@@ -805,6 +815,32 @@ export default function App() {
               remoteSet.add(clean)
             }
           })
+        })
+
+        const combinedTags = cloneTagsMap(snapshot.tagsByTrack || {})
+        if (Array.isArray(snapshot.tracks)) {
+          snapshot.tracks.forEach((track) => {
+            if (!track || typeof track !== 'object') return
+            const id = track.id
+            if (!id) return
+            const existing = Array.isArray(combinedTags[id]) ? [...combinedTags[id]] : []
+            const cleaned = normalizeTagList(track.tags)
+            cleaned.forEach((tag) => {
+              if (!existing.includes(tag)) existing.push(tag)
+            })
+            if (existing.length > 0) {
+              combinedTags[id] = existing
+            }
+          })
+        }
+
+        /** @type {{ trackId: string, tags: string[] }[]} */
+        const tagUploads = []
+        Object.entries(combinedTags).forEach(([trackId, tags]) => {
+          const remoteTags = remoteTagMap[trackId]
+          if (Array.isArray(remoteTags) && remoteTags.length > 0) return
+          if (!Array.isArray(tags) || tags.length === 0) return
+          tagUploads.push({ trackId, tags })
         })
 
         const localNoteCount = Object.values(combinedLocal).reduce(
@@ -816,7 +852,9 @@ export default function App() {
           localTracks: snapshot.tracks?.length ?? 0,
           localNotes: localNoteCount,
           remoteNotes: remoteList.length,
+          remoteTagSets: Object.keys(remoteTagMap).length,
           toUpload: uploads.length,
+          tagUploads: tagUploads.length,
         })
 
         for (const job of uploads) {
@@ -828,6 +866,18 @@ export default function App() {
           if (!res.ok) {
             const errPayload = await res.json().catch(() => ({}))
             throw new Error(errPayload?.error ?? 'Failed to sync note')
+          }
+        }
+
+        for (const job of tagUploads) {
+          if (cancelled) return
+          const res = await apiFetch('/api/db/notes', {
+            method: 'POST',
+            body: JSON.stringify(job),
+          })
+          if (!res.ok) {
+            const errPayload = await res.json().catch(() => ({}))
+            throw new Error(errPayload?.error ?? 'Failed to sync tags')
           }
         }
 
@@ -871,20 +921,32 @@ export default function App() {
           console.error('[notes sync] failed', payload)
           return
         }
-        const remoteMap = groupNotesByTrack(payload?.notes)
-        if (!remoteMap || Object.keys(remoteMap).length === 0) {
+        const { notes: remoteMap, tags: remoteTagMap } = groupRemoteNotes(payload?.notes)
+        const hasRemoteNotes = Object.keys(remoteMap).length > 0
+        const hasRemoteTags = Object.keys(remoteTagMap).length > 0
+        if (!hasRemoteNotes && !hasRemoteTags) {
           return
         }
         setNotesByTrack((prev) =>
           ensureNotesEntries(mergeRemoteNotes(prev, remoteMap), tracksRef.current)
         )
+        setTagsByTrack((prev) =>
+          ensureTagsEntries(mergeRemoteTags(prev, remoteTagMap), tracksRef.current)
+        )
         setTracks((prev) =>
           prev.map((track) => {
+            let next = track
             const remoteNotes = remoteMap[track.id]
-            if (!remoteNotes || remoteNotes.length === 0) return track
-            const existingNotes = Array.isArray(track.notes) ? track.notes : []
-            if (existingNotes.length > 0) return track
-            return { ...track, notes: [...remoteNotes] }
+            if (Array.isArray(remoteNotes) && remoteNotes.length > 0) {
+              const existingNotes = Array.isArray(track.notes) ? track.notes : []
+              if (existingNotes.length === 0) {
+                next = { ...next, notes: [...remoteNotes] }
+              }
+            }
+            if (track.id && track.id in remoteTagMap) {
+              next = { ...next, tags: [...remoteTagMap[track.id]] }
+            }
+            return next
           })
         )
       } catch (err) {
@@ -1378,6 +1440,26 @@ export default function App() {
     setTimeout(() => importInputRef.current?.focus(), 0)
   }
 
+  const syncTrackTags = useCallback(
+    async (trackId, tags) => {
+      if (!trackId || !anonContext?.deviceId) return
+      try {
+        const response = await apiFetch('/api/db/notes', {
+          method: 'POST',
+          body: JSON.stringify({ trackId, tags }),
+        })
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          throw new Error(payload?.error ?? 'Failed to sync tags')
+        }
+      } catch (err) {
+        console.error('[tags sync] error', err)
+        throw err
+      }
+    },
+    [anonContext?.deviceId],
+  )
+
   const handleAddTag = useCallback(
     (trackId, tag) => {
       const normalized = normalizeTag(tag)
@@ -1401,9 +1483,14 @@ export default function App() {
       )
       const title = tracksRef.current.find((t) => t.id === trackId)?.title ?? 'this track'
       announce(`Added tag "${normalized}" to "${title}".`)
+      if (anonContext?.deviceId) {
+        syncTrackTags(trackId, nextList).catch(() => {
+          announce('Tag sync failed. Changes are saved locally.')
+        })
+      }
       return true
     },
-    [announce],
+    [announce, anonContext?.deviceId, syncTrackTags],
   )
 
   const handleRemoveTag = useCallback(
@@ -1425,8 +1512,13 @@ export default function App() {
       )
       const title = tracksRef.current.find((t) => t.id === trackId)?.title ?? 'this track'
       announce(`Removed tag "${normalized}" from "${title}".`)
+      if (anonContext?.deviceId) {
+        syncTrackTags(trackId, filtered).catch(() => {
+          announce('Tag sync failed. Changes are saved locally.')
+        })
+      }
     },
-    [announce],
+    [announce, anonContext?.deviceId, syncTrackTags],
   )
 
   const onAddNote = (trackId) => {

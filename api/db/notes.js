@@ -37,6 +37,21 @@ function parseBody(value) {
   return null;
 }
 
+function normalizeTagsInput(value) {
+  if (!Array.isArray(value)) return null;
+  /** @type {string[]} */
+  const out = [];
+  const seen = new Set();
+  value.forEach((tag) => {
+    if (typeof tag !== 'string') return;
+    const normalized = tag.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) return;
+    out.push(normalized);
+    seen.add(normalized);
+  });
+  return out;
+}
+
 export default async function handler(req, res) {
   withCors(res);
 
@@ -69,7 +84,7 @@ export default async function handler(req, res) {
 
       let query = supabaseAdmin
         .from('notes')
-        .select('id, track_id, body, created_at, updated_at')
+        .select('id, track_id, body, tags, created_at, updated_at')
         .eq('anon_id', anonContext.anonId)
         .order('created_at', { ascending: true });
 
@@ -93,6 +108,7 @@ export default async function handler(req, res) {
             id: row.id,
             trackId: row.track_id,
             body: row.body,
+            tags: Array.isArray(row.tags) ? row.tags : [],
             createdAt: row.created_at,
             updatedAt: row.updated_at,
           })) ?? [],
@@ -111,46 +127,132 @@ export default async function handler(req, res) {
           : typeof parsed?.trackId === 'string'
             ? parsed.trackId
             : '';
-      const noteBody =
-        typeof parsed?.body === 'string' ? parsed.body.trim() : '';
+      const hasBodyField = typeof parsed?.body === 'string';
+      const noteBody = hasBodyField ? parsed.body.trim() : '';
+      const tagsProvided = Array.isArray(parsed?.tags);
+      const normalizedTags = tagsProvided
+        ? normalizeTagsInput(parsed.tags)
+        : null;
 
-      if (!trackId || !noteBody) {
+      if (!trackId) {
         return res
           .status(400)
-          .json({ error: 'Missing trackId/track_id or body' });
+          .json({ error: 'Missing trackId/track_id' });
       }
 
       const nowIso = new Date().toISOString();
+      const {
+        data: existingRow,
+        error: existingError,
+      } = await supabaseAdmin
+        .from('notes')
+        .select('id, body, tags')
+        .eq('anon_id', anonContext.anonId)
+        .eq('device_id', deviceId)
+        .eq('track_id', trackId)
+        .maybeSingle();
 
-      const insertPayload = {
-        anon_id: anonContext.anonId,
-        device_id: deviceId,
-        track_id: trackId,
-        body: noteBody,
+      if (existingError) {
+        console.error('[notes:post] lookup error', existingError);
+        return res.status(500).json({
+          error: 'Failed to look up existing note',
+          details: existingError.message,
+        });
+      }
+
+      if (!existingRow) {
+        if (!noteBody && !tagsProvided) {
+          return res
+            .status(400)
+            .json({ error: 'Missing note body or tags payload' });
+        }
+        if (hasBodyField && !noteBody && !tagsProvided) {
+          return res
+            .status(400)
+            .json({ error: 'Note body cannot be empty' });
+        }
+
+        const insertPayload = {
+          anon_id: anonContext.anonId,
+          device_id: deviceId,
+          track_id: trackId,
+          body: noteBody || '',
+          tags: normalizedTags ?? [],
+          last_active: nowIso,
+        };
+
+        const { data, error } = await supabaseAdmin
+          .from('notes')
+          .insert(insertPayload)
+          .select('id, track_id, body, tags, created_at, updated_at')
+          .single();
+
+        if (error) {
+          console.error('[notes:post] supabase error', error);
+          return res.status(500).json({
+            error: 'Failed to create note',
+            details: error.message,
+          });
+        }
+
+        await touchLastActive(supabaseAdmin, anonContext.anonId, deviceId);
+
+        return res.status(201).json({
+          note: {
+            id: data.id,
+            trackId: data.track_id,
+            body: data.body,
+            tags: Array.isArray(data.tags) ? data.tags : [],
+            createdAt: data.created_at,
+            updatedAt: data.updated_at,
+          },
+        });
+      }
+
+      if (!hasBodyField && !tagsProvided) {
+        return res
+          .status(400)
+          .json({ error: 'No updates provided' });
+      }
+      if (hasBodyField && !noteBody) {
+        return res
+          .status(400)
+          .json({ error: 'Note body cannot be empty' });
+      }
+
+      const updatePayload = {
         last_active: nowIso,
       };
+      if (hasBodyField) {
+        updatePayload.body = noteBody;
+      }
+      if (tagsProvided) {
+        updatePayload.tags = normalizedTags ?? [];
+      }
 
       const { data, error } = await supabaseAdmin
         .from('notes')
-        .insert(insertPayload)
-        .select('id, track_id, body, created_at, updated_at')
+        .update(updatePayload)
+        .eq('id', existingRow.id)
+        .select('id, track_id, body, tags, created_at, updated_at')
         .single();
 
       if (error) {
-        console.error('[notes:post] supabase error', error);
+        console.error('[notes:post] supabase update error', error);
         return res.status(500).json({
-          error: 'Failed to create note',
+          error: 'Failed to update note',
           details: error.message,
         });
       }
 
       await touchLastActive(supabaseAdmin, anonContext.anonId, deviceId);
 
-      return res.status(201).json({
+      return res.status(200).json({
         note: {
           id: data.id,
           trackId: data.track_id,
           body: data.body,
+          tags: Array.isArray(data.tags) ? data.tags : [],
           createdAt: data.created_at,
           updatedAt: data.updated_at,
         },
