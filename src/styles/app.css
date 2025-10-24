@@ -209,3 +209,137 @@
   color: rgba(255, 255, 255, 0.75);
   background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.08));
 }
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.2;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.tag-chip:hover,
+.tag-chip:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--fg);
+  outline: none;
+}
+
+.tag-chip:focus-visible {
+  box-shadow: 0 0 0 2px rgba(90, 180, 255, 0.3);
+}
+
+.tag-chip__label {
+  text-transform: lowercase;
+}
+
+.tag-chip__remove {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  font-size: 0.85em;
+  line-height: 1;
+}
+
+.tag-chip:hover .tag-chip__remove,
+.tag-chip:focus-visible .tag-chip__remove {
+  opacity: 1;
+}
+
+.tag-chip--add {
+  border-style: dashed;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.tag-chip--add:hover,
+.tag-chip--add:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: var(--fg);
+}
+
+.tag-input {
+  position: relative;
+  min-width: 160px;
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.tag-input__field {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+  font-size: 0.75rem;
+}
+
+.tag-input__field::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.tag-input__field:focus {
+  outline: none;
+  border-color: rgba(90, 180, 255, 0.6);
+  box-shadow: 0 0 0 2px rgba(90, 180, 255, 0.3);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.tag-input__suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 17, 21, 0.95);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  z-index: 20;
+}
+
+.tag-input__option {
+  margin: 0;
+  border-radius: 6px;
+}
+
+.tag-input__option button {
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  border: none;
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tag-input__option button:focus {
+  outline: none;
+}
+
+.tag-input__option button:hover,
+.tag-input__option button:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tag-input__option--active button {
+  background: rgba(90, 180, 255, 0.18);
+}

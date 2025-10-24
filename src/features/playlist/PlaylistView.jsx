@@ -17,6 +17,8 @@ import TrackCard from './TrackCard.jsx'
  * @param {(trackId: string|number) => void} props.onSaveNote
  * @param {() => void} props.onCancelNote
  * @param {(trackId: string|number, noteIndex: number) => void} props.onDeleteNote
+ * @param {(trackId: string|number, tag: string) => boolean} props.onAddTag
+ * @param {(trackId: string|number, tag: string) => void} props.onRemoveTag
  * @param {(pendingId: string) => void} props.onUndo
  * @param {(pendingId: string) => void} props.onDismissUndo
  * @param {() => void} props.onReimport
@@ -26,6 +28,8 @@ import TrackCard from './TrackCard.jsx'
  * @param {import('react').RefObject<HTMLButtonElement>} props.reimportBtnRef
  * @param {import('react').RefObject<HTMLButtonElement>} props.loadMoreBtnRef
  * @param {() => void} props.onLoadMore
+ * @param {string[]} props.stockTags
+ * @param {string[]} props.customTags
  */
 export default function PlaylistView({
   playlistTitle,
@@ -43,6 +47,8 @@ export default function PlaylistView({
   onSaveNote,
   onCancelNote,
   onDeleteNote,
+  onAddTag,
+  onRemoveTag,
   onUndo,
   onDismissUndo,
   onReimport,
@@ -52,6 +58,8 @@ export default function PlaylistView({
   reimportBtnRef,
   loadMoreBtnRef,
   onLoadMore,
+  stockTags,
+  customTags,
 }) {
   const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
   const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
@@ -110,6 +118,10 @@ export default function PlaylistView({
             onSaveNote={onSaveNote}
             onCancelNote={onCancelNote}
             onDeleteNote={onDeleteNote}
+            onAddTag={onAddTag}
+            onRemoveTag={onRemoveTag}
+            stockTags={stockTags}
+            customTags={customTags}
             onUndo={onUndo}
             onDismissUndo={onDismissUndo}
           />
