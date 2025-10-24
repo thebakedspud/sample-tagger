@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import NoteList from './NoteList.jsx'
 import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
@@ -41,7 +41,10 @@ export default function TrackCard({
   onDismissUndo,
 }) {
   const noteArr = Array.isArray(track.notes) ? track.notes : []
-  const tags = Array.isArray(track.tags) ? track.tags : []
+  const tags = useMemo(
+    () => (Array.isArray(track.tags) ? track.tags : []),
+    [track.tags],
+  )
   const { editingId, draft, error } = editingState
   const isEditing = editingId === track.id
 

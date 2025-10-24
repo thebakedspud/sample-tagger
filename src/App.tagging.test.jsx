@@ -96,7 +96,7 @@ vi.mock('./components/RestoreDialog.jsx', () => ({ default: () => null }))
 vi.mock('./features/recent/RecentPlaylists.jsx', () => ({ default: () => null }))
 vi.mock('@vercel/analytics/react', () => ({ Analytics: () => null }))
 vi.mock('./features/a11y/useAnnounce.js', () => ({
-  default: () => {
+  default: function useMockAnnounce() {
     const [message, setMessage] = useState('')
     const announce = useCallback((text) => setMessage(text), [])
     const clear = useCallback(() => setMessage(''), [])
