@@ -168,7 +168,7 @@ describe('api/db/notes handler', () => {
           id: 'row-1',
           track_id: 'track-7',
           body: 'hello',
-          tags: ['lofi'],
+          tags: ['trap', '808'],
           created_at: '2024-01-02T00:00:00Z',
           updated_at: '2024-01-02T00:00:01Z',
         },
@@ -194,7 +194,7 @@ describe('api/db/notes handler', () => {
           id: 'row-1',
           trackId: 'track-7',
           body: 'hello',
-          tags: ['lofi'],
+          tags: ['808', 'trap'],
           createdAt: '2024-01-02T00:00:00Z',
           updatedAt: '2024-01-02T00:00:01Z',
         },
@@ -267,7 +267,7 @@ describe('api/db/notes handler', () => {
     await handler(req, res);
 
     expect(notesUpdatePayload).toMatchObject({
-      tags: ['drill', '808'],
+      tags: ['808', 'drill'],
     });
     const [updateQuery] = notesUpdateQueries;
     expect(updateQuery.eq).toHaveBeenCalledWith('id', 'note-1');
@@ -283,6 +283,24 @@ describe('api/db/notes handler', () => {
       },
     });
   });
+
+  it('rejects invalid tags that exceed length limits', async () => {
+    getAnonContextMock.mockResolvedValueOnce({ anonId: 'anon-1' });
+    notesSelectQueue.push({ data: null, error: null });
+
+    const req = createMockReq({
+      method: 'POST',
+      headers: { 'x-device-id': 'device-1' },
+      body: { trackId: 'track-99', tags: ['x'.repeat(40)] },
+    });
+    const res = createMockRes();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.body?.error).toMatch(/Tags must be/);
+  });
+
 
   it('rejects missing device header', async () => {
     const req = createMockReq({ method: 'GET' });

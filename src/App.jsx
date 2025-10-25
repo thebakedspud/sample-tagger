@@ -19,6 +19,7 @@ import {
 } from './utils/storage.js'
 import { normalizeTag } from './features/tags/tagUtils.js'
 import { STOCK_TAGS } from './features/tags/constants.js'
+import { createTagSyncScheduler } from './features/tags/tagSyncQueue.js'
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
@@ -60,6 +61,10 @@ const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
 const persistedRecents = Array.isArray(persisted?.recentPlaylists) ? [...persisted.recentPlaylists] : null
 const loadedRecents = persistedRecents ?? loadRecent()
 const INITIAL_RECENTS = Array.isArray(loadedRecents) ? [...loadedRecents] : []
+
+const MAX_TAGS_PER_TRACK = 32
+const MAX_TAG_LENGTH = 24
+const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/
 
 // Safe default importMeta shape (mirrors storage v3)
 const EMPTY_IMPORT_META = {
@@ -114,10 +119,14 @@ function normalizeTagList(value) {
   const seen = new Set();
   value.forEach((tag) => {
     const normalized = normalizeTag(tag);
-    if (!normalized || seen.has(normalized)) return;
+    if (!normalized || normalized.length > MAX_TAG_LENGTH) return;
+    if (!TAG_ALLOWED_RE.test(normalized)) return;
+    if (seen.has(normalized)) return;
+    if (out.length >= MAX_TAGS_PER_TRACK) return;
     seen.add(normalized);
     out.push(normalized);
   });
+  out.sort();
   return out;
 }
 
@@ -965,6 +974,7 @@ export default function App() {
 
   const reimportBtnRef = useRef(null)
   const loadMoreBtnRef = useRef(null)
+  const tagSyncSchedulerRef = useRef(null)
 
   // -- PERSISTENCE: save whenever core state changes (v3 structured shape)
   useEffect(() => {
@@ -1440,32 +1450,62 @@ export default function App() {
     setTimeout(() => importInputRef.current?.focus(), 0)
   }
 
-  const syncTrackTags = useCallback(
+  const sendTagUpdate = useCallback(
     async (trackId, tags) => {
       if (!trackId || !anonContext?.deviceId) return
-      try {
-        const response = await apiFetch('/api/db/notes', {
-          method: 'POST',
-          body: JSON.stringify({ trackId, tags }),
-        })
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}))
-          throw new Error(payload?.error ?? 'Failed to sync tags')
-        }
-      } catch (err) {
-        console.error('[tags sync] error', err)
-        throw err
+      const response = await apiFetch('/api/db/notes', {
+        method: 'POST',
+        body: JSON.stringify({ trackId, tags }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.error ?? 'Failed to sync tags')
       }
     },
     [anonContext?.deviceId],
+  )
+
+  useEffect(() => {
+    if (!anonContext?.deviceId) {
+      tagSyncSchedulerRef.current?.clear?.()
+      tagSyncSchedulerRef.current = null
+      return
+    }
+    const scheduler = createTagSyncScheduler(sendTagUpdate, 350)
+    tagSyncSchedulerRef.current = scheduler
+    return () => scheduler.clear()
+  }, [anonContext?.deviceId, sendTagUpdate])
+
+  const syncTrackTags = useCallback(
+    (trackId, tags) => {
+      if (!trackId) return Promise.resolve()
+      const scheduler = tagSyncSchedulerRef.current
+      if (scheduler) {
+        return scheduler.schedule(trackId, tags)
+      }
+      return sendTagUpdate(trackId, tags)
+    },
+    [sendTagUpdate],
   )
 
   const handleAddTag = useCallback(
     (trackId, tag) => {
       const normalized = normalizeTag(tag)
       if (!trackId || !normalized) return false
+      if (normalized.length > MAX_TAG_LENGTH) {
+        announce(`Tags must be ${MAX_TAG_LENGTH} characters or fewer.`)
+        return false
+      }
+      if (!TAG_ALLOWED_RE.test(normalized)) {
+        announce('Tags can only include letters, numbers, spaces, hyphen, or underscore.')
+        return false
+      }
       const currentMap = tagsByTrackRef.current || {}
       const existing = hasOwn(currentMap, trackId) ? [...currentMap[trackId]] : []
+      if (existing.length >= MAX_TAGS_PER_TRACK) {
+        announce(`Maximum of ${MAX_TAGS_PER_TRACK} tags reached for this track.`)
+        return false
+      }
       if (existing.includes(normalized)) {
         const title = tracksRef.current.find((t) => t.id === trackId)?.title ?? 'this track'
         announce(`Tag "${normalized}" already applied to "${title}".`)

@@ -3,8 +3,8 @@ import PropTypes from 'prop-types';
 import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { getTagSuggestions, normalizeTag } from './tagUtils.js';
 
-const TagInput = forwardRef(function TagInput(
-  {
+const TagInput = forwardRef(function TagInput(props, ref) {
+  const {
     stockTags,
     customTags,
     existingTags,
@@ -13,9 +13,7 @@ const TagInput = forwardRef(function TagInput(
     placeholder = 'Add tag',
     autoFocus = false,
     className = '',
-  },
-  ref,
-) {
+  } = props || {}
   const inputId = useId();
   const listboxId = `${inputId}-listbox`;
   const inputRef = useRef(null);

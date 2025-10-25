@@ -24,6 +24,7 @@
  * @property {string=} thumbnailUrl
  * @property {string=} sourceUrl
  * @property {number=} durationMs
+ * @property {string[]=} tags
  *
  * @typedef {Record<string, string[]>} NotesByTrack
  *
@@ -62,6 +63,9 @@ const AUTO_BACKUP_KEY = 'sta:v5:auto-backup';
 const VALID_PROVIDERS = new Set(['spotify', 'youtube', 'soundcloud']);
 const RECENT_FALLBACK_TITLE = 'Untitled playlist';
 const RECENT_DEFAULT_MAX = 8;
+const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/;
+const TAG_MAX_LENGTH = 24;
+const TAG_MAX_PER_TRACK = 32;
 
 const EMPTY_META = Object.freeze({
   provider: null,
@@ -431,6 +435,10 @@ function sanitizeTracks(list) {
     if (Number.isFinite(duration) && duration > 0) {
       record.durationMs = Math.round(duration);
     }
+    const cleanedTags = normalizeTagsArray(/** @type {any} */(t).tags);
+    if (cleanedTags.length > 0) {
+      record.tags = cleanedTags;
+    }
     out.push(record);
   });
 
@@ -766,10 +774,14 @@ function normalizeTagsArray(maybeTags) {
   const seen = new Set();
   maybeTags.forEach((tag) => {
     const normalized = normalizeTagValue(tag);
-    if (!normalized || seen.has(normalized)) return;
+    if (!normalized || normalized.length > TAG_MAX_LENGTH) return;
+    if (!TAG_ALLOWED_RE.test(normalized)) return;
+    if (seen.has(normalized)) return;
+    if (out.length >= TAG_MAX_PER_TRACK) return;
     seen.add(normalized);
     out.push(normalized);
   });
+  out.sort();
   return out;
 }
 

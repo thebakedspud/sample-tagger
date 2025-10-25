@@ -7,6 +7,12 @@ import {
   getDeviceIdFromRequest,
 } from '../_lib/supabase.js';
 
+// Conflict policy: server state is treated as canonical (union/merge planned in Phase 2).
+
+const MAX_TAGS_PER_TRACK = 32;
+const MAX_TAG_LENGTH = 24;
+const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/;
+
 const supabaseAdmin = getAdminClient();
 
 function getTrackIdFromRequest(req) {
@@ -45,10 +51,21 @@ function normalizeTagsInput(value) {
   value.forEach((tag) => {
     if (typeof tag !== 'string') return;
     const normalized = tag.trim().toLowerCase();
-    if (!normalized || seen.has(normalized)) return;
+    if (!normalized) return;
+    if (normalized.length > MAX_TAG_LENGTH) {
+      throw new Error(`Tags must be ${MAX_TAG_LENGTH} characters or fewer.`);
+    }
+    if (!TAG_ALLOWED_RE.test(normalized)) {
+      throw new Error('Tags can only contain letters, numbers, spaces, hyphen, or underscore.');
+    }
+    if (seen.has(normalized)) return;
+    if (out.length >= MAX_TAGS_PER_TRACK) {
+      throw new Error(`A track may have at most ${MAX_TAGS_PER_TRACK} tags.`);
+    }
     out.push(normalized);
     seen.add(normalized);
   });
+  out.sort();
   return out;
 }
 
@@ -108,7 +125,7 @@ export default async function handler(req, res) {
             id: row.id,
             trackId: row.track_id,
             body: row.body,
-            tags: Array.isArray(row.tags) ? row.tags : [],
+            tags: Array.isArray(row.tags) ? [...row.tags].sort() : [],
             createdAt: row.created_at,
             updatedAt: row.updated_at,
           })) ?? [],
@@ -130,9 +147,14 @@ export default async function handler(req, res) {
       const hasBodyField = typeof parsed?.body === 'string';
       const noteBody = hasBodyField ? parsed.body.trim() : '';
       const tagsProvided = Array.isArray(parsed?.tags);
-      const normalizedTags = tagsProvided
-        ? normalizeTagsInput(parsed.tags)
-        : null;
+      let normalizedTags = null;
+      if (tagsProvided) {
+        try {
+          normalizedTags = normalizeTagsInput(parsed.tags);
+        } catch (err) {
+          return res.status(400).json({ error: err.message || 'Invalid tags' });
+        }
+      }
 
       if (!trackId) {
         return res
@@ -252,7 +274,7 @@ export default async function handler(req, res) {
           id: data.id,
           trackId: data.track_id,
           body: data.body,
-          tags: Array.isArray(data.tags) ? data.tags : [],
+          tags: Array.isArray(data.tags) ? [...data.tags].sort() : [],
           createdAt: data.created_at,
           updatedAt: data.updated_at,
         },

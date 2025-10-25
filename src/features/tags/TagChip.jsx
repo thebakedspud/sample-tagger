@@ -2,10 +2,16 @@
 import PropTypes from 'prop-types'
 import { forwardRef } from 'react'
 
-const TagChip = forwardRef(function TagChip(
-  { tag, onRemove, onFilter, onClick, className = '', ...rest },
-  ref,
-) {
+const TagChip = forwardRef(function TagChip(props, ref) {
+  const {
+    tag,
+    onRemove,
+    onFilter,
+    onClick,
+    className = '',
+    ...rest
+  } = props || {}
+
   const handleClick = (event) => {
     if (onClick) {
       onClick(event);

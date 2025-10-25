@@ -208,7 +208,7 @@ describe('tag helpers', () => {
     addTag('track-1', 'drill'); // dedupe
     addTag('track-1', ' 808 ');
 
-    expect(getTags('track-1')).toEqual(['drill', '808']);
+    expect(getTags('track-1')).toEqual(['808', 'drill']);
     expect(listAllCustomTags()).toEqual(['808', 'drill']);
 
     removeTag('track-1', 'DRILL');
@@ -343,3 +343,4 @@ describe('recent playlists storage', () => {
     expect(migrated?.tagsByTrack).toEqual({});
   });
 });
+
