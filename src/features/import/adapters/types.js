@@ -17,7 +17,7 @@
  * @property {string} artist
  * @property {string} [sourceUrl]
  * @property {string} [providerTrackId]
- * @property {'spotify' | 'youtube' | 'soundcloud'} [provider]
+ * @property {PlaylistProvider} [provider]
  * @property {number} [durationMs]
  * @property {string} [thumbnailUrl]
  * @property {any[]} [notes]
@@ -154,3 +154,54 @@ export function extractErrorCode(e) {
 export function isKnownAdapterErrorObject(e) {
   return extractErrorCode(e) !== CODES.ERR_UNKNOWN;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Playlist import flow types                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Normalized playlist metadata produced by the import flow.
+ * Mirrors buildMeta() in the hook.
+ * @typedef {Object} ImportMeta
+ * @property {PlaylistProvider | null} provider
+ * @property {string | null} playlistId
+ * @property {string | null} snapshotId
+ * @property {string | null} cursor
+ * @property {boolean} hasMore
+ * @property {string} sourceUrl
+ * @property {any | null} [debug]
+ */
+
+/**
+ * Options for the initial playlist import.
+ * @typedef {Object} ImportInitialOptions
+ * @property {string=} providerHint   e.g. "spotify"; used if adapter didn't set res.provider.
+ * @property {string=} sourceUrl      Canonicalized URL to store in meta.sourceUrl.
+ */
+
+/**
+ * Options for re-importing an existing playlist (refresh metadata/tracks).
+ * @typedef {Object} ReimportOptions
+ * @property {string=} providerHint
+ * @property {{provider?: string, playlistId?: string|null, snapshotId?: string|null, sourceUrl?: string, debug?: any}=} existingMeta
+ * @property {string=} fallbackTitle
+ */
+
+/**
+ * Options for loading more tracks (pagination).
+ * @typedef {Object} LoadMoreOptions
+ * @property {string=} providerHint
+ * @property {{provider?: string, playlistId?: string|null, snapshotId?: string|null, sourceUrl?: string, debug?: any}=} existingMeta
+ * @property {number=} startIndex           Starting index for fallback IDs of the next page (1-based internally).
+ * @property {Iterable<string>=} existingIds Set/array of IDs to skip when appending (client-side dedupe).
+ */
+
+/**
+ * Unified result shape returned by all playlist import flow functions.
+ * @typedef {Object} ImportResult
+ * @property {boolean} ok
+ * @property {{tracks: NormalizedTrack[], meta: ImportMeta, title?: string, importedAt?: string, coverUrl?: string|null, total?: number}=} [data]
+ * @property {AdapterErrorCode=} code
+ * @property {any=} error
+ * @property {true=} [stale]
+ */
