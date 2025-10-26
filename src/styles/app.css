@@ -35,6 +35,72 @@
   border: 0;
 }
 
+.font-settings-card {
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 12px);
+}
+
+.font-settings {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.font-settings-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-2, 12px);
+}
+
+.font-option {
+  display: block;
+  position: relative;
+}
+
+.font-option input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  pointer-events: none;
+}
+
+.font-option-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+  justify-content: center;
+  align-items: flex-start;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+  cursor: pointer;
+}
+
+.font-option.is-selected .font-option-card {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(11, 92, 255, 0.35);
+}
+
+.font-option-card:hover {
+  border-color: var(--accent);
+}
+
+.font-option-sample {
+  font-size: 1.6rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.font-option-label {
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
 .recent-section {
   margin-top: 32px;
 }

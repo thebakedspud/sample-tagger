@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
+import FontSettings from './components/display/FontSettings.jsx'
 import RecoveryModal from './components/RecoveryModal.jsx'
 import RestoreDialog from './components/RestoreDialog.jsx'
 import RecentPlaylists from './features/recent/RecentPlaylists.jsx'
@@ -1692,12 +1693,32 @@ export default function App() {
             <button type="button" className="btn" onClick={openRestoreDialog}>
               Have a code?
             </button>
-            <ThemeToggle />
           </div>
         </div>
       </header>
 
       <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px', paddingBottom: 128 }}>
+        <section aria-labelledby="display-settings-title" className="card font-settings-card">
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 16,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div>
+              <h2 id="display-settings-title" style={{ margin: '0 0 4px' }}>
+                Display
+              </h2>
+              <p style={{ margin: 0, color: 'var(--muted)' }}>Theme and font preferences</p>
+            </div>
+            <ThemeToggle />
+          </div>
+          <FontSettings />
+        </section>
+
         {screen === 'landing' && (
           <section aria-labelledby="landing-title">
             <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>

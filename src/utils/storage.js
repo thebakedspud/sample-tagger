@@ -7,6 +7,10 @@
 /**
  * @typedef {'dark' | 'light'} Theme
  *
+ * @typedef {'default' | 'system' | 'dyslexic'} FontPreference
+ *
+ * @typedef {{ font: FontPreference }} UiPrefs
+ *
  * @typedef {Object} ImportMeta
  * @property {'spotify' | 'youtube' | 'soundcloud' | null} [provider]
  * @property {string | null} [playlistId]
@@ -53,19 +57,22 @@
  * @property {NotesByTrack} notesByTrack
  * @property {RecentPlaylist[]} recentPlaylists
  * @property {TagsByTrack} tagsByTrack
+ * @property {UiPrefs} uiPrefs
  */
 
-const STORAGE_VERSION = 5;
-const LS_KEY = 'sta:v5';
-const LEGACY_KEYS = ['sta:v4', 'sta:v3', 'sta:v2'];
-const PENDING_MIGRATION_KEY = 'sta:v5:pending-migration';
-const AUTO_BACKUP_KEY = 'sta:v5:auto-backup';
+const STORAGE_VERSION = 6;
+const LS_KEY = 'sta:v6';
+const LEGACY_KEYS = ['sta:v5', 'sta:v4', 'sta:v3', 'sta:v2'];
+const PENDING_MIGRATION_KEY = 'sta:v6:pending-migration';
+const AUTO_BACKUP_KEY = 'sta:v6:auto-backup';
 const VALID_PROVIDERS = new Set(['spotify', 'youtube', 'soundcloud']);
 const RECENT_FALLBACK_TITLE = 'Untitled playlist';
 const RECENT_DEFAULT_MAX = 8;
 const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/;
 const TAG_MAX_LENGTH = 24;
 const TAG_MAX_PER_TRACK = 32;
+const FONT_PREF_DEFAULT = 'default';
+const FONT_PREF_VALUES = new Set(['default', 'system', 'dyslexic']);
 
 const EMPTY_META = Object.freeze({
   provider: null,
@@ -122,6 +129,10 @@ export function saveAppState(state) {
         ? sanitizeRecentList(state.recentPlaylists)
         : existingRecents;
 
+    const existingPrefs = sanitizeUiPrefs(stored?.uiPrefs);
+    const hasUiPrefs = state && Object.prototype.hasOwnProperty.call(state, 'uiPrefs');
+    const actualPrefs = hasUiPrefs ? sanitizeUiPrefs(state?.uiPrefs) : existingPrefs;
+
     const payload = {
       version: STORAGE_VERSION,
       theme: sanitizeTheme(state?.theme),
@@ -133,6 +144,7 @@ export function saveAppState(state) {
       notesByTrack: sanitizeNotesMap(state?.notesByTrack, state?.tracks),
       tagsByTrack: sanitizeTagsMap(state?.tagsByTrack, state?.tracks),
       recentPlaylists: actualRecents,
+      uiPrefs: actualPrefs,
     };
     persistState(payload);
   } catch {
@@ -146,7 +158,13 @@ export function saveAppState(state) {
  */
 export function clearAppState(preserve = {}) {
   try {
+    const storedPrefs = readStoredState();
+    const preservedPrefs =
+      preserve?.uiPrefs !== undefined
+        ? sanitizeUiPrefs(preserve.uiPrefs)
+        : sanitizeUiPrefs(storedPrefs?.uiPrefs);
     const cleared = createEmptyState(sanitizeTheme(preserve?.theme));
+    cleared.uiPrefs = preservedPrefs;
     persistState(cleared);
     return cleared;
   } catch {
@@ -253,6 +271,27 @@ export function listAllCustomTags() {
   return Array.from(accumulator).sort();
 }
 
+/** @returns {FontPreference} */
+export function getFontPreference() {
+  const stored = readStoredState();
+  return sanitizeFontPreference(stored?.uiPrefs?.font);
+}
+
+/**
+ * @param {unknown} font
+ * @returns {FontPreference}
+ */
+export function setFontPreference(font) {
+  const nextFont = sanitizeFontPreference(font);
+  const base = loadAppState() ?? createEmptyState();
+  const nextState = {
+    ...base,
+    uiPrefs: { font: nextFont },
+  };
+  persistState(nextState);
+  return nextFont;
+}
+
 /**
  * @param {RecentPlaylist[]} list
  * @param {Partial<RecentPlaylist>} item
@@ -314,6 +353,7 @@ function createEmptyState(theme = 'dark') {
     notesByTrack: Object.create(null),
     tagsByTrack: Object.create(null),
     recentPlaylists: [],
+    uiPrefs: sanitizeUiPrefs(null),
   };
 }
 
@@ -333,6 +373,7 @@ function normalizeState(data) {
     notesByTrack: sanitizeNotesMap(data?.notesByTrack, data?.tracks),
     tagsByTrack: sanitizeTagsMap(data?.tagsByTrack, data?.tracks),
     recentPlaylists: sanitizeRecentList(data?.recentPlaylists),
+    uiPrefs: sanitizeUiPrefs(data?.uiPrefs),
   };
 }
 
@@ -381,6 +422,7 @@ function migrateLegacy(v2) {
     notesByTrack: sanitizeNotesMap(null, tracks),
     tagsByTrack: Object.create(null),
     recentPlaylists,
+    uiPrefs: sanitizeUiPrefs(null),
   };
   setPendingMigrationSnapshot(next);
   return next;
@@ -392,6 +434,26 @@ function migrateLegacy(v2) {
  */
 function sanitizeTheme(theme) {
   return theme === 'light' ? 'light' : 'dark';
+}
+
+/**
+ * @param {unknown} value
+ * @returns {FontPreference}
+ */
+function sanitizeFontPreference(value) {
+  const candidate = typeof value === 'string' ? value : '';
+  return FONT_PREF_VALUES.has(candidate) ? /** @type {FontPreference} */ (candidate) : FONT_PREF_DEFAULT;
+}
+
+/**
+ * @param {unknown} prefs
+ * @returns {UiPrefs}
+ */
+function sanitizeUiPrefs(prefs) {
+  if (prefs && typeof prefs === 'object') {
+    return { font: sanitizeFontPreference(/** @type {any} */ (prefs).font) };
+  }
+  return { font: FONT_PREF_DEFAULT };
 }
 
 /**

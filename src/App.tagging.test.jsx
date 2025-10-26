@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react'
 
 vi.mock('./utils/storage.js', () => {
   const createPersistedState = () => ({
-    version: 5,
+    version: 6,
     theme: 'dark',
     playlistTitle: 'Test Playlist',
     importedAt: null,
@@ -16,6 +16,7 @@ vi.mock('./utils/storage.js', () => {
     notesByTrack: {},
     tagsByTrack: {},
     recentPlaylists: [],
+    uiPrefs: { font: 'default' },
   })
   return {
     loadAppState: vi.fn(() => createPersistedState()),
@@ -28,6 +29,8 @@ vi.mock('./utils/storage.js', () => {
     loadRecent: vi.fn(() => []),
     saveRecent: vi.fn(),
     upsertRecent: vi.fn((list = [], item) => [...list, item]),
+    getFontPreference: vi.fn(() => 'default'),
+    setFontPreference: vi.fn(() => 'default'),
   }
 })
 
