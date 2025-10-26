@@ -25,7 +25,6 @@ import './styles/tokens.css';
 import './styles/primitives.css';
 import './styles/app.css';
 import useAnnounce from './features/a11y/useAnnounce.js'
-import { Analytics } from '@vercel/analytics/react'
 
 // NEW: inline undo
 import useInlineUndo from './features/undo/useInlineUndo.js'
@@ -1837,7 +1836,6 @@ export default function App() {
         error={restoreError}
         hasLocalNotes={hasLocalNotes}
       />
-      <Analytics />
       <input
         ref={backupFileInputRef}
         type="file"
