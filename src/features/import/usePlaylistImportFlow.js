@@ -1,6 +1,41 @@
+// src/features/import/usePlaylistImportFlow.js
+
+// @ts-check
 import { useCallback, useRef, useState } from 'react'
 import useImportPlaylist from './useImportPlaylist.js'
 import { extractErrorCode, CODES } from './adapters/types.js'
+
+/**
+ * Pull in shared typedefs from adapters/types.js so this file stays lean.
+ * @typedef {import('./adapters/types.js').ImportInitialOptions} ImportInitialOptions
+ * @typedef {import('./adapters/types.js').ReimportOptions} ReimportOptions
+ * @typedef {import('./adapters/types.js').LoadMoreOptions} LoadMoreOptions
+ * @typedef {import('./adapters/types.js').ImportResult} ImportResult
+ * @typedef {import('./adapters/types.js').AdapterErrorCode} AdapterErrorCode
+ */
+
+/**
+ * usePlaylistImportFlow
+ *
+ * Orchestrates the end-to-end import lifecycle:
+ *  - initial import from a playlist URL
+ *  - re-import (refresh current playlist metadata/tracks)
+ *  - paginated "load more"
+ *  - exposes a guarded status + errorCode and a reset() that cancels in-flight work
+ *
+ * Concurrency model:
+ *  Multiple imports can be triggered (e.g., a fast re-import while load-more is resolving).
+ *  We assign a monotonically increasing requestId to each call and only let the *latest*
+ *  request update state. Older responses return `{ ok:false, stale:true }` and are ignored.
+ *
+ * Result contract:
+ *  Each call resolves to `{ ok:true, data }` or `{ ok:false, code, error?, stale? }`.
+ *  When `ok:true`, `data` contains `{ tracks, meta, title?, importedAt?, coverUrl?, total? }`.
+ *
+ * Error codes:
+ *  `errorCode` mirrors adapter codes from `CODES` (e.g., ERR_PRIVATE_PLAYLIST, ERR_NOT_FOUND,
+ *  ERR_RATE_LIMITED) or `ERR_UNKNOWN` when unmapped.
+ */
 
 /**
  * @typedef {'idle' | 'importing' | 'reimporting' | 'loadingMore'} ImportStatus
@@ -20,11 +55,21 @@ function toIsoNow() {
   return new Date().toISOString()
 }
 
+/**
+ * Coerce possibly-undefined provider data to stable strings
+ * for safe serialization and rendering.
+ */
 function ensureString(value) {
   if (value == null) return ''
   return String(value)
 }
 
+/**
+ * buildTrackId(provider, fallbackIndex)
+ * Generates a stable fallback track id when the adapter didn't supply one.
+ * Policy: `${provider}-${1-based-index}` (e.g., "spotify-12").
+ * Rationale: keeps notes/tags mergeable across re-imports when real IDs are missing.
+ */
 function buildTrackId(baseProvider, fallbackIndex) {
   const parts = []
   if (baseProvider) parts.push(baseProvider)
@@ -32,6 +77,13 @@ function buildTrackId(baseProvider, fallbackIndex) {
   return parts.length > 0 ? parts.join('-') : `${fallbackIndex ?? ''}`.trim()
 }
 
+/**
+ * buildTracks(res, providerHint, startIndex = 0, existingIds?)
+ * - Normalizes adapter tracks to `{ id, title, artist, [thumbnailUrl], [sourceUrl], [durationMs], [provider] }`.
+ * - If `existingIds` is provided, skips any track whose `id` is already present (client-side dedupe when appending pages).
+ * - `startIndex` is used to produce fallback IDs that remain stable across pagination (1-based).
+ * - `providerHint` is used when the adapter didn't stamp a provider on each track.
+ */
 function buildTracks(res, providerHint, startIndex = 0, existingIds) {
   const provider = res?.provider ?? providerHint ?? null
   const rawTracks = Array.isArray(res?.tracks) ? res.tracks : []
@@ -74,6 +126,20 @@ function buildTracks(res, providerHint, startIndex = 0, existingIds) {
   return mapped
 }
 
+/**
+ * buildMeta(res, fallback)
+ * Produces normalized playlist metadata:
+ *  - provider: "spotify" | "youtube" | "soundcloud" | null
+ *  - playlistId: string | null   // provider's playlist identifier
+ *  - snapshotId: string | null   // provider's change token for this playlist revision
+ *  - cursor: string | null       // opaque pagination token; null means "no more pages"
+ *  - hasMore: boolean            // true iff the adapter reports another page AND provided a cursor
+ *  - sourceUrl: string           // canonical URL used for this import
+ *  - debug: any | null           // optional adapter debug payload (dev only)
+ *
+ * Null vs undefined:
+ *  We use explicit `null` for "known missing" fields so callers can serialize/compare reliably.
+ */
 function buildMeta(res, fallback = {}) {
   const provider =
     res?.provider ??
@@ -83,6 +149,7 @@ function buildMeta(res, fallback = {}) {
 
   const pageInfo = res?.pageInfo ?? {}
   const cursor = pageInfo?.cursor ?? null
+  // Only signal "hasMore" when a usable cursor is present (truthy) AND the adapter says there are more pages.
   const hasMore = Boolean(pageInfo?.hasMore && cursor)
 
   return {
@@ -99,7 +166,15 @@ function buildMeta(res, fallback = {}) {
 export default function usePlaylistImportFlow() {
   const { importPlaylist, importNext, loading, reset: resetImportSession } = useImportPlaylist()
   const [status, setStatus] = useState(/** @type {ImportStatus} */ (ImportFlowStatus.IDLE))
-  const [errorCode, setErrorCode] = useState(null)
+
+  // Give TS a precise tuple type for the error state without importing React types into runtime.
+  /** @type {[AdapterErrorCode|null, import('react').Dispatch<import('react').SetStateAction<AdapterErrorCode|null>>]} */
+  // @ts-ignore - tuple typing for JS + useState
+  const [errorCode, setErrorCode] = useState(/** @type {AdapterErrorCode|null} */ (null))
+
+  // Guard against out-of-order async updates.
+  // Any in-flight request that finishes after a newer one is considered "stale"
+  // and must not mutate state. We track a monotonically increasing requestIdRef.
   const requestIdRef = useRef(0)
 
   /** @param {ImportStatus} nextStatus */
@@ -116,6 +191,12 @@ export default function usePlaylistImportFlow() {
     }
   }, [])
 
+  /**
+   * Starts a fresh import of `url`.
+   * @param {string} url
+   * @param {ImportInitialOptions=} options
+   * @returns {Promise<ImportResult>}
+   */
   const importInitial = useCallback(async (url, options = {}) => {
     const trimmedUrl = typeof url === 'string' ? url.trim() : ''
     const requestId = beginRequest(ImportFlowStatus.IMPORTING)
@@ -125,6 +206,7 @@ export default function usePlaylistImportFlow() {
       const res = await importPlaylist(trimmedUrl, { context: { importBusyKind: 'initial' } })
 
       if (requestId !== requestIdRef.current) {
+        // Another request started after this one; mark as stale so callers can ignore without side effects.
         return { ok: false, stale: true }
       }
 
@@ -164,6 +246,12 @@ export default function usePlaylistImportFlow() {
     }
   }, [beginRequest, finishRequest, importPlaylist])
 
+  /**
+   * Re-imports the same playlist (refresh metadata/tracks).
+   * @param {string} url
+   * @param {ReimportOptions=} options
+   * @returns {Promise<ImportResult>}
+   */
   const reimport = useCallback(async (url, options = {}) => {
     if (!url) return { ok: false, code: CODES.ERR_UNKNOWN }
     const trimmedUrl = String(url).trim()
@@ -174,6 +262,7 @@ export default function usePlaylistImportFlow() {
       const res = await importPlaylist(trimmedUrl, { context: { importBusyKind: 'reimport' } })
 
       if (requestId !== requestIdRef.current) {
+        // Another request started after this one; mark as stale so callers can ignore without side effects.
         return { ok: false, stale: true }
       }
 
@@ -215,6 +304,12 @@ export default function usePlaylistImportFlow() {
     }
   }, [beginRequest, finishRequest, importPlaylist])
 
+  /**
+   * Loads the next page for the current import session.
+   * When the adapter indicates terminal state, returns `ok:true` with `meta.hasMore=false`.
+   * @param {LoadMoreOptions=} options
+   * @returns {Promise<ImportResult>}
+   */
   const loadMore = useCallback(async (options = {}) => {
     const requestId = beginRequest(ImportFlowStatus.LOADING_MORE)
     setErrorCode(null)
@@ -223,6 +318,7 @@ export default function usePlaylistImportFlow() {
       const res = await importNext({ context: { importBusyKind: 'load-more' } })
 
       if (requestId !== requestIdRef.current) {
+        // Another request started after this one; mark as stale so callers can ignore without side effects.
         return { ok: false, stale: true }
       }
 
@@ -230,6 +326,7 @@ export default function usePlaylistImportFlow() {
       setErrorCode(null)
 
       if (!res) {
+        // Terminal page: no more data. Preserve existing meta but clear cursor/hasMore.
         return {
           ok: true,
           data: {
@@ -278,12 +375,23 @@ export default function usePlaylistImportFlow() {
   }, [beginRequest, finishRequest, importNext])
 
   const resetFlow = useCallback(() => {
+    // Cancels in-flight work by bumping the requestId and resets local state.
     resetImportSession()
     requestIdRef.current += 1
     setStatus(ImportFlowStatus.IDLE)
     setErrorCode(null)
   }, [resetImportSession])
 
+  /**
+   * Public API:
+   *  - status:      'idle' | 'importing' | 'reimporting' | 'loadingMore'
+   *  - errorCode:   adapter/provider error code or null
+   *  - loading:     boolean passthrough from underlying adapter hook
+   *  - importInitial(url, opts?): Promise<ImportResult>
+   *  - reimport(url, opts?):      Promise<ImportResult>
+   *  - loadMore(opts?):           Promise<ImportResult>
+   *  - resetFlow():               cancels in-flight work, clears error/status
+   */
   return {
     status,
     errorCode,

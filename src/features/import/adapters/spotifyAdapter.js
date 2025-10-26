@@ -132,10 +132,6 @@ function extractHttpStatus(err) {
 /**
  * @param {'token' | 'meta' | 'tracks'} stage
  * @param {unknown} err
- */
-/**
- * @param {'token' | 'meta' | 'tracks'} stage
- * @param {unknown} err
  * @returns {never}
  */
 function mapSpotifyError(stage, err) {
@@ -166,10 +162,6 @@ function mapSpotifyError(stage, err) {
   throw createAdapterError(CODES.ERR_NETWORK, details, err);
 }
 
-/**
- * @param {'token' | 'meta' | 'tracks'} stage
- * @param {Record<string, any>} details
- */
 /**
  * @param {'token' | 'meta' | 'tracks'} stage
  * @param {Record<string, unknown>} [details]
@@ -217,6 +209,7 @@ function toTokenMemo(payload) {
   }
 
   const rawExpiresIn = Number(/** @type {any} */ (payload)?.expires_in);
+  // Use a small safety margin so we never present an already-expired token under clock skew.
   const safeExpiresInSeconds = Number.isFinite(rawExpiresIn)
     ? Math.max(5, rawExpiresIn - 5)
     : 55;
@@ -238,11 +231,13 @@ async function fetchAccessToken(fetchClient, { signal, forceRefresh = false } = 
     invalidateTokenMemo();
   }
 
+  // Fast path: still-fresh memoized token.
   if (!forceRefresh && isTokenFresh(tokenMemo)) {
     debugLog('token:hit', { expiresInMs: tokenMemo.expiresAt - Date.now() });
     return /** @type {TokenMemo} */ (tokenMemo);
   }
 
+  // Coalesce concurrent callers when not forcing refresh.
   if (!forceRefresh && tokenPromise) {
     return tokenPromise;
   }
@@ -406,7 +401,7 @@ function toNormalizedTracks(rawItems, meta) {
         thumbnailUrl: albumThumb ?? undefined,
         provider: PROVIDER,
       },
-      out.length,
+      out.length, // note: indices are page-local
       PROVIDER
     );
 
@@ -417,7 +412,26 @@ function toNormalizedTracks(rawItems, meta) {
 }
 
 /**
- * Adapter contract entry point shared with other providers.
+ * Spotify playlist import adapter (client-credentials via server token proxy).
+ *
+ * Inputs:
+ *  - options.url: any supported Spotify playlist link/URI. Required for first page.
+ *  - options.cursor: opaque Spotify "next" URL from a prior call. Optional for pagination.
+ *  - options.signal: AbortSignal to cancel both token + data requests.
+ *  - options.fetchClient: injected fetch client (tests/SSR).
+ *
+ * Returns:
+ *  {
+ *    provider, playlistId, title, snapshotId?, sourceUrl, coverUrl?, total?,
+ *    tracks: NormalizedTrack[],
+ *    pageInfo: { cursor: string|null, hasMore: boolean },
+ *    debug: { source, stage, hasNext, tokenRefreshed, metaMs, tracksMs, tokenMs, inputUrl? }
+ *  }
+ *
+ * Throws adapter errors (createAdapterError) with codes:
+ *  - ERR_UNSUPPORTED_URL, ERR_PRIVATE_PLAYLIST (401/403), ERR_NOT_FOUND (404),
+ *    ERR_RATE_LIMITED (429), ERR_INVALID_RESPONSE, ERR_NETWORK, ERR_UNKNOWN.
+ *
  * @param {{
  *   url?: string,
  *   cursor?: string,
@@ -450,6 +464,8 @@ export async function importPlaylist(options = {}) {
     const token = await fetchAccessToken(fetchClient, { signal, forceRefresh });
     const tokenMs = Date.now() - tokenStart;
 
+    // Fetch playlist meta and first page of tracks in parallel under the same token.
+    // If either returns 401 once, we retry the whole pair with a fresh token (see loop below).
     let metaMs = null;
     let tracksMs = null;
 
@@ -486,7 +502,7 @@ export async function importPlaylist(options = {}) {
       const { meta, tracksPayload, timings } = await runWithToken(forceRefresh);
 
       const items = /** @type {any[]} */ (tracksPayload?.items ?? []);
-      const tracks = toNormalizedTracks(items, meta);
+      const tracks = toNormalizedTracks(items, meta); // note: indices are page-local
       const nextCursor = typeof tracksPayload?.next === 'string' ? tracksPayload.next : null;
       const totalTracks =
         typeof tracksPayload?.total === 'number' && Number.isFinite(tracksPayload.total)
@@ -525,6 +541,7 @@ export async function importPlaylist(options = {}) {
       lastError = err;
       const status = extractHttpStatus(err);
       if (status === 401 && attempt === 0) {
+        // Unauthorized once → drop memo and retry with a fresh token.
         debugLog('token:retry', { reason: 'unauthorized', playlist: playlistId.slice(0, 8) });
         invalidateTokenMemo();
         tokenRefreshed = true;

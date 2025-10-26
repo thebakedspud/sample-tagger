@@ -24,8 +24,11 @@
  * @property {string=} thumbnailUrl
  * @property {string=} sourceUrl
  * @property {number=} durationMs
+ * @property {string[]=} tags
  *
  * @typedef {Record<string, string[]>} NotesByTrack
+ *
+ * @typedef {Record<string, string[]>} TagsByTrack
  *
  * @typedef {Object} RecentPlaylist
  * @property {string} id // `${provider}:${playlistId}`
@@ -49,16 +52,20 @@
  * @property {ImportMeta} importMeta
  * @property {NotesByTrack} notesByTrack
  * @property {RecentPlaylist[]} recentPlaylists
+ * @property {TagsByTrack} tagsByTrack
  */
 
-const STORAGE_VERSION = 4;
-const LS_KEY = 'sta:v4';
-const LEGACY_KEYS = ['sta:v3', 'sta:v2'];
-const PENDING_MIGRATION_KEY = 'sta:v4:pending-migration';
-const AUTO_BACKUP_KEY = 'sta:v4:auto-backup';
+const STORAGE_VERSION = 5;
+const LS_KEY = 'sta:v5';
+const LEGACY_KEYS = ['sta:v4', 'sta:v3', 'sta:v2'];
+const PENDING_MIGRATION_KEY = 'sta:v5:pending-migration';
+const AUTO_BACKUP_KEY = 'sta:v5:auto-backup';
 const VALID_PROVIDERS = new Set(['spotify', 'youtube', 'soundcloud']);
 const RECENT_FALLBACK_TITLE = 'Untitled playlist';
 const RECENT_DEFAULT_MAX = 8;
+const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/;
+const TAG_MAX_LENGTH = 24;
+const TAG_MAX_PER_TRACK = 32;
 
 const EMPTY_META = Object.freeze({
   provider: null,
@@ -124,6 +131,7 @@ export function saveAppState(state) {
       tracks: sanitizeTracks(state?.tracks),
       importMeta: sanitizeImportMeta(state?.importMeta),
       notesByTrack: sanitizeNotesMap(state?.notesByTrack, state?.tracks),
+      tagsByTrack: sanitizeTagsMap(state?.tagsByTrack, state?.tracks),
       recentPlaylists: actualRecents,
     };
     persistState(payload);
@@ -165,6 +173,84 @@ export function saveRecent(list) {
   } catch {
     // ignore persistence failures
   }
+}
+
+/**
+ * @param {string} trackId
+ * @returns {string[]}
+ */
+export function getTags(trackId) {
+  const id = safeString(trackId);
+  if (!id) return [];
+  const state = loadAppState();
+  if (!state || !state.tagsByTrack) return [];
+  const tags = state.tagsByTrack[id];
+  return Array.isArray(tags) ? [...tags] : [];
+}
+
+/**
+ * @param {string} trackId
+ * @param {string} tag
+ * @returns {string[]}
+ */
+export function addTag(trackId, tag) {
+  const id = safeString(trackId);
+  const normalizedTag = normalizeTagValue(tag);
+  if (!id || !normalizedTag) return getTags(trackId);
+  const base = loadAppState() ?? createEmptyState();
+  const currentMap = sanitizeTagsMap(base.tagsByTrack, base.tracks);
+  const existing = currentMap[id] ? [...currentMap[id]] : [];
+  if (!existing.includes(normalizedTag)) {
+    existing.push(normalizedTag);
+  }
+  currentMap[id] = existing;
+  const nextState = {
+    ...base,
+    version: STORAGE_VERSION,
+    tagsByTrack: currentMap,
+  };
+  persistState(nextState);
+  return [...currentMap[id]];
+}
+
+/**
+ * @param {string} trackId
+ * @param {string} tag
+ * @returns {string[]}
+ */
+export function removeTag(trackId, tag) {
+  const id = safeString(trackId);
+  const normalizedTag = normalizeTagValue(tag);
+  if (!id || !normalizedTag) return getTags(trackId);
+  const base = loadAppState() ?? createEmptyState();
+  const currentMap = sanitizeTagsMap(base.tagsByTrack, base.tracks);
+  const existing = currentMap[id] ? [...currentMap[id]] : [];
+  const nextList = existing.filter((entry) => entry !== normalizedTag);
+  if (nextList.length > 0) {
+    currentMap[id] = nextList;
+  } else {
+    delete currentMap[id];
+  }
+  const nextState = {
+    ...base,
+    version: STORAGE_VERSION,
+    tagsByTrack: currentMap,
+  };
+  persistState(nextState);
+  return currentMap[id] ? [...currentMap[id]] : [];
+}
+
+/** @returns {string[]} */
+export function listAllCustomTags() {
+  const state = loadAppState();
+  if (!state) return [];
+  const currentMap = sanitizeTagsMap(state.tagsByTrack, state.tracks);
+  /** @type {Set<string>} */
+  const accumulator = new Set();
+  Object.values(currentMap).forEach((list) => {
+    list.forEach((tag) => accumulator.add(tag));
+  });
+  return Array.from(accumulator).sort();
 }
 
 /**
@@ -226,6 +312,7 @@ function createEmptyState(theme = 'dark') {
     tracks: [],
     importMeta: { ...EMPTY_META },
     notesByTrack: Object.create(null),
+    tagsByTrack: Object.create(null),
     recentPlaylists: [],
   };
 }
@@ -244,6 +331,7 @@ function normalizeState(data) {
     tracks: sanitizeTracks(data?.tracks),
     importMeta: sanitizeImportMeta(data?.importMeta),
     notesByTrack: sanitizeNotesMap(data?.notesByTrack, data?.tracks),
+    tagsByTrack: sanitizeTagsMap(data?.tagsByTrack, data?.tracks),
     recentPlaylists: sanitizeRecentList(data?.recentPlaylists),
   };
 }
@@ -254,6 +342,13 @@ function normalizeState(data) {
  */
 function migrateLegacy(v2) {
   if (!v2 || typeof v2 !== 'object') return null;
+  const version = typeof v2?.version === 'number' ? v2.version : 0;
+  if (version >= 4) {
+    const normalized = normalizeState(v2);
+    const next = { ...normalized, version: STORAGE_VERSION };
+    setPendingMigrationSnapshot(next);
+    return next;
+  }
   const theme = sanitizeTheme(v2?.theme);
   const playlistTitle = sanitizeTitle(v2?.playlistTitle ?? v2?.title);
   const tracks = sanitizeTracks(v2?.tracks);
@@ -284,6 +379,7 @@ function migrateLegacy(v2) {
     tracks,
     importMeta,
     notesByTrack: sanitizeNotesMap(null, tracks),
+    tagsByTrack: Object.create(null),
     recentPlaylists,
   };
   setPendingMigrationSnapshot(next);
@@ -339,6 +435,10 @@ function sanitizeTracks(list) {
     if (Number.isFinite(duration) && duration > 0) {
       record.durationMs = Math.round(duration);
     }
+    const cleanedTags = normalizeTagsArray(/** @type {any} */(t).tags);
+    if (cleanedTags.length > 0) {
+      record.tags = cleanedTags;
+    }
     out.push(record);
   });
 
@@ -373,6 +473,41 @@ function sanitizeNotesMap(input, fallbackTracks) {
         `track-${idx + 1}`;
       if (!id || out[id]) return;
       const cleaned = normalizeNotesArray(/** @type {any} */ (t).notes);
+      if (cleaned.length > 0) {
+        out[id] = cleaned;
+      }
+    });
+  }
+
+  return out;
+}
+
+/**
+ * @param {unknown} input
+ * @param {unknown} fallbackTracks
+ * @returns {TagsByTrack}
+ */
+function sanitizeTagsMap(input, fallbackTracks) {
+  /** @type {TagsByTrack} */
+  const out = Object.create(null);
+
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    for (const [rawId, rawTags] of Object.entries(/** @type {Record<string, unknown>} */ (input))) {
+      const id = safeString(rawId);
+      if (!id) continue;
+      const cleaned = normalizeTagsArray(rawTags);
+      if (cleaned.length > 0) {
+        out[id] = cleaned;
+      }
+    }
+  }
+
+  if (Array.isArray(fallbackTracks)) {
+    fallbackTracks.forEach((t, idx) => {
+      if (!t || typeof t !== 'object') return;
+      const id = safeString(/** @type {any} */ (t).id) || `track-${idx + 1}`;
+      if (!id || out[id]) return;
+      const cleaned = normalizeTagsArray(/** @type {any} */ (t).tags);
       if (cleaned.length > 0) {
         out[id] = cleaned;
       }
@@ -618,6 +753,39 @@ function normalizeNotesArray(maybeNotes) {
 }
 
 /**
+ * @param {unknown} tag
+ * @returns {string}
+ */
+function normalizeTagValue(tag) {
+  if (typeof tag !== 'string') return '';
+  const trimmed = tag.trim().toLowerCase();
+  return trimmed;
+}
+
+/**
+ * @param {unknown} maybeTags
+ * @returns {string[]}
+ */
+function normalizeTagsArray(maybeTags) {
+  if (!Array.isArray(maybeTags)) return [];
+  /** @type {string[]} */
+  const out = [];
+  /** @type {Set<string>} */
+  const seen = new Set();
+  maybeTags.forEach((tag) => {
+    const normalized = normalizeTagValue(tag);
+    if (!normalized || normalized.length > TAG_MAX_LENGTH) return;
+    if (!TAG_ALLOWED_RE.test(normalized)) return;
+    if (seen.has(normalized)) return;
+    if (out.length >= TAG_MAX_PER_TRACK) return;
+    seen.add(normalized);
+    out.push(normalized);
+  });
+  out.sort();
+  return out;
+}
+
+/**
  * @returns {any}
  */
 function readStoredState() {
@@ -688,6 +856,7 @@ export function writeAutoBackupSnapshot(state) {
         sourceUrl: safeString(state.importMeta?.sourceUrl ?? state.lastImportUrl),
       },
       notesByTrack: sanitizeNotesMap(state.notesByTrack, state.tracks),
+      tagsByTrack: sanitizeTagsMap(state.tagsByTrack, state.tracks),
     };
     localStorage.setItem(AUTO_BACKUP_KEY, JSON.stringify(payload));
   } catch {

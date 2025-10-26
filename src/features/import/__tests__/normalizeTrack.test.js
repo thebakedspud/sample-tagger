@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, it, expect } from 'vitest';
 import { normalizeTrack } from '../normalizeTrack.js';
 

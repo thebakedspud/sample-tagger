@@ -17,12 +17,14 @@ import {
   saveRecent,
   upsertRecent,
 } from './utils/storage.js'
+import { normalizeTag } from './features/tags/tagUtils.js'
+import { STOCK_TAGS } from './features/tags/constants.js'
+import { createTagSyncScheduler } from './features/tags/tagSyncQueue.js'
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
 import './styles/app.css';
 import useAnnounce from './features/a11y/useAnnounce.js'
-import { Analytics } from '@vercel/analytics/react'
 
 // NEW: inline undo
 import useInlineUndo from './features/undo/useInlineUndo.js'
@@ -52,11 +54,16 @@ import {
 const persisted = loadAppState()
 const pendingMigrationSnapshot = getPendingMigrationSnapshot()
 const INITIAL_NOTES_MAP = createInitialNotesMap(persisted)
+const INITIAL_TAGS_MAP = createInitialTagsMap(persisted)
 const HAS_VALID_PLAYLIST = !!(persisted?.importMeta?.provider && persisted?.tracks?.length)
 const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
 const persistedRecents = Array.isArray(persisted?.recentPlaylists) ? [...persisted.recentPlaylists] : null
 const loadedRecents = persistedRecents ?? loadRecent()
 const INITIAL_RECENTS = Array.isArray(loadedRecents) ? [...loadedRecents] : []
+
+const MAX_TAGS_PER_TRACK = 32
+const MAX_TAG_LENGTH = 24
+const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/
 
 // Safe default importMeta shape (mirrors storage v3)
 const EMPTY_IMPORT_META = {
@@ -105,6 +112,37 @@ function cloneNotesMap(source) {
   return out;
 }
 
+function normalizeTagList(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  value.forEach((tag) => {
+    const normalized = normalizeTag(tag);
+    if (!normalized || normalized.length > MAX_TAG_LENGTH) return;
+    if (!TAG_ALLOWED_RE.test(normalized)) return;
+    if (seen.has(normalized)) return;
+    if (out.length >= MAX_TAGS_PER_TRACK) return;
+    seen.add(normalized);
+    out.push(normalized);
+  });
+  out.sort();
+  return out;
+}
+
+function cloneTagsMap(source) {
+  const out = Object.create(null);
+  if (!source || typeof source !== 'object') return out;
+  Object.entries(source).forEach(([key, raw]) => {
+    const id = typeof key === 'string' ? key : String(key);
+    if (!id) return;
+    const cleaned = normalizeTagList(raw);
+    if (cleaned.length > 0) {
+      out[id] = cleaned;
+    }
+  });
+  return out;
+}
+
 function createInitialNotesMap(state) {
   const fromState = cloneNotesMap(state?.notesByTrack);
   if (Array.isArray(state?.tracks)) {
@@ -113,6 +151,22 @@ function createInitialNotesMap(state) {
       const id = track.id;
       if (!id || hasOwn(fromState, id)) return;
       const cleaned = normalizeNotesList(track.notes);
+      if (cleaned.length > 0) {
+        fromState[id] = cleaned;
+      }
+    });
+  }
+  return fromState;
+}
+
+function createInitialTagsMap(state) {
+  const fromState = cloneTagsMap(state?.tagsByTrack);
+  if (Array.isArray(state?.tracks)) {
+    state.tracks.forEach((track) => {
+      if (!track || typeof track !== 'object') return;
+      const id = track.id;
+      if (!id || hasOwn(fromState, id)) return;
+      const cleaned = normalizeTagList(track.tags);
       if (cleaned.length > 0) {
         fromState[id] = cleaned;
       }
@@ -133,18 +187,26 @@ function ensureNotesEntries(baseMap, tracks) {
   return next;
 }
 
-function groupNotesByTrack(rows) {
-  const map = Object.create(null);
-  if (!Array.isArray(rows)) return map;
+function groupRemoteNotes(rows) {
+  const noteMap = Object.create(null);
+  const tagMap = Object.create(null);
+  if (!Array.isArray(rows)) return { notes: noteMap, tags: tagMap };
   rows.forEach((row) => {
     if (!row || typeof row !== 'object') return;
-    const trackId = typeof row.trackId === 'string' ? row.trackId : row.track_id;
-    const body = typeof row.body === 'string' ? row.body : null;
-    if (!trackId || !body) return;
-    if (!Array.isArray(map[trackId])) map[trackId] = [];
-    map[trackId].push(body);
+    const trackId =
+      typeof row.trackId === 'string' ? row.trackId : row.track_id;
+    if (!trackId) return;
+    const body = typeof row.body === 'string' ? row.body.trim() : '';
+    if (body) {
+      if (!Array.isArray(noteMap[trackId])) noteMap[trackId] = [];
+      noteMap[trackId].push(body);
+    }
+    if ('tags' in row) {
+      const cleaned = normalizeTagList(row.tags);
+      tagMap[trackId] = cleaned;
+    }
   });
-  return map;
+  return { notes: noteMap, tags: tagMap };
 }
 
 function mergeRemoteNotes(localMap, remoteMap) {
@@ -158,14 +220,36 @@ function mergeRemoteNotes(localMap, remoteMap) {
   return merged;
 }
 
-function attachNotesToTracks(trackList, notesMap) {
+function mergeRemoteTags(localMap, remoteMap) {
+  const merged = cloneTagsMap(localMap);
+  Object.entries(remoteMap).forEach(([trackId, remoteTags]) => {
+    merged[trackId] = Array.isArray(remoteTags) ? [...remoteTags] : [];
+  });
+  return merged;
+}
+
+function ensureTagsEntries(baseMap, tracks) {
+  const next = cloneTagsMap(baseMap);
+  if (!Array.isArray(tracks)) return next;
+  tracks.forEach((track) => {
+    if (!track || typeof track !== 'object') return;
+    const id = track.id;
+    if (!id || hasOwn(next, id)) return;
+    next[id] = [];
+  });
+  return next;
+}
+
+function attachNotesToTracks(trackList, notesMap, tagsMap) {
   if (!Array.isArray(trackList)) return [];
   const safeMap = notesMap || Object.create(null);
+  const safeTags = tagsMap || Object.create(null);
   return trackList.map((track) => {
     if (!track || typeof track !== 'object') return track;
     const id = track.id;
     const mappedNotes = id && hasOwn(safeMap, id) ? [...safeMap[id]] : normalizeNotesList(track.notes);
-    return { ...track, notes: mappedNotes };
+    const mappedTags = id && hasOwn(safeTags, id) ? [...safeTags[id]] : normalizeTagList(track.tags);
+    return { ...track, notes: mappedNotes, tags: mappedTags };
   });
 }
 
@@ -174,6 +258,17 @@ function updateNotesMap(baseMap, trackId, nextNotes) {
   if (!trackId) return map;
   if (Array.isArray(nextNotes) && nextNotes.length > 0) {
     map[trackId] = [...nextNotes];
+  } else if (hasOwn(map, trackId)) {
+    delete map[trackId];
+  }
+  return map;
+}
+
+function updateTagsMap(baseMap, trackId, nextTags) {
+  const map = cloneTagsMap(baseMap);
+  if (!trackId) return map;
+  if (Array.isArray(nextTags) && nextTags.length > 0) {
+    map[trackId] = [...nextTags];
   } else if (hasOwn(map, trackId)) {
     delete map[trackId];
   }
@@ -290,18 +385,32 @@ export default function App() {
     persisted?.lastImportUrl ?? (persisted?.importMeta?.sourceUrl ?? '')
   )
 
-  const [notesByTrack, setNotesByTrack] = useState(() => ensureNotesEntries(INITIAL_NOTES_MAP, persisted?.tracks ?? []))
+  const [notesByTrack, setNotesByTrack] = useState(() =>
+    ensureNotesEntries(INITIAL_NOTES_MAP, persisted?.tracks ?? []))
+  const [tagsByTrack, setTagsByTrack] = useState(() =>
+    ensureTagsEntries(INITIAL_TAGS_MAP, persisted?.tracks ?? []))
   const hasLocalNotes = useMemo(
     () =>
       Object.values(notesByTrack || {}).some(
         (value) => Array.isArray(value) && value.length > 0
+      ) ||
+      Object.values(tagsByTrack || {}).some(
+        (value) => Array.isArray(value) && value.length > 0
       ),
-    [notesByTrack]
+    [notesByTrack, tagsByTrack]
   )
+  const allCustomTags = useMemo(() => {
+    const bucket = new Set()
+    Object.values(tagsByTrack || {}).forEach((list) => {
+      if (!Array.isArray(list)) return
+      list.forEach((tag) => bucket.add(tag))
+    })
+    return Array.from(bucket).sort()
+  }, [tagsByTrack])
 
   // DATA - normalize persisted tracks so notes always exist
   const [tracks, setTracks] = useState(() =>
-    attachNotesToTracks(persisted?.tracks ?? [], notesByTrack)
+    attachNotesToTracks(persisted?.tracks ?? [], notesByTrack, tagsByTrack)
   )
   const tracksRef = useRef(tracks)
 
@@ -391,8 +500,10 @@ export default function App() {
       const resolvedTitle = payload?.title || fallbackTitle || 'Imported Playlist'
 
       const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, mapped)
+      const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, mapped)
       setNotesByTrack(nextNotesMap)
-      setTracks(attachNotesToTracks(mapped, nextNotesMap))
+      setTagsByTrack(nextTagsMap)
+      setTracks(attachNotesToTracks(mapped, nextNotesMap, nextTagsMap))
       setImportMeta({
         ...EMPTY_IMPORT_META,
         ...meta,
@@ -451,11 +562,16 @@ export default function App() {
   // Remember which button opened the editor
   const editorInvokerRef = useRef(null)
   const notesByTrackRef = useRef(notesByTrack)
+  const tagsByTrackRef = useRef(tagsByTrack)
   const backupFileInputRef = useRef(null)
 
   useEffect(() => {
     notesByTrackRef.current = notesByTrack
   }, [notesByTrack])
+
+  useEffect(() => {
+    tagsByTrackRef.current = tagsByTrack
+  }, [tagsByTrack])
 
   useEffect(() => {
     tracksRef.current = tracks
@@ -671,17 +787,11 @@ export default function App() {
         }
 
         const remoteList = Array.isArray(payload?.notes) ? payload.notes : []
+        const { notes: remoteNoteMap, tags: remoteTagMap } = groupRemoteNotes(remoteList)
         /** @type {Map<string, Set<string>>} */
-        const remoteMap = new Map()
-        remoteList.forEach((row) => {
-          if (!row || typeof row !== 'object') return
-          const trackId = typeof row.trackId === 'string' ? row.trackId : null
-          const body = typeof row.body === 'string' ? row.body.trim() : ''
-          if (!trackId || !body) return
-          if (!remoteMap.has(trackId)) {
-            remoteMap.set(trackId, new Set())
-          }
-          remoteMap.get(trackId)?.add(body)
+        const remoteNoteSets = new Map()
+        Object.entries(remoteNoteMap).forEach(([trackId, noteList]) => {
+          remoteNoteSets.set(trackId, new Set(noteList))
         })
 
         const combinedLocal = cloneNotesMap(snapshot.notesByTrack || {})
@@ -704,7 +814,7 @@ export default function App() {
         /** @type {{ trackId: string, body: string }[]} */
         const uploads = []
         Object.entries(combinedLocal).forEach(([trackId, notes]) => {
-          const remoteSet = remoteMap.get(trackId) ?? new Set()
+          const remoteSet = remoteNoteSets.get(trackId) ?? new Set()
           notes.forEach((note) => {
             const clean = typeof note === 'string' ? note.trim() : ''
             if (!clean) return
@@ -713,6 +823,32 @@ export default function App() {
               remoteSet.add(clean)
             }
           })
+        })
+
+        const combinedTags = cloneTagsMap(snapshot.tagsByTrack || {})
+        if (Array.isArray(snapshot.tracks)) {
+          snapshot.tracks.forEach((track) => {
+            if (!track || typeof track !== 'object') return
+            const id = track.id
+            if (!id) return
+            const existing = Array.isArray(combinedTags[id]) ? [...combinedTags[id]] : []
+            const cleaned = normalizeTagList(track.tags)
+            cleaned.forEach((tag) => {
+              if (!existing.includes(tag)) existing.push(tag)
+            })
+            if (existing.length > 0) {
+              combinedTags[id] = existing
+            }
+          })
+        }
+
+        /** @type {{ trackId: string, tags: string[] }[]} */
+        const tagUploads = []
+        Object.entries(combinedTags).forEach(([trackId, tags]) => {
+          const remoteTags = remoteTagMap[trackId]
+          if (Array.isArray(remoteTags) && remoteTags.length > 0) return
+          if (!Array.isArray(tags) || tags.length === 0) return
+          tagUploads.push({ trackId, tags })
         })
 
         const localNoteCount = Object.values(combinedLocal).reduce(
@@ -724,7 +860,9 @@ export default function App() {
           localTracks: snapshot.tracks?.length ?? 0,
           localNotes: localNoteCount,
           remoteNotes: remoteList.length,
+          remoteTagSets: Object.keys(remoteTagMap).length,
           toUpload: uploads.length,
+          tagUploads: tagUploads.length,
         })
 
         for (const job of uploads) {
@@ -736,6 +874,18 @@ export default function App() {
           if (!res.ok) {
             const errPayload = await res.json().catch(() => ({}))
             throw new Error(errPayload?.error ?? 'Failed to sync note')
+          }
+        }
+
+        for (const job of tagUploads) {
+          if (cancelled) return
+          const res = await apiFetch('/api/db/notes', {
+            method: 'POST',
+            body: JSON.stringify(job),
+          })
+          if (!res.ok) {
+            const errPayload = await res.json().catch(() => ({}))
+            throw new Error(errPayload?.error ?? 'Failed to sync tags')
           }
         }
 
@@ -779,20 +929,32 @@ export default function App() {
           console.error('[notes sync] failed', payload)
           return
         }
-        const remoteMap = groupNotesByTrack(payload?.notes)
-        if (!remoteMap || Object.keys(remoteMap).length === 0) {
+        const { notes: remoteMap, tags: remoteTagMap } = groupRemoteNotes(payload?.notes)
+        const hasRemoteNotes = Object.keys(remoteMap).length > 0
+        const hasRemoteTags = Object.keys(remoteTagMap).length > 0
+        if (!hasRemoteNotes && !hasRemoteTags) {
           return
         }
         setNotesByTrack((prev) =>
           ensureNotesEntries(mergeRemoteNotes(prev, remoteMap), tracksRef.current)
         )
+        setTagsByTrack((prev) =>
+          ensureTagsEntries(mergeRemoteTags(prev, remoteTagMap), tracksRef.current)
+        )
         setTracks((prev) =>
           prev.map((track) => {
+            let next = track
             const remoteNotes = remoteMap[track.id]
-            if (!remoteNotes || remoteNotes.length === 0) return track
-            const existingNotes = Array.isArray(track.notes) ? track.notes : []
-            if (existingNotes.length > 0) return track
-            return { ...track, notes: [...remoteNotes] }
+            if (Array.isArray(remoteNotes) && remoteNotes.length > 0) {
+              const existingNotes = Array.isArray(track.notes) ? track.notes : []
+              if (existingNotes.length === 0) {
+                next = { ...next, notes: [...remoteNotes] }
+              }
+            }
+            if (track.id && track.id in remoteTagMap) {
+              next = { ...next, tags: [...remoteTagMap[track.id]] }
+            }
+            return next
           })
         )
       } catch (err) {
@@ -811,6 +973,7 @@ export default function App() {
 
   const reimportBtnRef = useRef(null)
   const loadMoreBtnRef = useRef(null)
+  const tagSyncSchedulerRef = useRef(null)
 
   // -- PERSISTENCE: save whenever core state changes (v3 structured shape)
   useEffect(() => {
@@ -821,8 +984,9 @@ export default function App() {
       tracks,
       importMeta,
       notesByTrack,
+      tagsByTrack,
     })
-  }, [playlistTitle, importedAt, lastImportUrl, tracks, importMeta, notesByTrack])
+  }, [playlistTitle, importedAt, lastImportUrl, tracks, importMeta, notesByTrack, tagsByTrack])
 
   // Safety: close editor if its track disappears or changes
   useEffect(() => {
@@ -1114,8 +1278,10 @@ export default function App() {
       }
 
       const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, additions)
+      const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, additions)
       setNotesByTrack(nextNotesMap)
-      const additionsWithNotes = attachNotesToTracks(additions, nextNotesMap)
+      setTagsByTrack(nextTagsMap)
+      const additionsWithNotes = attachNotesToTracks(additions, nextNotesMap, nextTagsMap)
       setTracks(prev => [...prev, ...additionsWithNotes])
       setImportMeta(prev => ({
         ...prev,
@@ -1155,6 +1321,7 @@ export default function App() {
           sourceUrl: importMeta?.sourceUrl ?? lastImportUrl ?? '',
         },
         notesByTrack: cloneNotesMap(notesByTrackRef.current),
+        tagsByTrack: cloneTagsMap(tagsByTrackRef.current),
       }
       const json = JSON.stringify(payload, null, 2)
       const blob = new Blob([json], { type: 'application/json' })
@@ -1218,9 +1385,26 @@ export default function App() {
       Object.entries(importedMap).forEach(([id, notes]) => {
         merged[id] = [...notes]
       })
+      const importedTags = cloneTagsMap(parsed?.tagsByTrack)
+      const mergedTags = cloneTagsMap(tagsByTrackRef.current)
+      Object.entries(importedTags).forEach(([id, tags]) => {
+        const existing = Array.isArray(mergedTags[id]) ? [...mergedTags[id]] : []
+        const combined = [...existing]
+        tags.forEach((tag) => {
+          const normalized = normalizeTag(tag)
+          if (normalized && !combined.includes(normalized)) {
+            combined.push(normalized)
+          }
+        })
+        if (combined.length > 0) {
+          mergedTags[id] = combined
+        }
+      })
       const nextMap = ensureNotesEntries(merged, tracks)
+      const nextTagsMap = ensureTagsEntries(mergedTags, tracks)
       setNotesByTrack(nextMap)
-      setTracks(prev => attachNotesToTracks(prev, nextMap))
+      setTagsByTrack(nextTagsMap)
+      setTracks(prev => attachNotesToTracks(prev, nextMap, nextTagsMap))
       announce('Notes restored from backup.')
     } catch (err) {
       console.error('[notes restore error]', err)
@@ -1248,6 +1432,7 @@ export default function App() {
 
     // Reset in-memory app state
     setNotesByTrack(Object.create(null))
+    setTagsByTrack(Object.create(null))
     setTracks([])
     setImportMeta({ ...EMPTY_IMPORT_META })
     setPlaylistTitle('My Playlist')
@@ -1263,6 +1448,117 @@ export default function App() {
     announce("All saved data cleared. You're back at the start.")
     setTimeout(() => importInputRef.current?.focus(), 0)
   }
+
+  const sendTagUpdate = useCallback(
+    async (trackId, tags) => {
+      if (!trackId || !anonContext?.deviceId) return
+      const response = await apiFetch('/api/db/notes', {
+        method: 'POST',
+        body: JSON.stringify({ trackId, tags }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.error ?? 'Failed to sync tags')
+      }
+    },
+    [anonContext?.deviceId],
+  )
+
+  useEffect(() => {
+    if (!anonContext?.deviceId) {
+      tagSyncSchedulerRef.current?.clear?.()
+      tagSyncSchedulerRef.current = null
+      return
+    }
+    const scheduler = createTagSyncScheduler(sendTagUpdate, 350)
+    tagSyncSchedulerRef.current = scheduler
+    return () => scheduler.clear()
+  }, [anonContext?.deviceId, sendTagUpdate])
+
+  const syncTrackTags = useCallback(
+    (trackId, tags) => {
+      if (!trackId) return Promise.resolve()
+      const scheduler = tagSyncSchedulerRef.current
+      if (scheduler) {
+        return scheduler.schedule(trackId, tags)
+      }
+      return sendTagUpdate(trackId, tags)
+    },
+    [sendTagUpdate],
+  )
+
+  const handleAddTag = useCallback(
+    (trackId, tag) => {
+      const normalized = normalizeTag(tag)
+      if (!trackId || !normalized) return false
+      if (normalized.length > MAX_TAG_LENGTH) {
+        announce(`Tags must be ${MAX_TAG_LENGTH} characters or fewer.`)
+        return false
+      }
+      if (!TAG_ALLOWED_RE.test(normalized)) {
+        announce('Tags can only include letters, numbers, spaces, hyphen, or underscore.')
+        return false
+      }
+      const currentMap = tagsByTrackRef.current || {}
+      const existing = hasOwn(currentMap, trackId) ? [...currentMap[trackId]] : []
+      if (existing.length >= MAX_TAGS_PER_TRACK) {
+        announce(`Maximum of ${MAX_TAGS_PER_TRACK} tags reached for this track.`)
+        return false
+      }
+      if (existing.includes(normalized)) {
+        const title = tracksRef.current.find((t) => t.id === trackId)?.title ?? 'this track'
+        announce(`Tag "${normalized}" already applied to "${title}".`)
+        return false
+      }
+      const nextList = [...existing, normalized]
+      const nextMap = updateTagsMap(currentMap, trackId, nextList)
+      setTagsByTrack(nextMap)
+      tagsByTrackRef.current = nextMap
+      setTracks((prev) =>
+        prev.map((t) => {
+          if (t.id !== trackId) return t
+          return { ...t, tags: nextList }
+        })
+      )
+      const title = tracksRef.current.find((t) => t.id === trackId)?.title ?? 'this track'
+      announce(`Added tag "${normalized}" to "${title}".`)
+      if (anonContext?.deviceId) {
+        syncTrackTags(trackId, nextList).catch(() => {
+          announce('Tag sync failed. Changes are saved locally.')
+        })
+      }
+      return true
+    },
+    [announce, anonContext?.deviceId, syncTrackTags],
+  )
+
+  const handleRemoveTag = useCallback(
+    (trackId, tag) => {
+      const normalized = normalizeTag(tag)
+      if (!trackId || !normalized) return
+      const currentMap = tagsByTrackRef.current || {}
+      const existing = hasOwn(currentMap, trackId) ? [...currentMap[trackId]] : []
+      if (existing.length === 0) return
+      const filtered = existing.filter((value) => value !== normalized)
+      const nextMap = updateTagsMap(currentMap, trackId, filtered)
+      setTagsByTrack(nextMap)
+      tagsByTrackRef.current = nextMap
+      setTracks((prev) =>
+        prev.map((t) => {
+          if (t.id !== trackId) return t
+          return { ...t, tags: filtered }
+        })
+      )
+      const title = tracksRef.current.find((t) => t.id === trackId)?.title ?? 'this track'
+      announce(`Removed tag "${normalized}" from "${title}".`)
+      if (anonContext?.deviceId) {
+        syncTrackTags(trackId, filtered).catch(() => {
+          announce('Tag sync failed. Changes are saved locally.')
+        })
+      }
+    },
+    [announce, anonContext?.deviceId, syncTrackTags],
+  )
 
   const onAddNote = (trackId) => {
     setEditingId(trackId); setDraft(''); setError(null)
@@ -1478,6 +1774,10 @@ export default function App() {
             onSaveNote={onSaveNote}
             onCancelNote={onCancelNote}
             onDeleteNote={onDeleteNote}
+            onAddTag={handleAddTag}
+            onRemoveTag={handleRemoveTag}
+            stockTags={STOCK_TAGS}
+            customTags={allCustomTags}
             onUndo={undoInline}
             onDismissUndo={expireInline}
             onReimport={handleReimport}
@@ -1536,7 +1836,6 @@ export default function App() {
         error={restoreError}
         hasLocalNotes={hasLocalNotes}
       />
-      <Analytics />
       <input
         ref={backupFileInputRef}
         type="file"

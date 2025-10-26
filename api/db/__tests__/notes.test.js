@@ -8,10 +8,14 @@ let hasConfig = true;
 let adminClient;
 let handler;
 let notesSelectResponse;
+let notesSelectQueue;
 let notesInsertResponse;
 let notesInsertPayload;
 let notesSelectQueries;
 let notesInsertMock;
+let notesUpdateResponse;
+let notesUpdatePayload;
+let notesUpdateQueries;
 
 vi.mock('../../_lib/supabase.js', () => ({
   getAdminClient: () => adminClient,
@@ -28,12 +32,21 @@ vi.mock('../../_lib/supabase.js', () => ({
   },
 }));
 
+function nextSelectResponse() {
+  if (notesSelectQueue.length > 0) {
+    return notesSelectQueue.shift();
+  }
+  return notesSelectResponse;
+}
+
 function createSelectQuery() {
+  const responsePromise = Promise.resolve(nextSelectResponse());
   const query = {
     eq: vi.fn(() => query),
     order: vi.fn(() => query),
+    maybeSingle: vi.fn(() => responsePromise),
     then(onFulfilled, onRejected) {
-      return Promise.resolve(notesSelectResponse).then(onFulfilled, onRejected);
+      return responsePromise.then(onFulfilled, onRejected);
     },
   };
   notesSelectQueries.push(query);
@@ -47,6 +60,19 @@ function createAdminClient() {
     const select = vi.fn(() => ({ single }));
     return { select };
   });
+  notesUpdateQueries = [];
+  notesUpdatePayload = undefined;
+  const updateFactory = (payload) => {
+    notesUpdatePayload = payload;
+    const query = {
+      eq: vi.fn(() => query),
+      select: vi.fn(() => ({
+        single: vi.fn(() => Promise.resolve(notesUpdateResponse)),
+      })),
+    };
+    notesUpdateQueries.push(query);
+    return query;
+  };
 
   return {
     from: vi.fn((table) => {
@@ -54,6 +80,7 @@ function createAdminClient() {
         return {
           select: vi.fn(() => createSelectQuery()),
           insert: notesInsertMock,
+          update: updateFactory,
         };
       }
       throw new Error(`Unexpected table ${table}`);
@@ -98,11 +125,13 @@ beforeEach(async () => {
   vi.resetModules();
   hasConfig = true;
   notesSelectResponse = { data: [], error: null };
+  notesSelectQueue = [];
   notesInsertResponse = {
     data: {
       id: 'note-1',
       track_id: 'track-9',
       body: 'hi',
+      tags: ['drill'],
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
     },
@@ -110,6 +139,19 @@ beforeEach(async () => {
   };
   notesInsertPayload = undefined;
   notesSelectQueries = [];
+  notesUpdateResponse = {
+    data: {
+      id: 'note-1',
+      track_id: 'track-9',
+      body: 'hi',
+      tags: ['chill'],
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:01Z',
+    },
+    error: null,
+  };
+  notesUpdatePayload = undefined;
+  notesUpdateQueries = [];
   getAnonContextMock.mockReset();
   touchLastActiveMock.mockReset();
   withCorsMock.mockClear();
@@ -126,6 +168,7 @@ describe('api/db/notes handler', () => {
           id: 'row-1',
           track_id: 'track-7',
           body: 'hello',
+          tags: ['trap', '808'],
           created_at: '2024-01-02T00:00:00Z',
           updated_at: '2024-01-02T00:00:01Z',
         },
@@ -151,6 +194,7 @@ describe('api/db/notes handler', () => {
           id: 'row-1',
           trackId: 'track-7',
           body: 'hello',
+          tags: ['808', 'trap'],
           createdAt: '2024-01-02T00:00:00Z',
           updatedAt: '2024-01-02T00:00:01Z',
         },
@@ -168,6 +212,7 @@ describe('api/db/notes handler', () => {
 
   it('creates note on POST', async () => {
     getAnonContextMock.mockResolvedValueOnce({ anonId: 'anon-1' });
+    notesSelectQueue.push({ data: null, error: null });
 
     const req = createMockReq({
       method: 'POST',
@@ -184,6 +229,7 @@ describe('api/db/notes handler', () => {
       device_id: 'device-1',
       track_id: 'track-9',
       body: 'new note',
+      tags: [],
     });
     expect(typeof notesInsertPayload.last_active).toBe('string');
     expect(res.status).toHaveBeenCalledWith(201);
@@ -192,6 +238,7 @@ describe('api/db/notes handler', () => {
         id: 'note-1',
         trackId: 'track-9',
         body: 'hi',
+        tags: ['drill'],
         createdAt: '2024-01-01T00:00:00Z',
         updatedAt: '2024-01-01T00:00:00Z',
       },
@@ -202,6 +249,58 @@ describe('api/db/notes handler', () => {
       'device-1',
     );
   });
+
+  it('updates tags for existing note when only tags payload is provided', async () => {
+    getAnonContextMock.mockResolvedValueOnce({ anonId: 'anon-1' });
+    notesSelectQueue.push({
+      data: { id: 'note-1', body: 'hi', tags: ['lofi'] },
+      error: null,
+    });
+
+    const req = createMockReq({
+      method: 'POST',
+      headers: { 'x-device-id': 'device-1' },
+      body: { trackId: 'track-9', tags: ['Drill', ' 808 ', 'drill'] },
+    });
+    const res = createMockRes();
+
+    await handler(req, res);
+
+    expect(notesUpdatePayload).toMatchObject({
+      tags: ['808', 'drill'],
+    });
+    const [updateQuery] = notesUpdateQueries;
+    expect(updateQuery.eq).toHaveBeenCalledWith('id', 'note-1');
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.body).toEqual({
+      note: {
+        id: 'note-1',
+        trackId: 'track-9',
+        body: 'hi',
+        tags: ['chill'],
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:01Z',
+      },
+    });
+  });
+
+  it('rejects invalid tags that exceed length limits', async () => {
+    getAnonContextMock.mockResolvedValueOnce({ anonId: 'anon-1' });
+    notesSelectQueue.push({ data: null, error: null });
+
+    const req = createMockReq({
+      method: 'POST',
+      headers: { 'x-device-id': 'device-1' },
+      body: { trackId: 'track-99', tags: ['x'.repeat(40)] },
+    });
+    const res = createMockRes();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.body?.error).toMatch(/Tags must be/);
+  });
+
 
   it('rejects missing device header', async () => {
     const req = createMockReq({ method: 'GET' });

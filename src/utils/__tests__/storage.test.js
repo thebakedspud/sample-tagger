@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  addTag,
+  getTags,
+  listAllCustomTags,
   loadAppState,
   loadRecent,
+  removeTag,
   saveAppState,
   saveRecent,
   upsertRecent,
@@ -53,7 +57,7 @@ describe('storage cursors', () => {
       importedAt: null,
     });
 
-    const raw = globalThis.localStorage.getItem('sta:v4');
+    const raw = globalThis.localStorage.getItem('sta:v5');
     expect(raw).toBeTypeOf('string');
 
     const parsed = JSON.parse(raw);
@@ -77,7 +81,7 @@ describe('storage cursors', () => {
       importedAt: null,
     });
 
-    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v4'));
+    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v5'));
     expect(parsed.importMeta.cursor).toBeNull();
 
     const restored = loadAppState();
@@ -98,7 +102,7 @@ describe('storage cursors', () => {
       importedAt: null,
     });
 
-    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v4'));
+    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v5'));
     expect(parsed.notesByTrack['sp:track:1']).toEqual(['First note']);
     expect(parsed.notesByTrack['sp:track:2']).toEqual(['Second note']);
 
@@ -106,6 +110,56 @@ describe('storage cursors', () => {
     expect(restored?.notesByTrack['sp:track:1']).toEqual(['First note']);
     expect(restored?.notesByTrack['sp:track:2']).toEqual(['Second note']);
     expect(Array.isArray(restored?.tracks)).toBe(true);
+  });
+
+  it('normalizes and persists tagsByTrack', () => {
+    saveAppState({
+      theme: 'dark',
+      playlistTitle: 'Tags Test',
+      tracks: [],
+      tagsByTrack: {
+        ' sp:track:1 ': ['Drill', 'drill', '  '],
+        'sp:track:2': [' 808 ', 'Dark', 'DARK'],
+      },
+      importMeta: {},
+      lastImportUrl: '',
+      importedAt: null,
+    });
+
+    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v5'));
+    expect(parsed.tagsByTrack['sp:track:1']).toEqual(['drill']);
+    expect(parsed.tagsByTrack['sp:track:2']).toEqual(['808', 'dark']);
+
+    const restored = loadAppState();
+    expect(restored?.tagsByTrack['sp:track:1']).toEqual(['drill']);
+    expect(restored?.tagsByTrack['sp:track:2']).toEqual(['808', 'dark']);
+  });
+
+  it('migrates v4 payloads to v5 and normalizes tags', () => {
+    const legacy = {
+      version: 4,
+      theme: 'dark',
+      playlistTitle: 'Legacy v4',
+      importedAt: null,
+      lastImportUrl: '',
+      tracks: [],
+      importMeta: { provider: 'spotify', cursor: null, hasMore: false, sourceUrl: null },
+      notesByTrack: { 't1': ['First note'] },
+      tagsByTrack: { 't1': ['Drill', 'DRILL'] },
+      recentPlaylists: [],
+    };
+    globalThis.localStorage.setItem('sta:v4', JSON.stringify(legacy));
+
+    const migrated = loadAppState();
+
+    expect(migrated?.version).toBe(5);
+    expect(migrated?.playlistTitle).toBe('Legacy v4');
+    expect(migrated?.tagsByTrack['t1']).toEqual(['drill']);
+
+    const newRaw = globalThis.localStorage.getItem('sta:v5');
+    expect(newRaw).not.toBeNull();
+    const parsed = JSON.parse(newRaw);
+    expect(parsed.version).toBe(5);
   });
 });
 
@@ -139,6 +193,31 @@ describe('track persistence', () => {
     expect(restored?.tracks?.[0]?.sourceUrl).toBe('https://example.com/track');
     expect(restored?.tracks?.[0]?.durationMs).toBe(123456);
     expect(restored?.tracks?.[0]?.notes).toEqual(['Great intro']);
+  });
+});
+
+describe('tag helpers', () => {
+  beforeEach(() => {
+    globalThis.localStorage = new MemoryStorage();
+  });
+
+  it('adds, removes, and lists tags with normalization', () => {
+    expect(getTags('track-1')).toEqual([]);
+
+    addTag('track-1', 'Drill');
+    addTag('track-1', 'drill'); // dedupe
+    addTag('track-1', ' 808 ');
+
+    expect(getTags('track-1')).toEqual(['808', 'drill']);
+    expect(listAllCustomTags()).toEqual(['808', 'drill']);
+
+    removeTag('track-1', 'DRILL');
+    expect(getTags('track-1')).toEqual(['808']);
+    expect(listAllCustomTags()).toEqual(['808']);
+
+    removeTag('track-1', '808');
+    expect(getTags('track-1')).toEqual([]);
+    expect(listAllCustomTags()).toEqual([]);
   });
 });
 
@@ -261,5 +340,7 @@ describe('recent playlists storage', () => {
     expect(recents[0].sourceUrl).toBe('https://open.spotify.com/playlist/legacy');
     expect(typeof recents[0].importedAt).toBe('number');
     expect(typeof recents[0].lastUsedAt).toBe('number');
+    expect(migrated?.tagsByTrack).toEqual({});
   });
 });
+
