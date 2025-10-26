@@ -15,21 +15,21 @@
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
-    "@supabase/supabase-js": "^2.75.1",
+    "@supabase/supabase-js": "^2.76.1",
     "@vercel/analytics": "^1.5.0",
     "@vercel/speed-insights": "^1.2.0",
     "prop-types": "^15.8.1",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
-    "@eslint/js": "^9.36.0",
+    "@eslint/js": "^9.38.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.0.1",
     "@testing-library/user-event": "^14.5.2",
     "@types/react": "^19.1.13",
-    "@types/react-dom": "^19.1.9",
+    "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.0.3",
     "@vitest/coverage-v8": "^2.1.9",
     "cross-env": "^7.0.3",
