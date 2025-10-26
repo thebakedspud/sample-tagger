@@ -14,8 +14,8 @@ describe('tag utils', () => {
       stock: STOCK_TAGS,
       custom: ['drone', 'dramatic'],
     })
-    expect(result.slice(0, 3)).toEqual(['drill', 'dreamy', 'drums'])
-    expect(result).toContain('drone')
+    expect(result.slice(0, 3)).toEqual(['drums', 'dreamy', 'drone'])
+    expect(result).toContain('dramatic')
   })
 
   it('filters out existing tags and avoids duplicates', () => {

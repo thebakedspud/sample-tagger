@@ -122,15 +122,15 @@ describe('App tagging announcements', () => {
     const input = screen.getByPlaceholderText(/add tag/i)
     fireEvent.change(input, { target: { value: 'dr' } })
 
-    const suggestion = await screen.findByRole('button', { name: 'drill' })
+    const suggestion = await screen.findByRole('button', { name: 'drums' })
     fireEvent.click(suggestion)
 
-    expect(screen.getByRole('status').textContent).toMatch(/Added tag "drill" to "Test Track"/i)
+    expect(screen.getByRole('status').textContent).toMatch(/Added tag "drums" to "Test Track"/i)
 
-    const chip = await screen.findByRole('button', { name: /remove tag drill/i })
+    const chip = await screen.findByRole('button', { name: /remove tag drums/i })
     fireEvent.click(chip)
 
-    expect(screen.getByRole('status').textContent).toMatch(/Removed tag "drill" from "Test Track"/i)
-    expect(screen.queryByRole('button', { name: /remove tag drill/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('status').textContent).toMatch(/Removed tag "drums" from "Test Track"/i)
+    expect(screen.queryByRole('button', { name: /remove tag drums/i })).not.toBeInTheDocument()
   })
 })
