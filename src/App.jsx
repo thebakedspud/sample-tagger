@@ -1,8 +1,6 @@
 // src/App.jsx
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
-import ThemeToggle from './components/ThemeToggle.jsx'
-import FontSettings from './components/display/FontSettings.jsx'
 import RecoveryModal from './components/RecoveryModal.jsx'
 import RestoreDialog from './components/RestoreDialog.jsx'
 import RecentPlaylists from './features/recent/RecentPlaylists.jsx'
@@ -30,6 +28,7 @@ import useAnnounce from './features/a11y/useAnnounce.js'
 // NEW: inline undo
 import useInlineUndo from './features/undo/useInlineUndo.js'
 import PlaylistView from './features/playlist/PlaylistView.jsx'
+import AccountView from './features/account/AccountView.jsx'
 
 // Extracted helpers
 import detectProvider from './features/import/detectProvider'
@@ -48,7 +47,10 @@ import {
   getStoredRecoveryCode,
   hasAcknowledgedRecovery,
   markRecoveryAcknowledged,
+  getRecoveryAcknowledgement,
+  clearRecoveryAcknowledgement,
   clearDeviceContext,
+  ensureRecoveryCsrfToken,
 } from './lib/deviceState.js'
 
 // -- Derive initial state from storage (v3 structured: { importMeta, tracks, ... })
@@ -346,9 +348,16 @@ export default function App() {
     anonId: getAnonId(),
   }))
   const initialRecoveryCode = getStoredRecoveryCode()
+  const initialRecoveryMeta = getRecoveryAcknowledgement()
   const initialRecoveryAcknowledged = initialRecoveryCode
     ? hasAcknowledgedRecovery(initialRecoveryCode)
     : false
+  const [recoveryAckMeta, setRecoveryAckMeta] = useState(() => {
+    if (!initialRecoveryCode || !initialRecoveryMeta) return null
+    return initialRecoveryMeta.code === initialRecoveryCode
+      ? initialRecoveryMeta
+      : null
+  })
   const [recoveryCode, setRecoveryCode] = useState(initialRecoveryCode)
   const [showRecoveryModal, setShowRecoveryModal] = useState(
     Boolean(initialRecoveryCode) && !initialRecoveryAcknowledged
@@ -356,6 +365,11 @@ export default function App() {
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
   const [restoreBusy, setRestoreBusy] = useState(false)
   const [restoreError, setRestoreError] = useState(null)
+  const [regeneratingRecovery, setRegeneratingRecovery] = useState(false)
+  const [recoveryRotationError, setRecoveryRotationError] = useState(null)
+  const [showBackupReminder, setShowBackupReminder] = useState(false)
+  const recoveryCopyButtonRef = useRef(null)
+  const [recoveryCsrfToken, setRecoveryCsrfToken] = useState(() => ensureRecoveryCsrfToken())
   const [bootstrapError, setBootstrapError] = useState(null)
   const [showMigrationNotice, setShowMigrationNotice] = useState(Boolean(pendingMigrationSnapshot))
   const migrationSnapshotRef = useRef(pendingMigrationSnapshot)
@@ -663,9 +677,12 @@ export default function App() {
         const normalizedCode = payload.recoveryCode
         saveRecoveryCode(normalizedCode)
         setRecoveryCode(normalizedCode)
-        if (hasAcknowledgedRecovery(normalizedCode)) {
+        const ackMeta = getRecoveryAcknowledgement()
+        if (ackMeta?.code === normalizedCode && hasAcknowledgedRecovery(normalizedCode)) {
+          setRecoveryAckMeta(ackMeta)
           setShowRecoveryModal(false)
         } else {
+          setRecoveryAckMeta(null)
           setShowRecoveryModal(true)
         }
       }
@@ -683,8 +700,13 @@ export default function App() {
   const handleRecoveryModalConfirm = useCallback(() => {
     if (!recoveryCode) return
     markRecoveryAcknowledged(recoveryCode)
+    setRecoveryAckMeta({
+      code: recoveryCode,
+      acknowledgedAt: Date.now(),
+    })
     setShowRecoveryModal(false)
     announce('Recovery code saved. You can now continue.')
+    setShowBackupReminder(false)
   }, [announce, recoveryCode])
 
   const openRestoreDialog = useCallback(() => {
@@ -716,6 +738,14 @@ export default function App() {
             message = 'Recovery code was not recognised.'
           } else if (response.status === 429) {
             message = 'Too many attempts. Wait a bit and try again.'
+          } else if (response.status === 410) {
+            const rotatedAt = payload?.rotatedAt
+            if (rotatedAt) {
+              const formatted = new Date(rotatedAt).toLocaleString()
+              message = `Code was replaced on ${formatted}.`
+            } else {
+              message = 'That recovery code was replaced on another device.'
+            }
           }
           setRestoreError(message)
           return
@@ -729,8 +759,13 @@ export default function App() {
         })
         saveRecoveryCode(normalized)
         markRecoveryAcknowledged(normalized)
+        setRecoveryAckMeta({
+          code: normalized,
+          acknowledgedAt: Date.now(),
+        })
         setRecoveryCode(normalized)
         setShowRecoveryModal(false)
+        setShowBackupReminder(false)
 
         clearAppState()
         setNotesByTrack(Object.create(null))
@@ -755,6 +790,118 @@ export default function App() {
     },
     [announce, resetImportFlow]
   )
+
+  const handleCopyRecoveryCode = useCallback(async () => {
+    if (!recoveryCode) return
+    const value = recoveryCode
+    try {
+      if (
+        typeof navigator !== 'undefined' &&
+        navigator?.clipboard &&
+        typeof navigator.clipboard.writeText === 'function'
+      ) {
+        await navigator.clipboard.writeText(value)
+        announce('Recovery code copied.')
+        return
+      }
+      throw new Error('Clipboard API unavailable')
+    } catch (_err) {
+      try {
+        if (typeof document !== 'undefined') {
+          const textarea = document.createElement('textarea')
+          textarea.value = value
+          textarea.setAttribute('readonly', '')
+          textarea.style.position = 'absolute'
+          textarea.style.left = '-9999px'
+          document.body.appendChild(textarea)
+          textarea.select()
+          document.execCommand('copy')
+          document.body.removeChild(textarea)
+          announce('Recovery code copied.')
+          return
+        }
+      } catch (_err) {
+        // fall through to failure
+      }
+    }
+    announce('Copy failed. Please copy the code manually.')
+  }, [announce, recoveryCode])
+
+  const handleRegenerateRecoveryCode = useCallback(async () => {
+    if (regeneratingRecovery) return
+    setRegeneratingRecovery(true)
+    setRecoveryRotationError(null)
+    try {
+      const headers = recoveryCsrfToken
+        ? { 'x-recovery-csrf': recoveryCsrfToken }
+        : undefined
+      const response = await apiFetch('/api/anon/recovery', {
+        method: 'POST',
+        headers,
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        const message =
+          payload?.error ?? 'Unable to regenerate recovery code.'
+        setRecoveryRotationError(message)
+        announce('Could not regenerate recovery code.')
+        return
+      }
+      const nextCode =
+        typeof payload?.recoveryCode === 'string'
+          ? payload.recoveryCode.trim().toUpperCase()
+          : ''
+      if (payload?.anonId) {
+        setAnonId(payload.anonId)
+        setAnonContext((prev) => ({
+          deviceId: prev?.deviceId ?? getDeviceId(),
+          anonId: payload.anonId,
+        }))
+      }
+      if (nextCode) {
+        clearRecoveryAcknowledgement()
+        saveRecoveryCode(nextCode)
+        setRecoveryCode(nextCode)
+        setRecoveryAckMeta(null)
+        setShowRecoveryModal(true)
+        setShowBackupReminder(true)
+        announce('Recovery code regenerated. You must save this new code.')
+        requestAnimationFrame(() => {
+          if (recoveryCopyButtonRef.current) {
+            recoveryCopyButtonRef.current.focus()
+          }
+        })
+      } else {
+        announce('Recovery code updated, but no code returned.')
+      }
+    } catch (err) {
+      console.error('[recovery:regenerate] request failed', err)
+      const message =
+        typeof err?.message === 'string'
+          ? err.message
+          : 'Failed to regenerate recovery code. Please try again.'
+      setRecoveryRotationError(message)
+      announce('Could not regenerate recovery code.')
+    } finally {
+      setRegeneratingRecovery(false)
+    }
+  }, [announce, recoveryCsrfToken, regeneratingRecovery])
+
+  const handleOpenRecoveryOptions = useCallback(() => {
+    if (!recoveryCode) return
+    setShowRecoveryModal(true)
+    announce('Recovery code ready. Choose how you want to back it up.')
+  }, [announce, recoveryCode])
+
+  const handleOpenSpotifyLink = useCallback(() => {
+    announce('Spotify linking is coming soon.')
+  }, [announce])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const token = ensureRecoveryCsrfToken()
+    setRecoveryCsrfToken(token)
+  }, [])
 
   // REIMPORT focus pattern
   useEffect(() => {
@@ -1425,6 +1572,8 @@ export default function App() {
     clearDeviceContext()
     setAnonContext({ deviceId: null, anonId: null })
     setRecoveryCode(null)
+    setRecoveryAckMeta(null)
+    setShowBackupReminder(false)
     setShowRecoveryModal(false)
     setRestoreDialogOpen(false)
     setRestoreError(null)
@@ -1659,6 +1808,8 @@ export default function App() {
     announce('Note deleted. Press Undo to restore')
   }
 
+  const hasPlaylist = Array.isArray(tracks) && tracks.length > 0
+
   // Helper to hide the mock prefix from SRs but keep it visible
   return (
     <div className="app">
@@ -1687,9 +1838,48 @@ export default function App() {
       )}
 
       <header style={{ maxWidth: 880, margin: '20px auto 0', padding: '0 16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ margin: 0 }}>Sample Tagger</h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 16,
+            flexWrap: 'wrap',
+          }}
+        >
+          <p className="app-title">Sample Tagger</p>
+          <div className="app-header__actions">
+            <nav className="app-nav" aria-label="Primary navigation">
+              <button
+                type="button"
+                className={`app-nav__btn${screen === 'landing' ? ' is-active' : ''}`}
+                onClick={() => setScreen('landing')}
+                aria-current={screen === 'landing' ? 'page' : undefined}
+              >
+                Import
+              </button>
+              <button
+                type="button"
+                className={`app-nav__btn${screen === 'playlist' ? ' is-active' : ''}`}
+                onClick={() => {
+                  if (!hasPlaylist) return
+                  setScreen('playlist')
+                }}
+                aria-current={screen === 'playlist' ? 'page' : undefined}
+                disabled={!hasPlaylist}
+                aria-disabled={!hasPlaylist ? 'true' : undefined}
+              >
+                Playlist
+              </button>
+              <button
+                type="button"
+                className={`app-nav__btn${screen === 'account' ? ' is-active' : ''}`}
+                onClick={() => setScreen('account')}
+                aria-current={screen === 'account' ? 'page' : undefined}
+              >
+                Account
+              </button>
+            </nav>
             <button type="button" className="btn" onClick={openRestoreDialog}>
               Have a code?
             </button>
@@ -1698,117 +1888,119 @@ export default function App() {
       </header>
 
       <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px', paddingBottom: 128 }}>
-        <section aria-labelledby="display-settings-title" className="card font-settings-card">
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: 16,
-              flexWrap: 'wrap',
-            }}
-          >
-            <div>
-              <h2 id="display-settings-title" style={{ margin: '0 0 4px' }}>
-                Display
-              </h2>
-              <p style={{ margin: 0, color: 'var(--muted)' }}>Theme and font preferences</p>
-            </div>
-            <ThemeToggle />
-          </div>
-          <FontSettings />
-        </section>
-
-        {screen === 'landing' && (
-          <section aria-labelledby="landing-title">
-            <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
-            <p style={{ color: 'var(--muted)' }}>
-              Paste a Spotify / YouTube / SoundCloud <strong>playlist</strong> URL to import a snapshot and start adding notes.
-            </p>
-
-            <form onSubmit={handleImport} aria-describedby={importError ? 'import-error' : undefined}>
-              <div style={{ display: 'grid', gap: 8, alignItems: 'start', gridTemplateColumns: '1fr auto' }}>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label htmlFor="playlist-url" style={{ display: 'block', marginBottom: 6 }}>Playlist URL</label>
-                  <input
-                    id="playlist-url"
-                    ref={importInputRef}
-                    type="url"
-                    inputMode="url"
-                    placeholder="https://open.spotify.com/playlist/..."
-                    autoComplete="off"
-                    value={importUrl}
-                    onChange={handleImportUrlChange}
-                    style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
-                    aria-invalid={!!importError}
-                  />
-                  {importError && (
-                    <div id="import-error" className="error-text" style={{ marginTop: 6 }}>
-                      {importError}
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="chip">
-                    <span className="chip-dot" style={{ background: providerChip ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
-                    {providerChip ? providerChip : 'no match'}
-                  </span>
-                </div>
-
-                <div style={{ justifySelf: 'end' }}>
-                  <button
-                    type="submit"
-                    className="btn primary"
-                    disabled={isAnyImportBusy}
-                    aria-busy={showInitialSpinner ? 'true' : 'false'}
-                  >
-                    {showInitialSpinner ? 'Importing...' : 'Import playlist'}
-                  </button>
-                </div>
-              </div>
-            </form>
-
-            <RecentPlaylists
-              items={recentPlaylists}
-              onSelect={handleSelectRecent}
-              cardState={recentCardState}
-              disabled={isAnyImportBusy}
-            />
-          </section>
-        )}
-
-        {screen === 'playlist' && (
-          <PlaylistView
-            playlistTitle={playlistTitle}
-            importedAt={importedAt}
-            importMeta={importMeta}
-            tracks={tracks}
-            isAnyImportBusy={isAnyImportBusy}
-            showReimportSpinner={showReimportSpinner}
-            showLoadMoreSpinner={showLoadMoreSpinner}
-            pending={pending}
-            isPending={isPending}
-            editingState={{ editingId, draft, error }}
-            onDraftChange={handleDraftChange}
-            onAddNote={onAddNote}
-            onSaveNote={onSaveNote}
-            onCancelNote={onCancelNote}
-            onDeleteNote={onDeleteNote}
-            onAddTag={handleAddTag}
-            onRemoveTag={handleRemoveTag}
-            stockTags={STOCK_TAGS}
-            customTags={allCustomTags}
-            onUndo={undoInline}
-            onDismissUndo={expireInline}
-            onReimport={handleReimport}
-            onClear={handleClearAll}
-            onBack={handleBackToLanding}
-            canReimport={Boolean(lastImportUrl)}
-            reimportBtnRef={reimportBtnRef}
-            loadMoreBtnRef={loadMoreBtnRef}
-            onLoadMore={handleLoadMore}
+        {screen === 'account' ? (
+          <AccountView
+            anonId={anonContext?.anonId}
+            deviceId={anonContext?.deviceId}
+            recoveryCode={recoveryCode}
+            recoveryAcknowledgedAt={recoveryAckMeta?.acknowledgedAt ?? null}
+            recoveryCopyButtonRef={recoveryCopyButtonRef}
+            onCopyRecoveryCode={handleCopyRecoveryCode}
+            onConfirmRegenerate={handleRegenerateRecoveryCode}
+            regeneratingRecoveryCode={regeneratingRecovery}
+            regenerationError={recoveryRotationError}
+            onOpenRestoreDialog={openRestoreDialog}
+            onOpenSpotifyLink={handleOpenSpotifyLink}
+            spotifyLinked={false}
+            spotifyAccountLabel=""
+            emailLinkingEnabled={false}
+            onRequestRecoveryModal={handleOpenRecoveryOptions}
+            showBackupPrompt={showBackupReminder}
           />
+        ) : (
+          <>
+            {screen === 'landing' && (
+              <section aria-labelledby="landing-title">
+                <h1 id="landing-title" style={{ marginTop: 0 }}>Get started</h1>
+                <p style={{ color: 'var(--muted)' }}>
+                  Paste a Spotify / YouTube / SoundCloud <strong>playlist</strong> URL to import a snapshot and start adding notes.
+                </p>
+
+                <form onSubmit={handleImport} aria-describedby={importError ? 'import-error' : undefined}>
+                  <div style={{ display: 'grid', gap: 8, alignItems: 'start', gridTemplateColumns: '1fr auto' }}>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label htmlFor="playlist-url" style={{ display: 'block', marginBottom: 6 }}>Playlist URL</label>
+                      <input
+                        id="playlist-url"
+                        ref={importInputRef}
+                        type="url"
+                        inputMode="url"
+                        placeholder="https://open.spotify.com/playlist/..."
+                        autoComplete="off"
+                        value={importUrl}
+                        onChange={handleImportUrlChange}
+                        style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
+                        aria-invalid={!!importError}
+                      />
+                      {importError && (
+                        <div id="import-error" className="error-text" style={{ marginTop: 6 }}>
+                          {importError}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="chip">
+                        <span className="chip-dot" style={{ background: providerChip ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
+                        {providerChip ? providerChip : 'no match'}
+                      </span>
+                    </div>
+
+                    <div style={{ justifySelf: 'end' }}>
+                      <button
+                        type="submit"
+                        className="btn primary"
+                        disabled={isAnyImportBusy}
+                        aria-busy={showInitialSpinner ? 'true' : 'false'}
+                      >
+                        {showInitialSpinner ? 'Importing...' : 'Import playlist'}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+
+                <RecentPlaylists
+                  items={recentPlaylists}
+                  onSelect={handleSelectRecent}
+                  cardState={recentCardState}
+                  disabled={isAnyImportBusy}
+                />
+              </section>
+            )}
+
+            {screen === 'playlist' && (
+              <PlaylistView
+                playlistTitle={playlistTitle}
+                importedAt={importedAt}
+                importMeta={importMeta}
+                tracks={tracks}
+                isAnyImportBusy={isAnyImportBusy}
+                showReimportSpinner={showReimportSpinner}
+                showLoadMoreSpinner={showLoadMoreSpinner}
+                pending={pending}
+                isPending={isPending}
+                editingState={{ editingId, draft, error }}
+                onDraftChange={handleDraftChange}
+                onAddNote={onAddNote}
+                onSaveNote={onSaveNote}
+                onCancelNote={onCancelNote}
+                onDeleteNote={onDeleteNote}
+                onAddTag={handleAddTag}
+                onRemoveTag={handleRemoveTag}
+                stockTags={STOCK_TAGS}
+                customTags={allCustomTags}
+                onUndo={undoInline}
+                onDismissUndo={expireInline}
+                onReimport={handleReimport}
+                onClear={handleClearAll}
+                onBack={handleBackToLanding}
+                canReimport={Boolean(lastImportUrl)}
+                reimportBtnRef={reimportBtnRef}
+                loadMoreBtnRef={loadMoreBtnRef}
+                onLoadMore={handleLoadMore}
+              />
+            )}
+          </>
         )}
       </main>
 
@@ -1845,7 +2037,7 @@ export default function App() {
         open={showRecoveryModal}
         code={recoveryCode}
         onAcknowledge={handleRecoveryModalConfirm}
-        onCopy={() => announce('Recovery code copied to clipboard.')}
+        onCopy={() => announce('Recovery code copied.')}
         onDownload={() => announce('Recovery code downloaded.')}
       />
       <RestoreDialog

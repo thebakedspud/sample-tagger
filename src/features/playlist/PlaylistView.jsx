@@ -70,10 +70,10 @@ export default function PlaylistView({
     <section aria-labelledby="playlist-title">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h2 id="playlist-title" aria-label={cleanTitle} style={{ marginTop: 0, marginBottom: 0 }}>
+          <h1 id="playlist-title" aria-label={cleanTitle} style={{ marginTop: 0, marginBottom: 0 }}>
             {hasMockPrefix && <span aria-hidden="true">{MOCK_PREFIX}</span>}
             {cleanTitle}
-          </h2>
+          </h1>
           {importedAt && (
             <span className="chip">
               {tracks.length} tracks - imported {new Date(importedAt).toLocaleDateString()}{' '}
