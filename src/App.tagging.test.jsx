@@ -43,6 +43,9 @@ vi.mock('./lib/deviceState.js', () => ({
   getStoredRecoveryCode: () => null,
   hasAcknowledgedRecovery: () => false,
   markRecoveryAcknowledged: () => {},
+  getRecoveryAcknowledgement: () => null,
+  ensureRecoveryCsrfToken: () => 'csrf-token',
+  clearRecoveryAcknowledgement: () => {},
   clearDeviceContext: () => {},
 }))
 

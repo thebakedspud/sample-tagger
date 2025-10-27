@@ -74,7 +74,7 @@ describe('PlaylistView', () => {
     render(<PlaylistView {...props} />)
 
     expect(
-      screen.getByRole('heading', { level: 2, name: /my playlist/i })
+      screen.getByRole('heading', { level: 1, name: /my playlist/i })
     ).toBeInTheDocument()
 
     const lists = screen.getAllByRole('list')
