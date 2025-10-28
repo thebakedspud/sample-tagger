@@ -1880,9 +1880,6 @@ export default function App() {
                 Account
               </button>
             </nav>
-            <button type="button" className="btn" onClick={openRestoreDialog}>
-              Have a code?
-            </button>
           </div>
         </div>
       </header>
