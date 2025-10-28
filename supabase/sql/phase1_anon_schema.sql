@@ -118,6 +118,18 @@ alter table public.anon_identities
 create index if not exists anon_identities_recovery_fingerprint_idx
   on public.anon_identities (recovery_code_fingerprint);
 
+alter table public.anon_identities
+  add column if not exists recovery_prev_fingerprint text;
+
+create index if not exists anon_identities_prev_recovery_idx
+  on public.anon_identities (recovery_prev_fingerprint);
+
+alter table public.anon_identities
+  add column if not exists recovery_rotated_at timestamptz;
+
+alter table public.anon_identities
+  add column if not exists recovery_rotated_by_ip text;
+
 -- Helpful indexes
 create index if not exists notes_anon_track_idx on public.notes (anon_id, track_id);
 create index if not exists anon_device_links_anon_idx on public.anon_device_links (anon_id);

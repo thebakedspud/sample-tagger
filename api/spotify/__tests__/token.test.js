@@ -77,7 +77,7 @@ beforeEach(() => {
   vi.resetModules();
   process.env.SPOTIFY_CLIENT_ID = 'id';
   process.env.SPOTIFY_CLIENT_SECRET = 'secret';
-  process.env.SPOTIFY_TOKEN_ALLOWED_ORIGINS = 'http://localhost:5173,https://sample-tagger.vercel.app';
+  process.env.SPOTIFY_TOKEN_ALLOWED_ORIGINS = 'http://localhost:5173,https://playlist-notes.vercel.app';
   vi.spyOn(console, 'debug').mockImplementation(() => {});
 });
 

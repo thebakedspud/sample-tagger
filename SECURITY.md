@@ -1,6 +1,6 @@
 # Security Policy
 
-Sample Tagger is an early-stage prototype. Security practices evolve alongside product milestones and the growing anonymous device/recovery flows.
+Playlist Notes is an early-stage prototype. Security practices evolve alongside product milestones and the growing anonymous device/recovery flows.
 
 ---
 

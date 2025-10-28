@@ -26,14 +26,14 @@ describe('TagInput', () => {
     const { input } = setup()
     fireEvent.change(input, { target: { value: 'dr' } })
     const options = screen.getAllByRole('option').map((option) => option.textContent)
-    expect(options.slice(0, 3)).toEqual(['drill', 'dreamy', 'drums'])
+    expect(options.slice(0, 3)).toEqual(['drums', 'dreamy', 'drone'])
   })
 
   it('omits existing tags from the suggestion list', () => {
-    const { input } = setup({ existingTags: ['drill'] })
+    const { input } = setup({ existingTags: ['drums'] })
     fireEvent.change(input, { target: { value: 'dr' } })
     const optionTexts = screen.getAllByRole('option').map((option) => option.textContent)
-    expect(optionTexts).not.toContain('drill')
+    expect(optionTexts).not.toContain('drums')
   })
 
   it('normalizes the selected tag before calling onAdd', () => {

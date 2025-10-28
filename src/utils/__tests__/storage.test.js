@@ -8,6 +8,8 @@ import {
   removeTag,
   saveAppState,
   saveRecent,
+  getFontPreference,
+  setFontPreference,
   upsertRecent,
 } from '../storage.js';
 
@@ -57,7 +59,7 @@ describe('storage cursors', () => {
       importedAt: null,
     });
 
-    const raw = globalThis.localStorage.getItem('sta:v5');
+    const raw = globalThis.localStorage.getItem('sta:v6');
     expect(raw).toBeTypeOf('string');
 
     const parsed = JSON.parse(raw);
@@ -81,7 +83,7 @@ describe('storage cursors', () => {
       importedAt: null,
     });
 
-    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v5'));
+    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v6'));
     expect(parsed.importMeta.cursor).toBeNull();
 
     const restored = loadAppState();
@@ -102,7 +104,7 @@ describe('storage cursors', () => {
       importedAt: null,
     });
 
-    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v5'));
+    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v6'));
     expect(parsed.notesByTrack['sp:track:1']).toEqual(['First note']);
     expect(parsed.notesByTrack['sp:track:2']).toEqual(['Second note']);
 
@@ -126,7 +128,7 @@ describe('storage cursors', () => {
       importedAt: null,
     });
 
-    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v5'));
+    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v6'));
     expect(parsed.tagsByTrack['sp:track:1']).toEqual(['drill']);
     expect(parsed.tagsByTrack['sp:track:2']).toEqual(['808', 'dark']);
 
@@ -135,7 +137,37 @@ describe('storage cursors', () => {
     expect(restored?.tagsByTrack['sp:track:2']).toEqual(['808', 'dark']);
   });
 
-  it('migrates v4 payloads to v5 and normalizes tags', () => {
+  it('adds default font preference when migrating prior versions', () => {
+    const legacy = {
+      version: 5,
+      theme: 'dark',
+      playlistTitle: 'Legacy Fonts',
+      importedAt: null,
+      lastImportUrl: '',
+      tracks: [],
+      importMeta: {},
+      notesByTrack: {},
+      tagsByTrack: {},
+      recentPlaylists: [],
+    };
+    globalThis.localStorage.setItem('sta:v5', JSON.stringify(legacy));
+
+    const migrated = loadAppState();
+    expect(migrated?.uiPrefs.font).toBe('default');
+
+    const stored = JSON.parse(globalThis.localStorage.getItem('sta:v6'));
+    expect(stored.uiPrefs.font).toBe('default');
+  });
+
+  it('persists font preference via helpers', () => {
+    expect(getFontPreference()).toBe('default');
+    setFontPreference('system');
+    expect(getFontPreference()).toBe('system');
+    const stored = JSON.parse(globalThis.localStorage.getItem('sta:v6'));
+    expect(stored.uiPrefs.font).toBe('system');
+  });
+
+  it('migrates v4 payloads to v6 and normalizes tags', () => {
     const legacy = {
       version: 4,
       theme: 'dark',
@@ -152,14 +184,14 @@ describe('storage cursors', () => {
 
     const migrated = loadAppState();
 
-    expect(migrated?.version).toBe(5);
+    expect(migrated?.version).toBe(6);
     expect(migrated?.playlistTitle).toBe('Legacy v4');
     expect(migrated?.tagsByTrack['t1']).toEqual(['drill']);
 
-    const newRaw = globalThis.localStorage.getItem('sta:v5');
+    const newRaw = globalThis.localStorage.getItem('sta:v6');
     expect(newRaw).not.toBeNull();
     const parsed = JSON.parse(newRaw);
-    expect(parsed.version).toBe(5);
+    expect(parsed.version).toBe(6);
   });
 });
 

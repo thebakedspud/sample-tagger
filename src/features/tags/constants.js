@@ -3,24 +3,6 @@
 
 /** @type {string[]} */
 export const STOCK_TAGS = [
-  // Genre
-  'drill',
-  'trap',
-  'boom-bap',
-  'lofi',
-  'ambient',
-  'r&b',
-  'uk-drill',
-  'jersey',
-  'afrobeat',
-  // Mood
-  'dark',
-  'uplifting',
-  'aggressive',
-  'chill',
-  'melancholic',
-  'energetic',
-  'dreamy',
   // Instruments
   'piano',
   'guitar',
@@ -31,6 +13,14 @@ export const STOCK_TAGS = [
   'brass',
   'synth',
   'bass',
+  // Mood
+  'dark',
+  'uplifting',
+  'aggressive',
+  'chill',
+  'melancholic',
+  'energetic',
+  'dreamy',
   // Use case
   'intro',
   'hook',

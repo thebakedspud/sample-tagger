@@ -98,11 +98,29 @@ export default async function handler(req, res) {
 
   const { data, error } = await supabaseAdmin
     .from('anon_identities')
-    .select('anon_id, recovery_code_hash')
+    .select('anon_id, recovery_code_hash, recovery_rotated_at')
     .eq('recovery_code_fingerprint', fingerprint)
     .maybeSingle();
 
-  if (error || !data?.anon_id) {
+  if (error) {
+    console.error('[restore] lookup failed', error);
+    return res.status(500).json({ error: 'Failed to verify recovery code' });
+  }
+
+  if (!data?.anon_id) {
+    const { data: replaced } = await supabaseAdmin
+      .from('anon_identities')
+      .select('anon_id, recovery_rotated_at')
+      .eq('recovery_prev_fingerprint', fingerprint)
+      .maybeSingle();
+
+    if (replaced?.anon_id) {
+      return res.status(410).json({
+        error: 'Recovery code was replaced.',
+        rotatedAt: replaced.recovery_rotated_at ?? null,
+      });
+    }
+
     return res.status(401).json({ error: 'Invalid recovery code' });
   }
 

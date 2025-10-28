@@ -9,13 +9,12 @@
   --btn-fg: #fff;
   --border: #dcdce4;
   --shadow: 0 2px 8px rgba(0,0,0,.06);
-  --font: sans-serif;
 }
 
 /* Make body use the theme colors */
 body {
   margin: 0;
-  font-family: var(--font);
+  font-family: var(--font-body, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif);
   background: var(--bg);
   color: var(--fg);
 }

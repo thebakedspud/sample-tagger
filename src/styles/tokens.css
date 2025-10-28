@@ -3,5 +3,33 @@
   --space-1: 8px;
   --space-2: 12px;
   --space-3: 16px;
+  /* Typography stacks */
+  --font-default: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-system: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans';
+  --font-dyslexic: 'Lexend Deca', var(--font-system);
+  --font-body: var(--font-default);
   /* Reuse existing theme vars like --bg, --fg, --card, --border */
+}
+
+html[data-font='default'] {
+  --font-body: var(--font-default);
+}
+
+html[data-font='system'] {
+  --font-body: var(--font-system);
+}
+
+html[data-font='dyslexic'] {
+  --font-body: var(--font-dyslexic);
+}
+
+body {
+  font-family: var(--font-body, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif);
+}
+
+html[data-font='dyslexic'] body {
+  letter-spacing: 0.02em;
+  word-spacing: 0.04em;
+  font-variant-ligatures: none;
 }
