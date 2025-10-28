@@ -3,7 +3,7 @@
 
 const DEFAULT_ALLOWED_ORIGINS = Object.freeze([
   'http://localhost:5173',
-  'https://sample-tagger.vercel.app',
+  'https://playlist-notes.vercel.app',
 ]);
 
 // Allow all Vercel previews and the Vercel feedback overlay by default.

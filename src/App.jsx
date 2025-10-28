@@ -1474,7 +1474,7 @@ export default function App() {
       const json = JSON.stringify(payload, null, 2)
       const blob = new Blob([json], { type: 'application/json' })
       const timestamp = new Date().toISOString().replace(/[:]/g, '-')
-      const suggestedName = `sample-tagger-notes-${timestamp}.json`
+      const suggestedName = `playlist-notes-backup-${timestamp}.json`
 
       if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
         try {
@@ -1483,7 +1483,7 @@ export default function App() {
             suggestedName,
             types: [
               {
-                description: 'Sample Tagger notes backup',
+              description: 'Playlist Notes backup',
                 accept: { 'application/json': ['.json'] },
               },
             ],
@@ -1847,7 +1847,7 @@ export default function App() {
             flexWrap: 'wrap',
           }}
         >
-          <p className="app-title">Sample Tagger</p>
+          <p className="app-title">Playlist Notes</p>
           <div className="app-header__actions">
             <nav className="app-nav" aria-label="Primary navigation">
               <button

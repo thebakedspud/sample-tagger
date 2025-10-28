@@ -1,6 +1,6 @@
 # Security Policy Reference
 
-Sample Tagger is a React + Vite prototype deployed on Vercel. It imports public playlists, stores notes locally, and exposes two anonymous endpoints: `/api/anon/bootstrap` issues device/recovery codes, and `/api/anon/restore` redeems them. There is still no full user account system or database, but we now handle short-lived secrets for these flows. This document captures the guardrails we follow today and the improvements we plan as the app grows. Review it before shipping changes to authentication, data access, or infrastructure.
+Playlist Notes is a React + Vite prototype deployed on Vercel. It imports public playlists, stores notes locally, and exposes two anonymous endpoints: `/api/anon/bootstrap` issues device/recovery codes, and `/api/anon/restore` redeems them. There is still no full user account system or database, but we now handle short-lived secrets for these flows. This document captures the guardrails we follow today and the improvements we plan as the app grows. Review it before shipping changes to authentication, data access, or infrastructure.
 
 ---
 
@@ -8,7 +8,7 @@ Sample Tagger is a React + Vite prototype deployed on Vercel. It imports public 
 
 - File a private report via GitHub's **Security -> Report a vulnerability** workflow. Please avoid public issues for security bugs.
 - Include reproduction steps, affected endpoints, and any logs or screenshots that demonstrate impact.
-- If GitHub's channel is unavailable, contact the maintainer directly with the subject "Sample Tagger Security".
+- If GitHub's channel is unavailable, contact the maintainer directly with the subject "Playlist Notes Security".
 - We aim to acknowledge reports within two business days and keep reporters updated until resolution.
 
 ---

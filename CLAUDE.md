@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Sample Tagger** is an accessibility-first playlist annotator built with React + Vite. Users import public playlists from Spotify/YouTube/SoundCloud, add per-track notes and tags, and sync those annotations across devices via anonymous device IDs and recovery codes.
+**Playlist Notes** is an accessibility-first playlist annotator built with React + Vite. Users import public playlists from Spotify/YouTube/SoundCloud, add per-track notes and tags, and sync those annotations across devices via anonymous device IDs and recovery codes.
 
 Key capabilities:
 - Import playlists through adapter registry (Spotify, YouTube, SoundCloud)

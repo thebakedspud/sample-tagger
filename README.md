@@ -1,10 +1,10 @@
-# Sample Tagger (Prototype)
+# Playlist Notes (Prototype)
 
 A minimal, accessibility-first playlist annotator built with React + Vite.
 
 [![Tests](https://github.com/thebakedspud/sample-tagger/actions/workflows/test.yml/badge.svg)](https://github.com/thebakedspud/sample-tagger/actions/workflows/test.yml)
 
-Sample Tagger helps you import a playlist, annotate tracks, and keep those notes accessible across sessions. It started as a UX accessibility exercise and now includes recovery, recents, and backup tooling.
+Playlist Notes helps you import a playlist, annotate tracks, and keep those notes accessible across sessions. It started as a UX accessibility exercise and now includes recovery, recents, and backup tooling.
 
 Current capabilities:
 

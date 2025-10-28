@@ -70,7 +70,7 @@ export default function RecoveryModal({
     const now = new Date();
     const humanTime = now.toLocaleString();
     const contents = [
-      'Sample Tagger — Recovery Code',
+      'Playlist Notes — Recovery Code',
       `Generated: ${humanTime}`,
       '',
       `Recovery code: ${code}`,
@@ -83,7 +83,7 @@ export default function RecoveryModal({
     const timestampSlug = now.toISOString().replace(/[:.]/g, '-');
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `sample-tagger-recovery-${timestampSlug}.txt`;
+    anchor.download = `playlist-notes-recovery-${timestampSlug}.txt`;
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
