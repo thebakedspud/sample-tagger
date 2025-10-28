@@ -412,8 +412,14 @@
 
 .app-title {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+#landing-title {
+  font-size: 1.25rem;
   font-weight: 600;
+  color: var(--fg);
 }
 
 .app .btn.destructive {

@@ -1847,7 +1847,7 @@ export default function App() {
             flexWrap: 'wrap',
           }}
         >
-          <p className="app-title">Playlist Notes</p>
+          <h1 className="app-title">Playlist Notes</h1>
           <div className="app-header__actions">
             <nav className="app-nav" aria-label="Primary navigation">
               <button
@@ -1908,7 +1908,7 @@ export default function App() {
           <>
             {screen === 'landing' && (
               <section aria-labelledby="landing-title">
-                <h1 id="landing-title" style={{ marginTop: 0 }}>Get started</h1>
+                <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
                 <p style={{ color: 'var(--muted)' }}>
                   Paste a Spotify / YouTube / SoundCloud <strong>playlist</strong> URL to import a snapshot and start adding notes.
                 </p>
