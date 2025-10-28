@@ -10,27 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <script>
-      (() => {
-        const FONT_KEY = 'sta:v6';
-        const LEGACY_KEY = 'sta:v5';
-        const FALLBACK = 'default';
-        let font = FALLBACK;
-        try {
-          const raw = localStorage.getItem(FONT_KEY) ?? localStorage.getItem(LEGACY_KEY);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            const candidate = parsed?.uiPrefs?.font;
-            if (candidate === 'system' || candidate === 'dyslexic' || candidate === 'default') {
-              font = candidate;
-            }
-          }
-        } catch {
-          font = FALLBACK;
-        }
-        document.documentElement.setAttribute('data-font', font);
-      })();
-    </script>
+    <script src="/font-boot.js"></script>
     <title>Vite + React</title>
   </head>
   <body>
