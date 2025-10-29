@@ -4,6 +4,7 @@ import LiveRegion from './components/LiveRegion.jsx'
 import RecoveryModal from './components/RecoveryModal.jsx'
 import RestoreDialog from './components/RestoreDialog.jsx'
 import RecentPlaylists from './features/recent/RecentPlaylists.jsx'
+import ErrorMessage from './components/ErrorMessage.jsx'
 import {
   loadAppState,
   saveAppState,
@@ -2265,11 +2266,9 @@ useEffect(() => {
                         style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
                         aria-invalid={!!importError}
                       />
-                      {importError && (
-                        <div id="import-error" className="error-text" style={{ marginTop: 6 }}>
-                          {importError}
-                        </div>
-                      )}
+                      <ErrorMessage id="import-error">
+                        {importError}
+                      </ErrorMessage>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

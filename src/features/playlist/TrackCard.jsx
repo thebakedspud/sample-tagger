@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import NoteList from './NoteList.jsx'
 import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
+import ErrorMessage from '../../components/ErrorMessage.jsx'
 
 /**
  * @param {object} props
@@ -371,11 +372,9 @@ export default function TrackCard({
               color: 'var(--fg)',
             }}
           />
-          {error && (
-            <div id={`note-error-${track.id}`} className="error-text">
-              {error}
-            </div>
-          )}
+          <ErrorMessage id={`note-error-${track.id}`}>
+            {error}
+          </ErrorMessage>
           <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
             <button type="button" className="btn primary" onClick={() => onSaveNote(track.id)}>
               Save note

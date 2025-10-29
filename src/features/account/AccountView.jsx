@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ThemeToggle from '../../components/ThemeToggle.jsx';
 import FontSettings from '../../components/display/FontSettings.jsx';
+import ErrorMessage from '../../components/ErrorMessage.jsx';
 
 function maskCodeSegment(segment, index, segments) {
   if (!segment) return '';
@@ -175,11 +176,9 @@ export default function AccountView({
             Backup options
           </button>
         </div>
-        {regenerationError && (
-          <p role="alert" className="account-summary__error">
-            {regenerationError}
-          </p>
-        )}
+        <ErrorMessage className="account-summary__error">
+          {regenerationError}
+        </ErrorMessage>
         {showBackupPrompt && (
           <div className="account-summary__backup">
             <p>
