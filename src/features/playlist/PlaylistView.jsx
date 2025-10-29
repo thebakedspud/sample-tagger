@@ -1,3 +1,7 @@
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import focusById from '../../utils/focusById.js'
+import SearchFilterBar from '../filter/SearchFilterBar.jsx'
+import useTrackFilter from '../filter/useTrackFilter.js'
 import TrackCard from './TrackCard.jsx'
 
 /**
@@ -30,6 +34,7 @@ import TrackCard from './TrackCard.jsx'
  * @param {() => void} props.onLoadMore
  * @param {string[]} props.stockTags
  * @param {string[]} props.customTags
+ * @param {(message: string) => void} props.announce
  */
 export default function PlaylistView({
   playlistTitle,
@@ -60,11 +65,86 @@ export default function PlaylistView({
   onLoadMore,
   stockTags,
   customTags,
+  announce,
 }) {
   const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
   const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
   const cleanTitle = hasMockPrefix ? playlistTitle.slice(MOCK_PREFIX.length) : playlistTitle
   const showLoadMore = Boolean(importMeta?.hasMore && importMeta?.cursor)
+
+  const searchInputRef = useRef(null)
+  const availableTags = useMemo(() => {
+    const bucket = new Set()
+    if (Array.isArray(stockTags)) {
+      stockTags.forEach((tag) => {
+        if (typeof tag === 'string' && tag.trim()) bucket.add(tag)
+      })
+    }
+    if (Array.isArray(customTags)) {
+      customTags.forEach((tag) => {
+        if (typeof tag === 'string' && tag.trim()) bucket.add(tag)
+      })
+    }
+    return Array.from(bucket).sort((a, b) => a.localeCompare(b))
+  }, [stockTags, customTags])
+
+  const {
+    query,
+    setQuery,
+    scope,
+    setScope,
+    sort,
+    setSort,
+    selectedTags,
+    toggleTag,
+    hasNotesOnly,
+    setHasNotesOnly,
+    filteredTracks,
+    totalCount,
+    filteredCount,
+    hasActiveFilters,
+    clearFilters,
+    summaryText,
+    emptyMessage,
+  } = useTrackFilter({
+    tracks,
+    provider: importMeta?.provider ?? null,
+    playlistId: importMeta?.playlistId ?? null,
+    snapshotId: importMeta?.snapshotId ?? null,
+    announce,
+  })
+
+  useEffect(() => {
+    if (!Array.isArray(tracks) || tracks.length === 0) return
+    if (filteredTracks.length === 0) {
+      searchInputRef.current?.focus()
+      return
+    }
+    const active = document.activeElement
+    if (!active || typeof active.closest !== 'function') return
+    const container = active.closest('[data-track-id]')
+    if (!container) return
+    const activeId = container.getAttribute('data-track-id')
+    if (!activeId) return
+    const stillVisible = filteredTracks.some((track) => String(track.id) === activeId)
+    if (!stillVisible) {
+      const firstId = filteredTracks[0]?.id
+      if (firstId != null) {
+        focusById(`track-${firstId}`)
+      }
+    }
+  }, [filteredTracks, tracks])
+
+  const handleFilterTag = useCallback(
+    (tag) => {
+      if (!tag) return
+      toggleTag(tag)
+      searchInputRef.current?.focus()
+    },
+    [toggleTag],
+  )
+
+  const showFilteringBanner = showLoadMore && hasActiveFilters
 
   return (
     <section aria-labelledby="playlist-title">
@@ -76,7 +156,7 @@ export default function PlaylistView({
           </h1>
           {importedAt && (
             <span className="chip">
-              {tracks.length} tracks - imported {new Date(importedAt).toLocaleDateString()}{' '}
+              {totalCount} tracks - imported {new Date(importedAt).toLocaleDateString()}{' '}
               {new Date(importedAt).toLocaleTimeString()}
             </span>
           )}
@@ -104,29 +184,82 @@ export default function PlaylistView({
         </div>
       </div>
 
-      <ul style={{ padding: 0, listStyle: 'none' }}>
-        {tracks.map((track, index) => (
-          <TrackCard
-            key={track.id}
-            track={track}
-            index={index}
-            pending={pending}
-            isPending={isPending}
-            editingState={editingState}
-            onDraftChange={onDraftChange}
-            onAddNote={onAddNote}
-            onSaveNote={onSaveNote}
-            onCancelNote={onCancelNote}
-            onDeleteNote={onDeleteNote}
-            onAddTag={onAddTag}
-            onRemoveTag={onRemoveTag}
-            stockTags={stockTags}
-            customTags={customTags}
-            onUndo={onUndo}
-            onDismissUndo={onDismissUndo}
-          />
-        ))}
-      </ul>
+      <SearchFilterBar
+        query={query}
+        onQueryChange={setQuery}
+        scope={scope}
+        onScopeChange={setScope}
+        sort={sort}
+        onSortChange={setSort}
+        hasNotesOnly={hasNotesOnly}
+        onHasNotesToggle={setHasNotesOnly}
+        selectedTags={selectedTags}
+        onToggleTag={toggleTag}
+        availableTags={availableTags}
+        hasActiveFilters={hasActiveFilters}
+        onClearFilters={clearFilters}
+        summaryText={summaryText}
+        filteredCount={filteredCount}
+        totalCount={totalCount}
+        searchInputRef={searchInputRef}
+      />
+
+      {showFilteringBanner && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 12,
+            padding: '8px 12px',
+            background: 'var(--surface)',
+            borderRadius: 6,
+            border: '1px solid var(--border)',
+            color: 'var(--muted)',
+          }}
+        >
+          Filtering {filteredCount} of {tracks.length} loaded. Load more to widen search.
+        </div>
+      )}
+
+      {filteredTracks.length === 0 ? (
+        <div
+          role="status"
+          style={{
+            padding: 24,
+            border: '1px dashed var(--border)',
+            borderRadius: 8,
+            textAlign: 'center',
+            color: 'var(--muted)',
+            marginBottom: 16,
+          }}
+        >
+          {emptyMessage || 'No matches. Try clearing filters.'}
+        </div>
+      ) : (
+        <ul style={{ padding: 0, listStyle: 'none' }}>
+          {filteredTracks.map((track, index) => (
+            <TrackCard
+              key={track.id}
+              track={track}
+              index={index}
+              pending={pending}
+              isPending={isPending}
+              editingState={editingState}
+              onDraftChange={onDraftChange}
+              onAddNote={onAddNote}
+              onSaveNote={onSaveNote}
+              onCancelNote={onCancelNote}
+              onDeleteNote={onDeleteNote}
+              onAddTag={onAddTag}
+              onRemoveTag={onRemoveTag}
+              stockTags={stockTags}
+              customTags={customTags}
+              onUndo={onUndo}
+              onDismissUndo={onDismissUndo}
+              onFilterTag={handleFilterTag}
+            />
+          ))}
+        </ul>
+      )}
 
       {showLoadMore && (
         <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>

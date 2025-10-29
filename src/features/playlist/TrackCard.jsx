@@ -21,6 +21,7 @@ import TagInput from '../tags/TagInput.jsx'
  * @param {string[]} props.customTags
  * @param {(pendingId: string) => void} props.onUndo
  * @param {(pendingId: string) => void} props.onDismissUndo
+ * @param {(tag: string) => void} [props.onFilterTag]
  */
 export default function TrackCard({
   track,
@@ -39,6 +40,7 @@ export default function TrackCard({
   customTags = [],
   onUndo,
   onDismissUndo,
+  onFilterTag,
 }) {
   const noteArr = Array.isArray(track.notes) ? track.notes : []
   const tags = useMemo(
@@ -194,12 +196,15 @@ export default function TrackCard({
   }
 
   const handleFilterTag = (value) => {
-    console.log('filter', value)
+    if (typeof onFilterTag === 'function' && typeof value === 'string') {
+      onFilterTag(value)
+    }
   }
 
   return (
     <li
       id={`track-${track.id}`}
+      data-track-id={track.id}
       tabIndex={-1}
       style={{
         border: '1px solid var(--border)',

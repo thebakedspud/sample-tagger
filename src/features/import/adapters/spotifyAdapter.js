@@ -389,6 +389,9 @@ function toNormalizedTracks(rawItems, meta) {
     const albumImages = track.album?.images;
     const albumThumb =
       Array.isArray(albumImages) && albumImages[0]?.url ? albumImages[0].url : fallbackThumb;
+    const albumName =
+      track?.album && typeof track.album.name === 'string' ? track.album.name : undefined;
+    const addedAt = typeof item?.added_at === 'string' ? item.added_at : undefined;
 
     const normalized = normalizeTrack(
       {
@@ -400,6 +403,8 @@ function toNormalizedTracks(rawItems, meta) {
         sourceUrl: track.external_urls?.spotify ?? '',
         thumbnailUrl: albumThumb ?? undefined,
         provider: PROVIDER,
+        album: albumName,
+        dateAdded: addedAt,
       },
       out.length, // note: indices are page-local
       PROVIDER
