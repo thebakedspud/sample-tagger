@@ -1791,7 +1791,7 @@ useEffect(() => {
           }
         })
     },
-    [announce, cancelBackgroundPagination, handleLoadMore, msgFromCode, extractErrorCode],
+    [announce, cancelBackgroundPagination, handleLoadMore, msgFromCode],
   )
 
   useEffect(() => {

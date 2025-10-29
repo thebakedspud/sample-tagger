@@ -226,7 +226,7 @@ export default function useTrackFilter({
     restoreCandidateRef.current = null;
     setCanRestoreFilters(false);
     return true;
-  }, [normalizeSort]);
+  }, []);
 
   const dismissRestoreFilters = useCallback(() => {
     restoreCandidateRef.current = null;
@@ -284,7 +284,7 @@ export default function useTrackFilter({
 
   const updateSort = useCallback((nextSort) => {
     setSortState(normalizeSort(nextSort));
-  }, [normalizeSort]);
+  }, []);
 
   const toggleTag = useCallback((tag) => {
     if (typeof tag !== 'string') return;
