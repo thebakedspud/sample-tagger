@@ -5,7 +5,7 @@ import TagInput from '../tags/TagInput.jsx'
 
 /**
  * @param {object} props
- * @param {{ id: string|number, title: string, artist: string, notes: string[], tags?: string[] }} props.track
+ * @param {{ id: string|number, title: string, artist: string, notes: string[], tags?: string[], dateAdded?: string }} props.track
  * @param {number} props.index
  * @param {Map<string, any>} props.pending
  * @param {(id: string) => boolean} props.isPending
@@ -69,6 +69,23 @@ export default function TrackCard({
         - {noteArr.length} note{noteArr.length > 1 ? 's' : ''}
       </span>
     ) : null
+
+  const dateAdded = useMemo(() => {
+    const raw = typeof track?.dateAdded === 'string' ? track.dateAdded.trim() : ''
+    if (!raw) return null
+    const parsed = Date.parse(raw)
+    if (Number.isNaN(parsed)) return null
+    const asDate = new Date(parsed)
+    const formatter = new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    })
+    return {
+      iso: asDate.toISOString(),
+      label: formatter.format(asDate),
+    }
+  }, [track?.dateAdded])
 
   const fallbackInitial =
     typeof track.title === 'string' && track.title.trim()
@@ -276,6 +293,13 @@ export default function TrackCard({
           </button>
         </div>
       </div>
+
+      {dateAdded && (
+        <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: '0.85rem' }}>
+          <span className="sr-only">Date added:</span>
+          <time dateTime={dateAdded.iso}>Added {dateAdded.label}</time>
+        </p>
+      )}
 
       <div
         className="tag-row"
