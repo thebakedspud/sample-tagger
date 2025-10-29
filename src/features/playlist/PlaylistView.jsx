@@ -6,6 +6,19 @@ import { SORT_KEY } from '../filter/filterTracks.js'
 import TrackCard from './TrackCard.jsx'
 
 /**
+ * @typedef {'idle'|'pending'|'loading'|'complete'|'error'} BackgroundSyncStatus
+ * @typedef {{ status: BackgroundSyncStatus, loaded: number, total: number|null, lastError: string|null }} BackgroundSyncState
+ */
+
+/** @type {BackgroundSyncState} */
+const DEFAULT_BACKGROUND_SYNC = {
+  status: 'idle',
+  loaded: 0,
+  total: null,
+  lastError: null,
+}
+
+/**
  * @param {object} props
  * @param {string} props.playlistTitle
  * @param {string|null} props.importedAt
@@ -36,7 +49,7 @@ import TrackCard from './TrackCard.jsx'
  * @param {string[]} props.stockTags
  * @param {string[]} props.customTags
 * @param {(message: string) => void} props.announce
- * @param {{ status: 'idle'|'pending'|'loading'|'complete'|'error', loaded: number, total: number|null, lastError: string|null }} [props.backgroundSync]
+ * @param {BackgroundSyncState} [props.backgroundSync]
  */
 export default function PlaylistView({
   playlistTitle,
@@ -68,7 +81,7 @@ export default function PlaylistView({
   stockTags,
   customTags,
   announce,
-  backgroundSync = { status: 'idle', loaded: 0, total: null, lastError: null },
+  backgroundSync = DEFAULT_BACKGROUND_SYNC,
 }) {
   const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
   const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)

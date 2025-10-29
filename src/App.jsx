@@ -69,6 +69,11 @@ const MAX_TAGS_PER_TRACK = 32
 const MAX_TAG_LENGTH = 24
 const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/
 
+/**
+ * @typedef {'idle' | 'pending' | 'loading' | 'complete' | 'error'} BackgroundSyncStatus
+ * @typedef {{ status: BackgroundSyncStatus, loaded: number, total: number|null, lastError: string|null }} BackgroundSyncState
+ */
+
 // Safe default importMeta shape (mirrors storage v3)
 const EMPTY_IMPORT_META = {
   provider: null,
@@ -513,6 +518,7 @@ useEffect(() => {
   )
   const tracksRef = useRef(tracks)
   const backgroundPagerRef = useRef(null)
+  /** @type {[BackgroundSyncState, import('react').Dispatch<import('react').SetStateAction<BackgroundSyncState>>]} */
   const [backgroundSync, setBackgroundSync] = useState(() => ({
     status: importMeta?.hasMore ? 'pending' : 'complete',
     loaded: PERSISTED_TRACKS.length,
@@ -524,6 +530,26 @@ useEffect(() => {
           : PERSISTED_TRACKS.length,
     lastError: null,
   }))
+
+  const cancelBackgroundPagination = useCallback(() => {
+    const controller = backgroundPagerRef.current
+    if (controller && typeof controller.cancel === 'function') {
+      try {
+        controller.cancel()
+      } catch {
+        // ignore cancellation errors
+      }
+    }
+    backgroundPagerRef.current = null
+    setBackgroundSync((prev) => {
+      const hasMore = Boolean(importMetaRef.current?.hasMore)
+      if (!hasMore) {
+        return { ...prev, status: 'complete', lastError: null }
+      }
+      if (prev.status === 'pending') return prev
+      return { ...prev, status: 'pending' }
+    })
+  }, [setBackgroundSync])
 
   const [recentPlaylists, setRecentPlaylists] = useState(() => INITIAL_RECENTS)
   const recentRef = useRef(recentPlaylists)
@@ -801,25 +827,6 @@ useEffect(() => {
     },
   })
 
-  const cancelBackgroundPagination = useCallback(() => {
-    const controller = backgroundPagerRef.current
-    if (controller && typeof controller.cancel === 'function') {
-      try {
-        controller.cancel()
-      } catch {
-        // ignore cancellation errors
-      }
-    }
-    backgroundPagerRef.current = null
-    setBackgroundSync((prev) => {
-      const hasMore = Boolean(importMetaRef.current?.hasMore)
-      if (!hasMore) {
-        return { ...prev, status: 'complete', lastError: null }
-      }
-      if (prev.status === 'pending') return prev
-      return { ...prev, status: 'pending' }
-    })
-  }, [setBackgroundSync])
 
   const {
     status: importStatus,
