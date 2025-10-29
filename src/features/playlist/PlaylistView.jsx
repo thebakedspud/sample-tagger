@@ -122,6 +122,9 @@ export default function PlaylistView({
     clearFilters,
     summaryText,
     emptyMessage,
+    canRestoreFilters,
+    restoreFilters,
+    dismissRestoreFilters,
   } = useTrackFilter({
     tracks,
     provider: importMeta?.provider ?? null,
@@ -247,6 +250,34 @@ export default function PlaylistView({
           }}
         >
           Filtering {filteredCount} of {tracks.length} loaded. Load more to widen search.
+        </div>
+      )}
+
+      {canRestoreFilters && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 12,
+            padding: '8px 12px',
+            background: 'var(--surface)',
+            borderRadius: 6,
+            border: '1px solid var(--border)',
+            color: 'var(--muted)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 12,
+            alignItems: 'center',
+          }}
+        >
+          <span>Filters from your previous import are available.</span>
+          <span style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="btn" onClick={restoreFilters}>
+              Restore filters
+            </button>
+            <button type="button" className="btn" onClick={dismissRestoreFilters}>
+              Dismiss
+            </button>
+          </span>
         </div>
       )}
 

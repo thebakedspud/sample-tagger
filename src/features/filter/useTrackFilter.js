@@ -146,6 +146,10 @@ export default function useTrackFilter({
     () => buildStorageKey(provider, playlistId, snapshotId),
     [provider, playlistId, snapshotId],
   );
+  const baseStorageKey = useMemo(
+    () => buildStorageKey(provider, playlistId, null),
+    [provider, playlistId],
+  );
 
   const stored = useMemo(() => loadStoredState(storageKey), [storageKey]);
 
@@ -160,19 +164,38 @@ export default function useTrackFilter({
   const [hasNotesOnly, setHasNotesOnly] = useState(
     stored?.hasNotesOnly ?? DEFAULT_FILTER_STATE.hasNotesOnly,
   );
+  const previousStorageKeyRef = useRef(storageKey);
+  const restoreCandidateRef = useRef(null);
+  const [canRestoreFilters, setCanRestoreFilters] = useState(false);
 
   // Rehydrate when playlist context changes.
   useEffect(() => {
+    const prevKey = previousStorageKeyRef.current;
+    if (prevKey === storageKey) return;
+    previousStorageKeyRef.current = storageKey;
+
     if (!storageKey) {
       setQuery(DEFAULT_FILTER_STATE.query);
       setScope(DEFAULT_FILTER_STATE.scope);
       setSortState(normalizeSort(DEFAULT_SORT));
       setSelectedTags([]);
       setHasNotesOnly(DEFAULT_FILTER_STATE.hasNotesOnly);
+      restoreCandidateRef.current = null;
+      setCanRestoreFilters(false);
       return;
     }
     const next = loadStoredState(storageKey);
     if (!next) {
+      let candidate = null;
+      // Extract the base prefix without the snapshotId part to prevent substring collisions
+      // baseStorageKey format: "sta:filters:spotify:123:null"
+      // We want: "sta:filters:spotify:123:" (exact boundary)
+      const basePrefix = baseStorageKey ? baseStorageKey.slice(0, -4) : null; // Remove "null"
+      if (prevKey && basePrefix && prevKey !== storageKey && prevKey.startsWith(basePrefix)) {
+        candidate = loadStoredState(prevKey);
+      }
+      restoreCandidateRef.current = candidate;
+      setCanRestoreFilters(Boolean(candidate));
       setQuery(DEFAULT_FILTER_STATE.query);
       setScope(DEFAULT_FILTER_STATE.scope);
       setSortState(normalizeSort(DEFAULT_SORT));
@@ -185,7 +208,30 @@ export default function useTrackFilter({
     setSortState(next.sort);
     setSelectedTags(next.selectedTags);
     setHasNotesOnly(next.hasNotesOnly);
-  }, [storageKey]);
+    restoreCandidateRef.current = null;
+    setCanRestoreFilters(false);
+  }, [storageKey, baseStorageKey]);
+
+  const restoreFilters = useCallback(() => {
+    const candidate = restoreCandidateRef.current;
+    if (!candidate) {
+      setCanRestoreFilters(false);
+      return false;
+    }
+    setQuery(candidate.query ?? DEFAULT_FILTER_STATE.query);
+    setScope(candidate.scope ?? DEFAULT_FILTER_STATE.scope);
+    setSortState(normalizeSort(candidate.sort ?? DEFAULT_SORT));
+    setSelectedTags(candidate.selectedTags ?? DEFAULT_FILTER_STATE.selectedTags);
+    setHasNotesOnly(candidate.hasNotesOnly ?? DEFAULT_FILTER_STATE.hasNotesOnly);
+    restoreCandidateRef.current = null;
+    setCanRestoreFilters(false);
+    return true;
+  }, [normalizeSort]);
+
+  const dismissRestoreFilters = useCallback(() => {
+    restoreCandidateRef.current = null;
+    setCanRestoreFilters(false);
+  }, []);
 
   const [debouncedQuery, setDebouncedQuery] = useState(() => query);
   useEffect(() => {
@@ -238,7 +284,7 @@ export default function useTrackFilter({
 
   const updateSort = useCallback((nextSort) => {
     setSortState(normalizeSort(nextSort));
-  }, []);
+  }, [normalizeSort]);
 
   const toggleTag = useCallback((tag) => {
     if (typeof tag !== 'string') return;
@@ -258,6 +304,8 @@ export default function useTrackFilter({
     setSortState(normalizeSort(DEFAULT_SORT));
     setSelectedTags([]);
     setHasNotesOnly(DEFAULT_FILTER_STATE.hasNotesOnly);
+    restoreCandidateRef.current = null;
+    setCanRestoreFilters(false);
     if (storageKey) {
       clearStoredState(storageKey);
     }
@@ -294,5 +342,8 @@ export default function useTrackFilter({
     liveSummary,
     summaryText: `Showing ${filteredCount} of ${totalCount} tracks`,
     emptyMessage,
+    canRestoreFilters,
+    restoreFilters,
+    dismissRestoreFilters,
   };
 }

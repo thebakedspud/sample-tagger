@@ -72,7 +72,7 @@ const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/
 
 /**
  * @typedef {'idle' | 'pending' | 'loading' | 'complete' | 'error'} BackgroundSyncStatus
- * @typedef {{ status: BackgroundSyncStatus, loaded: number, total: number|null, lastError: string|null }} BackgroundSyncState
+ * @typedef {{ status: BackgroundSyncStatus, loaded: number, total: number|null, lastError: string|null, snapshotId: string|null }} BackgroundSyncState
  */
 
 // Safe default importMeta shape (mirrors storage v3)
@@ -518,6 +518,7 @@ useEffect(() => {
     )
   )
   const tracksRef = useRef(tracks)
+  const initialFocusAppliedRef = useRef(false)
   const backgroundPagerRef = useRef(null)
   /** @type {[BackgroundSyncState, import('react').Dispatch<import('react').SetStateAction<BackgroundSyncState>>]} */
   const [backgroundSync, setBackgroundSync] = useState(() => ({
@@ -530,6 +531,7 @@ useEffect(() => {
           ? null
           : PERSISTED_TRACKS.length,
     lastError: null,
+    snapshotId: importMeta?.snapshotId ?? null,
   }))
 
   const cancelBackgroundPagination = useCallback(() => {
@@ -634,6 +636,8 @@ useEffect(() => {
 
       cancelBackgroundPagination()
 
+      initialFocusAppliedRef.current = false
+
       const mapped = Array.isArray(payload?.tracks) ? payload.tracks : []
       const meta = payload?.meta ?? {}
       const importedTimestamp = payload?.importedAt ?? null
@@ -685,11 +689,17 @@ useEffect(() => {
           focusById('playlist-title')
           return
         }
-        if (trackCount > 0 && mapped[0]?.id) {
+        if (
+          focusBehavior === 'first-track' &&
+          !initialFocusAppliedRef.current &&
+          trackCount > 0 &&
+          mapped[0]?.id
+        ) {
           focusById('add-note-btn-' + mapped[0].id)
-        } else {
-          focusById('playlist-title')
+          initialFocusAppliedRef.current = true
+          return
         }
+        focusById('playlist-title')
       })
 
       if (recents) {
@@ -720,6 +730,7 @@ useEffect(() => {
                 ? null
                 : mapped.length,
         lastError: null,
+        snapshotId: meta?.snapshotId ?? null,
       })
 
       return { trackCount, title: resolvedTitle }
@@ -751,35 +762,42 @@ useEffect(() => {
 
   useEffect(() => {
     setBackgroundSync((prev) => {
-      const nextTotal =
+      const loadedCount = Array.isArray(tracks) ? tracks.length : 0
+      const inferredTotal =
         typeof importMeta.total === 'number'
           ? importMeta.total
-          : prev.total ?? (importMeta.hasMore ? null : tracks.length)
-      if (prev.loaded === tracks.length && prev.total === nextTotal) {
+          : importMeta.hasMore
+            ? prev.total
+            : tracks.length
+
+      const nextStatus =
+        !importMeta.hasMore && prev.status !== 'error'
+          ? 'complete'
+          : importMeta.hasMore && prev.status === 'complete'
+            ? 'pending'
+            : prev.status
+
+      const nextLastError =
+        !importMeta.hasMore && prev.status !== 'error' ? null : prev.lastError
+
+      if (
+        prev.loaded === loadedCount &&
+        prev.total === inferredTotal &&
+        prev.status === nextStatus &&
+        prev.lastError === nextLastError
+      ) {
         return prev
       }
+
       return {
         ...prev,
-        loaded: tracks.length,
-        total: nextTotal,
+        loaded: loadedCount,
+        total: inferredTotal ?? null,
+        status: nextStatus,
+        lastError: nextLastError,
       }
     })
   }, [tracks, importMeta.total, importMeta.hasMore])
-
-  useEffect(() => {
-    setBackgroundSync((prev) => {
-      if (importMeta.hasMore) {
-        if (prev.status === 'loading' || prev.status === 'error' || prev.status === 'pending') {
-          return prev
-        }
-        return { ...prev, status: 'pending' }
-      }
-      if (prev.status === 'complete' && prev.lastError == null) {
-        return prev
-      }
-      return { ...prev, status: 'complete', lastError: null }
-    })
-  }, [importMeta.hasMore])
 
   const {
     pending,
@@ -1688,33 +1706,54 @@ useEffect(() => {
     [announce, cancelBackgroundPagination, loadMoreTracks, msgFromCode],
   )
 
-  useEffect(() => {
-    if (screen !== 'playlist') return
-    if (!importMeta.hasMore || !importMeta.cursor) return
-    if (backgroundSync.status === 'error') return
-    if (!lastImportUrl) return
-    if (importStatus !== ImportFlowStatus.IDLE) return
-    if (backgroundPagerRef.current) return
+  const startBackgroundPagination = useCallback(
+    (metaOverride) => {
+      const meta = metaOverride ?? importMetaRef.current
+      const snapshotId = meta?.snapshotId ?? null
+      const hasMore = Boolean(meta?.hasMore && meta?.cursor)
+      const sourceUrl = lastImportUrlRef.current
 
-    let cancelled = false
-    const controller = {
-      cancel: () => {
-        cancelled = true
-      },
-    }
-    backgroundPagerRef.current = controller
-    setBackgroundSync((prev) => ({
-      ...prev,
-      status: 'loading',
-      lastError: null,
-    }))
+      if (!hasMore || !sourceUrl) {
+        setBackgroundSync((prev) => ({
+          ...prev,
+          status: 'complete',
+          lastError: null,
+        }))
+        return
+      }
 
-    const run = async () => {
-      while (!cancelled) {
-        try {
+      cancelBackgroundPagination()
+
+      let cancelled = false
+      const controller = {
+        cancel: () => {
+          cancelled = true
+        },
+      }
+      backgroundPagerRef.current = controller
+
+      setBackgroundSync((prev) => ({
+        ...prev,
+        status: 'loading',
+        lastError: null,
+      }))
+
+      const loop = async () => {
+        while (!cancelled) {
+          const currentMeta = importMetaRef.current
+          if (!currentMeta || currentMeta.snapshotId !== snapshotId) {
+            break
+          }
+          if (!currentMeta.hasMore || !currentMeta.cursor) {
+            break
+          }
+
           const result = await handleLoadMore({ mode: 'background' })
           if (!result) break
-          if (result.stale || result.aborted) break
+          if (result.aborted) return
+          if (result.stale) {
+            continue
+          }
           if (!result.ok) {
             const msg = msgFromCode(result.code ?? CODES.ERR_UNKNOWN)
             setBackgroundSync((prevState) => ({
@@ -1724,72 +1763,59 @@ useEffect(() => {
             }))
             return
           }
-          if (result.done) {
-            break
-          }
-        } catch (err) {
-          if (err?.name === 'AbortError') {
-            return
-          }
+        }
+
+        if (!cancelled) {
+          setBackgroundSync((prevState) => ({
+            ...prevState,
+            status: 'complete',
+            lastError: null,
+          }))
+          announce('All tracks loaded; order complete.')
+        }
+      }
+
+      loop()
+        .catch((err) => {
+          if (err?.name === 'AbortError') return
           const msg = msgFromCode(extractErrorCode(err))
           setBackgroundSync((prevState) => ({
             ...prevState,
             status: 'error',
             lastError: msg,
           }))
-          return
-        }
-      }
-    }
+        })
+        .finally(() => {
+          if (backgroundPagerRef.current === controller) {
+            backgroundPagerRef.current = null
+          }
+        })
+    },
+    [announce, cancelBackgroundPagination, handleLoadMore, msgFromCode, extractErrorCode],
+  )
 
-    run()
-      .catch((err) => {
-        if (err?.name === 'AbortError') return
-        const msg = msgFromCode(extractErrorCode(err))
-        setBackgroundSync((prevState) => ({
-          ...prevState,
-          status: 'error',
-          lastError: msg,
-        }))
-      })
-      .finally(() => {
-        if (backgroundPagerRef.current === controller) {
-          backgroundPagerRef.current = null
-        }
-        const hasMore = Boolean(importMetaRef.current?.hasMore)
-        setBackgroundSync((prevState) => ({
-          ...prevState,
-          status:
-            prevState.status === 'error'
-              ? prevState.status
-              : hasMore
-                ? cancelled
-                  ? 'pending'
-                  : 'pending'
-                : 'complete',
-          lastError: hasMore ? prevState.lastError : null,
-        }))
-        if (!hasMore && !cancelled) {
-          announce('All tracks loaded; order complete.')
-        }
-      })
+  useEffect(() => {
+    const meta = importMetaRef.current
+    const hasMore = Boolean(importMeta?.hasMore && meta?.hasMore)
+    const cursor = meta?.cursor ?? importMeta?.cursor ?? null
 
-    return () => {
-      cancelled = true
-      if (backgroundPagerRef.current === controller) {
-        backgroundPagerRef.current = null
-      }
-    }
+    if (screen !== 'playlist') return
+    if (!hasMore || !cursor) return
+    if (backgroundSync.status !== 'pending') return
+    if (!lastImportUrl) return
+    if (importStatus !== ImportFlowStatus.IDLE) return
+    if (backgroundPagerRef.current) return
+
+    startBackgroundPagination(meta)
   }, [
     screen,
     importMeta.hasMore,
     importMeta.cursor,
+    importMeta.snapshotId,
+    backgroundSync.status,
     importStatus,
     lastImportUrl,
-    backgroundSync.status,
-    handleLoadMore,
-    announce,
-    msgFromCode,
+    startBackgroundPagination,
   ])
 
   const handleBackupNotes = async () => {
