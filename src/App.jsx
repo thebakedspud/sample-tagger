@@ -78,6 +78,7 @@ const EMPTY_IMPORT_META = {
   hasMore: false,
   sourceUrl: '',
   debug: null,
+  total: null,
 }
 
 // Handy helper so we never explode on undefined notes
@@ -453,21 +454,29 @@ export default function App() {
   const [importError, setImportError] = useState(null)
   const importInputRef = useRef(null)
   // PLAYLIST META (local state; persisted via storage v3 importMeta)
-  const [importMeta, setImportMeta] = useState(() => {
-    const initialMeta = persisted?.importMeta ?? {}
-    const sourceUrl = initialMeta.sourceUrl ?? (persisted?.lastImportUrl ?? '')
-    return {
-      ...EMPTY_IMPORT_META,
-      ...initialMeta,
-      sourceUrl,
-      hasMore: Boolean(initialMeta.cursor || initialMeta.hasMore),
-    }
-  })
+const [importMeta, setImportMeta] = useState(() => {
+  const initialMeta = persisted?.importMeta ?? {}
+  const sourceUrl = initialMeta.sourceUrl ?? (persisted?.lastImportUrl ?? '')
+  return {
+    ...EMPTY_IMPORT_META,
+    ...initialMeta,
+    sourceUrl,
+    hasMore: Boolean(initialMeta.cursor || initialMeta.hasMore),
+  }
+})
+const importMetaRef = useRef(importMeta)
+useEffect(() => {
+  importMetaRef.current = importMeta
+}, [importMeta])
   const [playlistTitle, setPlaylistTitle] = useState(persisted?.playlistTitle ?? 'My Playlist')
   const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null)
   const [lastImportUrl, setLastImportUrl] = useState(
     persisted?.lastImportUrl ?? (persisted?.importMeta?.sourceUrl ?? '')
   )
+  const lastImportUrlRef = useRef(lastImportUrl)
+  useEffect(() => {
+    lastImportUrlRef.current = lastImportUrl
+  }, [lastImportUrl])
 
   const [notesByTrack, setNotesByTrack] = useState(() =>
     ensureNotesEntries(INITIAL_NOTES_MAP, PERSISTED_TRACKS))
@@ -503,6 +512,18 @@ export default function App() {
     )
   )
   const tracksRef = useRef(tracks)
+  const backgroundPagerRef = useRef(null)
+  const [backgroundSync, setBackgroundSync] = useState(() => ({
+    status: importMeta?.hasMore ? 'pending' : 'complete',
+    loaded: PERSISTED_TRACKS.length,
+    total:
+      typeof importMeta?.total === 'number'
+        ? importMeta.total
+        : importMeta?.hasMore
+          ? null
+          : PERSISTED_TRACKS.length,
+    lastError: null,
+  }))
 
   const [recentPlaylists, setRecentPlaylists] = useState(() => INITIAL_RECENTS)
   const recentRef = useRef(recentPlaylists)
@@ -584,6 +605,8 @@ export default function App() {
         updateLastImportUrl = true,
       } = options || {}
 
+      cancelBackgroundPagination()
+
       const mapped = Array.isArray(payload?.tracks) ? payload.tracks : []
       const meta = payload?.meta ?? {}
       const importedTimestamp = payload?.importedAt ?? null
@@ -658,9 +681,23 @@ export default function App() {
         })
       }
 
+      setBackgroundSync({
+        status: meta?.hasMore ? 'pending' : 'complete',
+        loaded: mapped.length,
+        total:
+          typeof meta?.total === 'number'
+            ? meta.total
+            : typeof payload?.total === 'number'
+              ? payload.total
+              : meta?.hasMore
+                ? null
+                : mapped.length,
+        lastError: null,
+      })
+
       return { trackCount, title: resolvedTitle }
     },
-    [announce, pushRecentPlaylist, importMeta]
+    [announce, cancelBackgroundPagination, pushRecentPlaylist, importMeta]
   )
 
   const [editingId, setEditingId] = useState(null)
@@ -684,6 +721,38 @@ export default function App() {
   useEffect(() => {
     tracksRef.current = tracks
   }, [tracks])
+
+  useEffect(() => {
+    setBackgroundSync((prev) => {
+      const nextTotal =
+        typeof importMeta.total === 'number'
+          ? importMeta.total
+          : prev.total ?? (importMeta.hasMore ? null : tracks.length)
+      if (prev.loaded === tracks.length && prev.total === nextTotal) {
+        return prev
+      }
+      return {
+        ...prev,
+        loaded: tracks.length,
+        total: nextTotal,
+      }
+    })
+  }, [tracks, importMeta.total, importMeta.hasMore])
+
+  useEffect(() => {
+    setBackgroundSync((prev) => {
+      if (importMeta.hasMore) {
+        if (prev.status === 'loading' || prev.status === 'error' || prev.status === 'pending') {
+          return prev
+        }
+        return { ...prev, status: 'pending' }
+      }
+      if (prev.status === 'complete' && prev.lastError == null) {
+        return prev
+      }
+      return { ...prev, status: 'complete', lastError: null }
+    })
+  }, [importMeta.hasMore])
 
   const {
     pending,
@@ -731,6 +800,26 @@ export default function App() {
       }
     },
   })
+
+  const cancelBackgroundPagination = useCallback(() => {
+    const controller = backgroundPagerRef.current
+    if (controller && typeof controller.cancel === 'function') {
+      try {
+        controller.cancel()
+      } catch {
+        // ignore cancellation errors
+      }
+    }
+    backgroundPagerRef.current = null
+    setBackgroundSync((prev) => {
+      const hasMore = Boolean(importMetaRef.current?.hasMore)
+      if (!hasMore) {
+        return { ...prev, status: 'complete', lastError: null }
+      }
+      if (prev.status === 'pending') return prev
+      return { ...prev, status: 'pending' }
+    })
+  }, [setBackgroundSync])
 
   const {
     status: importStatus,
@@ -1280,6 +1369,7 @@ export default function App() {
   const handleImport = async (e) => {
     e?.preventDefault?.()
     setImportError(null)
+    cancelBackgroundPagination()
     const trimmedUrl = importUrl.trim()
 
     if (!trimmedUrl) {
@@ -1362,6 +1452,7 @@ export default function App() {
       return { ok: false, error: msg }
     }
 
+    cancelBackgroundPagination()
     setImportUrl(trimmedUrl)
     setImportError(null)
     updateRecentCardState(recent.id, { loading: true, error: null })
@@ -1423,6 +1514,7 @@ export default function App() {
 
   const handleReimport = async () => {
     if (!lastImportUrl) return
+    cancelBackgroundPagination()
     const wasActive = document.activeElement === reimportBtnRef.current
     setImportError(null)
     announce('Re-importing playlist.')
@@ -1478,44 +1570,62 @@ export default function App() {
     }
   }
 
-  const handleLoadMore = async () => {
-    if (!importMeta.cursor || !importMeta.provider || !lastImportUrl) {
-      return
+  const handleLoadMore = async (options = {}) => {
+    const mode = options?.mode === 'background' ? 'background' : 'manual'
+    const isBackground = mode === 'background'
+    const sourceUrl = lastImportUrlRef.current
+
+    if (!importMeta.cursor || !importMeta.provider || !sourceUrl) {
+      return { ok: false, reason: 'unavailable' }
+    }
+
+    if (!isBackground) {
+      cancelBackgroundPagination()
     }
 
     setImportError(null)
-    announce('Loading more tracks.')
+    if (!isBackground) {
+      announce('Loading more tracks.')
+    }
+
     try {
-      const existingIds = tracks.map(t => t.id)
+      const currentTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
+      const existingIds = currentTracks.map((t) => t.id)
       const result = await loadMoreTracks({
         providerHint: importMeta.provider ?? null,
         existingMeta: importMeta,
-        startIndex: tracks.length,
+        startIndex: currentTracks.length,
         existingIds,
-        sourceUrl: lastImportUrl,
+        sourceUrl,
       })
 
-      if (result?.stale) return
+      if (result?.stale) {
+        return { ok: false, stale: true }
+      }
 
       if (!result.ok) {
         const code = result.code ?? CODES.ERR_UNKNOWN
         const msg = msgFromCode(code)
         console.log('[load-more error]', { code, raw: result.error })
         setImportError(msg)
-        announce(msg)
-        return
+        if (!isBackground) {
+          announce(msg)
+        }
+        return { ok: false, code }
       }
 
       const additions = result.data.tracks
       const meta = result.data.meta ?? {}
 
       if (!additions.length) {
-        setImportMeta(prev => ({
+        setImportMeta((prev) => ({
           ...prev,
           ...meta,
         }))
-        announce('No additional tracks available.')
-        return
+        if (!isBackground) {
+          announce('No additional tracks available.')
+        }
+        return { ok: true, done: !meta?.hasMore, added: 0 }
       }
 
       const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, additions)
@@ -1531,31 +1641,142 @@ export default function App() {
         baseTracks,
         { importStamp: loadMoreStamp }
       )
-      setTracks(prev => [...prev, ...additionsWithNotes])
-      setImportMeta(prev => ({
+      setTracks((prev) => [...prev, ...additionsWithNotes])
+      setImportMeta((prev) => ({
         ...prev,
         ...meta,
       }))
       setImportedAt(loadMoreStamp)
-      const firstNewId = additions[0]?.id
-      if (firstNewId) {
-        focusById(`track-${firstNewId}`)
-      } else {
-        requestAnimationFrame(() => {
-          loadMoreBtnRef.current?.focus()
-        })
+      if (!isBackground) {
+        const firstNewId = additions[0]?.id
+        if (firstNewId) {
+          focusById(`track-${firstNewId}`)
+        } else {
+          requestAnimationFrame(() => {
+            loadMoreBtnRef.current?.focus()
+          })
+        }
+        announce(additions.length + ' more tracks loaded.')
       }
-      announce(additions.length + ' more tracks loaded.')
+      return { ok: true, done: !meta?.hasMore, added: additions.length }
     } catch (err) {
-      if (err?.name !== 'AbortError') {
-        const code = extractErrorCode(err)
-        const msg = msgFromCode(code)
-        console.log('[load-more error]', { code, raw: err })
-        setImportError(msg)
+      if (err?.name === 'AbortError') {
+        return { ok: false, aborted: true }
+      }
+      const code = extractErrorCode(err)
+      const msg = msgFromCode(code)
+      console.log('[load-more error]', { code, raw: err })
+      setImportError(msg)
+      if (!isBackground) {
         announce(msg)
       }
+      return { ok: false, code }
     }
   }
+
+  useEffect(() => {
+    if (screen !== 'playlist') return
+    if (!importMeta.hasMore || !importMeta.cursor) return
+    if (backgroundSync.status === 'error') return
+    if (!lastImportUrl) return
+    if (importStatus !== ImportFlowStatus.IDLE) return
+    if (backgroundPagerRef.current) return
+
+    let cancelled = false
+    const controller = {
+      cancel: () => {
+        cancelled = true
+      },
+    }
+    backgroundPagerRef.current = controller
+    setBackgroundSync((prev) => ({
+      ...prev,
+      status: 'loading',
+      lastError: null,
+    }))
+
+    const run = async () => {
+      while (!cancelled) {
+        try {
+          const result = await handleLoadMore({ mode: 'background' })
+          if (!result) break
+          if (result.stale || result.aborted) break
+          if (!result.ok) {
+            const msg = msgFromCode(result.code ?? CODES.ERR_UNKNOWN)
+            setBackgroundSync((prevState) => ({
+              ...prevState,
+              status: 'error',
+              lastError: msg,
+            }))
+            return
+          }
+          if (result.done) {
+            break
+          }
+        } catch (err) {
+          if (err?.name === 'AbortError') {
+            return
+          }
+          const msg = msgFromCode(extractErrorCode(err))
+          setBackgroundSync((prevState) => ({
+            ...prevState,
+            status: 'error',
+            lastError: msg,
+          }))
+          return
+        }
+      }
+    }
+
+    run()
+      .catch((err) => {
+        if (err?.name === 'AbortError') return
+        const msg = msgFromCode(extractErrorCode(err))
+        setBackgroundSync((prevState) => ({
+          ...prevState,
+          status: 'error',
+          lastError: msg,
+        }))
+      })
+      .finally(() => {
+        if (backgroundPagerRef.current === controller) {
+          backgroundPagerRef.current = null
+        }
+        const hasMore = Boolean(importMetaRef.current?.hasMore)
+        setBackgroundSync((prevState) => ({
+          ...prevState,
+          status:
+            prevState.status === 'error'
+              ? prevState.status
+              : hasMore
+                ? cancelled
+                  ? 'pending'
+                  : 'pending'
+                : 'complete',
+          lastError: hasMore ? prevState.lastError : null,
+        }))
+        if (!hasMore && !cancelled) {
+          announce('All tracks loaded; order complete.')
+        }
+      })
+
+    return () => {
+      cancelled = true
+      if (backgroundPagerRef.current === controller) {
+        backgroundPagerRef.current = null
+      }
+    }
+  }, [
+    screen,
+    importMeta.hasMore,
+    importMeta.cursor,
+    importStatus,
+    lastImportUrl,
+    backgroundSync.status,
+    handleLoadMore,
+    announce,
+    msgFromCode,
+  ])
 
   const handleBackupNotes = async () => {
     try {
@@ -1664,6 +1885,7 @@ export default function App() {
   }
 
   const handleClearAll = () => {
+    cancelBackgroundPagination()
     // Reset transient UI and timers
     clearInlineUndo()
     setEditingId(null); setDraft(''); setError(null)
@@ -2097,6 +2319,7 @@ export default function App() {
                 loadMoreBtnRef={loadMoreBtnRef}
                 onLoadMore={handleLoadMore}
                 announce={announce}
+                backgroundSync={backgroundSync}
               />
             )}
           </>

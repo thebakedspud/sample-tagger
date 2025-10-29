@@ -87,6 +87,7 @@ const EMPTY_META = Object.freeze({
   hasMore: false,
   sourceUrl: null,
   debug: null,
+  total: null,
 });
 
 /** @returns {PersistedState | null} */
@@ -796,6 +797,10 @@ function sanitizeImportMeta(meta) {
     hasMore: Boolean(m.hasMore) || Boolean(cursor),
     sourceUrl: safeString(m.sourceUrl),
     debug: sanitizeDebug(m.debug),
+    total:
+      typeof m.total === 'number' && Number.isFinite(m.total)
+        ? Math.max(0, Math.trunc(m.total))
+        : null,
   };
 }
 

@@ -168,6 +168,12 @@ function buildMeta(res, fallback = {}) {
     hasMore,
     sourceUrl: res?.sourceUrl ?? fallback.sourceUrl ?? '',
     debug: res?.debug ?? fallback.debug ?? null,
+    total:
+      typeof res?.total === 'number' && Number.isFinite(res.total)
+        ? res.total
+        : typeof fallback.total === 'number' && Number.isFinite(fallback.total)
+          ? fallback.total
+          : null,
   }
 }
 

@@ -174,6 +174,7 @@ export function isKnownAdapterErrorObject(e) {
  * @property {boolean} hasMore
  * @property {string} sourceUrl
  * @property {any | null} [debug]
+ * @property {number | null | undefined} [total]
  */
 
 /**

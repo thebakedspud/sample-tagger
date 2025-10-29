@@ -78,22 +78,33 @@ export function normalizePageInfo(pageInfo) {
 function mergeUniqueTracks(prev, next, provider) {
   if (!Array.isArray(next) || next.length === 0) return prev;
 
-  const seen = new Set(
-    prev.map(t => {
-      const id = String(t?.id ?? '');
-      const prov = String(t?.provider ?? '');
-      return `${prov}:${id}`;
-    })
-  );
+  const makeKey = (track) => {
+    const prov = String(track?.provider ?? provider ?? '');
+    const primary = track?.providerTrackId != null ? String(track.providerTrackId) : '';
+    const fallbackId = track?.id != null ? String(track.id) : '';
+    const addedAt =
+      typeof track?.dateAdded === 'string' && track.dateAdded.trim()
+        ? track.dateAdded.trim()
+        : '';
+    const base = primary || fallbackId;
+    if (!base) return '';
+    return `${prov}:${base}:${addedAt}`;
+  };
+
+  const seen = new Set();
+  prev.forEach((t) => {
+    const key = makeKey(t);
+    if (key) {
+      seen.add(key);
+    }
+  });
 
   /** @type {import('./adapters/types.js').NormalizedTrack[]} */
   const additions = [];
 
   next.forEach(t => {
-    const id = String(t?.id ?? '');
-    const prov = String(t?.provider ?? provider ?? '');
-    const key = `${prov}:${id}`;
-    if (!id || seen.has(key)) return;
+    const key = makeKey(t);
+    if (!key || seen.has(key)) return;
     seen.add(key);
     additions.push(t);
   });

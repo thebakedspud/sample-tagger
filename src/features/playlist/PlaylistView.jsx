@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import focusById from '../../utils/focusById.js'
 import SearchFilterBar from '../filter/SearchFilterBar.jsx'
 import useTrackFilter from '../filter/useTrackFilter.js'
+import { SORT_KEY } from '../filter/filterTracks.js'
 import TrackCard from './TrackCard.jsx'
 
 /**
@@ -24,17 +25,18 @@ import TrackCard from './TrackCard.jsx'
  * @param {(trackId: string|number, tag: string) => boolean} props.onAddTag
  * @param {(trackId: string|number, tag: string) => void} props.onRemoveTag
  * @param {(pendingId: string) => void} props.onUndo
- * @param {(pendingId: string) => void} props.onDismissUndo
- * @param {() => void} props.onReimport
- * @param {() => void} props.onClear
- * @param {() => void} props.onBack
+* @param {(pendingId: string) => void} props.onDismissUndo
+* @param {() => void} props.onReimport
+* @param {() => void} props.onClear
+* @param {() => void} props.onBack
  * @param {boolean} props.canReimport
  * @param {import('react').RefObject<HTMLButtonElement>} props.reimportBtnRef
  * @param {import('react').RefObject<HTMLButtonElement>} props.loadMoreBtnRef
  * @param {() => void} props.onLoadMore
  * @param {string[]} props.stockTags
  * @param {string[]} props.customTags
- * @param {(message: string) => void} props.announce
+* @param {(message: string) => void} props.announce
+ * @param {{ status: 'idle'|'pending'|'loading'|'complete'|'error', loaded: number, total: number|null, lastError: string|null }} [props.backgroundSync]
  */
 export default function PlaylistView({
   playlistTitle,
@@ -66,6 +68,7 @@ export default function PlaylistView({
   stockTags,
   customTags,
   announce,
+  backgroundSync = { status: 'idle', loaded: 0, total: null, lastError: null },
 }) {
   const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
   const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
@@ -145,6 +148,20 @@ export default function PlaylistView({
   )
 
   const showFilteringBanner = showLoadMore && hasActiveFilters
+  const isDateSort = sort?.key === SORT_KEY.DATE
+  const loadingStatus = backgroundSync?.status ?? 'idle'
+  const showBackgroundBanner =
+    isDateSort && loadingStatus === 'loading' && showLoadMore
+  const loadedLabel =
+    typeof backgroundSync?.loaded === 'number'
+      ? backgroundSync.loaded.toLocaleString()
+      : ''
+  const totalLabel =
+    typeof backgroundSync?.total === 'number'
+      ? backgroundSync.total.toLocaleString()
+      : null
+  const showBackgroundError =
+    loadingStatus === 'error' && typeof backgroundSync?.lastError === 'string'
 
   return (
     <section aria-labelledby="playlist-title">
@@ -217,6 +234,41 @@ export default function PlaylistView({
           }}
         >
           Filtering {filteredCount} of {tracks.length} loaded. Load more to widen search.
+        </div>
+      )}
+
+      {showBackgroundBanner && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 12,
+            padding: '8px 12px',
+            background: 'var(--surface)',
+            borderRadius: 6,
+            border: '1px solid var(--border)',
+            color: 'var(--muted)',
+          }}
+        >
+          Loading more to complete “recently added” order…{' '}
+          {totalLabel
+            ? `(loaded ${loadedLabel} of ${totalLabel})`
+            : `(loaded ${loadedLabel})`}
+        </div>
+      )}
+
+      {showBackgroundError && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 12,
+            padding: '8px 12px',
+            background: 'var(--surface)',
+            borderRadius: 6,
+            border: '1px solid var(--border)',
+            color: 'var(--warning, #ffa726)',
+          }}
+        >
+          Background sync paused: {backgroundSync.lastError}
         </div>
       )}
 
