@@ -1361,9 +1361,11 @@ useEffect(() => {
   const showLoadMoreSpinner = isLoadMoreBusy && importLoading
 
   // Small helper to resolve a friendly message from a code
-  function msgFromCode(code) {
-    return ERROR_MAP[code] ?? ERROR_MAP[CODES.ERR_UNKNOWN] ?? 'Something went wrong. Please try again.'
-  }
+  const msgFromCode = useCallback(
+    (code) =>
+      ERROR_MAP[code] ?? ERROR_MAP[CODES.ERR_UNKNOWN] ?? 'Something went wrong. Please try again.',
+    [],
+  )
 
   // IMPORT handlers
   const handleImport = async (e) => {
@@ -1570,109 +1572,113 @@ useEffect(() => {
     }
   }
 
-  const handleLoadMore = async (options = {}) => {
-    const mode = options?.mode === 'background' ? 'background' : 'manual'
-    const isBackground = mode === 'background'
-    const sourceUrl = lastImportUrlRef.current
+  const handleLoadMore = useCallback(
+    async (options = {}) => {
+      const mode = options?.mode === 'background' ? 'background' : 'manual'
+      const isBackground = mode === 'background'
+      const sourceUrl = lastImportUrlRef.current
+      const metaSnapshot = importMetaRef.current
 
-    if (!importMeta.cursor || !importMeta.provider || !sourceUrl) {
-      return { ok: false, reason: 'unavailable' }
-    }
-
-    if (!isBackground) {
-      cancelBackgroundPagination()
-    }
-
-    setImportError(null)
-    if (!isBackground) {
-      announce('Loading more tracks.')
-    }
-
-    try {
-      const currentTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
-      const existingIds = currentTracks.map((t) => t.id)
-      const result = await loadMoreTracks({
-        providerHint: importMeta.provider ?? null,
-        existingMeta: importMeta,
-        startIndex: currentTracks.length,
-        existingIds,
-        sourceUrl,
-      })
-
-      if (result?.stale) {
-        return { ok: false, stale: true }
+      if (!metaSnapshot?.cursor || !metaSnapshot?.provider || !sourceUrl) {
+        return { ok: false, reason: 'unavailable' }
       }
 
-      if (!result.ok) {
-        const code = result.code ?? CODES.ERR_UNKNOWN
+      if (!isBackground) {
+        cancelBackgroundPagination()
+      }
+
+      setImportError(null)
+      if (!isBackground) {
+        announce('Loading more tracks.')
+      }
+
+      try {
+        const currentTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
+        const existingIds = currentTracks.map((t) => t.id)
+        const result = await loadMoreTracks({
+          providerHint: metaSnapshot.provider ?? null,
+          existingMeta: metaSnapshot,
+          startIndex: currentTracks.length,
+          existingIds,
+          sourceUrl,
+        })
+
+        if (result?.stale) {
+          return { ok: false, stale: true }
+        }
+
+        if (!result.ok) {
+          const code = result.code ?? CODES.ERR_UNKNOWN
+          const msg = msgFromCode(code)
+          console.log('[load-more error]', { code, raw: result.error })
+          setImportError(msg)
+          if (!isBackground) {
+            announce(msg)
+          }
+          return { ok: false, code }
+        }
+
+        const additions = result.data.tracks
+        const meta = result.data.meta ?? {}
+
+        if (!additions.length) {
+          setImportMeta((prev) => ({
+            ...prev,
+            ...meta,
+          }))
+          if (!isBackground) {
+            announce('No additional tracks available.')
+          }
+          return { ok: true, done: !meta?.hasMore, added: 0 }
+        }
+
+        const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, additions)
+        const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, additions)
+        setNotesByTrack(nextNotesMap)
+        setTagsByTrack(nextTagsMap)
+        const baseTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
+        const loadMoreStamp = new Date().toISOString()
+        const additionsWithNotes = attachNotesToTracks(
+          additions,
+          nextNotesMap,
+          nextTagsMap,
+          baseTracks,
+          { importStamp: loadMoreStamp }
+        )
+        setTracks((prev) => [...prev, ...additionsWithNotes])
+        setImportMeta((prev) => ({
+          ...prev,
+          ...meta,
+        }))
+        setImportedAt(loadMoreStamp)
+        if (!isBackground) {
+          const firstNewId = additions[0]?.id
+          if (firstNewId) {
+            focusById(`track-${firstNewId}`)
+          } else {
+            requestAnimationFrame(() => {
+              loadMoreBtnRef.current?.focus()
+            })
+          }
+          announce(additions.length + ' more tracks loaded.')
+        }
+        return { ok: true, done: !meta?.hasMore, added: additions.length }
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          return { ok: false, aborted: true }
+        }
+        const code = extractErrorCode(err)
         const msg = msgFromCode(code)
-        console.log('[load-more error]', { code, raw: result.error })
+        console.log('[load-more error]', { code, raw: err })
         setImportError(msg)
         if (!isBackground) {
           announce(msg)
         }
         return { ok: false, code }
       }
-
-      const additions = result.data.tracks
-      const meta = result.data.meta ?? {}
-
-      if (!additions.length) {
-        setImportMeta((prev) => ({
-          ...prev,
-          ...meta,
-        }))
-        if (!isBackground) {
-          announce('No additional tracks available.')
-        }
-        return { ok: true, done: !meta?.hasMore, added: 0 }
-      }
-
-      const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, additions)
-      const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, additions)
-      setNotesByTrack(nextNotesMap)
-      setTagsByTrack(nextTagsMap)
-      const baseTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
-      const loadMoreStamp = new Date().toISOString()
-      const additionsWithNotes = attachNotesToTracks(
-        additions,
-        nextNotesMap,
-        nextTagsMap,
-        baseTracks,
-        { importStamp: loadMoreStamp }
-      )
-      setTracks((prev) => [...prev, ...additionsWithNotes])
-      setImportMeta((prev) => ({
-        ...prev,
-        ...meta,
-      }))
-      setImportedAt(loadMoreStamp)
-      if (!isBackground) {
-        const firstNewId = additions[0]?.id
-        if (firstNewId) {
-          focusById(`track-${firstNewId}`)
-        } else {
-          requestAnimationFrame(() => {
-            loadMoreBtnRef.current?.focus()
-          })
-        }
-        announce(additions.length + ' more tracks loaded.')
-      }
-      return { ok: true, done: !meta?.hasMore, added: additions.length }
-    } catch (err) {
-      if (err?.name === 'AbortError') {
-        return { ok: false, aborted: true }
-      }
-      const code = extractErrorCode(err)
-      const msg = msgFromCode(code)
-      console.log('[load-more error]', { code, raw: err })
-      setImportError(msg)
-      if (!isBackground) {
-        announce(msg)
-      }
-      return { ok: false, code }
-    }
-  }
+    },
+    [announce, cancelBackgroundPagination, loadMoreTracks, msgFromCode],
+  )
 
   useEffect(() => {
     if (screen !== 'playlist') return
