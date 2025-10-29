@@ -1,7 +1,7 @@
 // src/features/filter/SearchFilterBar.jsx
 // UI for search, scope selection, sort menu, tag filters, and clear action.
 
-import { useMemo, useCallback, useRef, useEffect } from 'react';
+import { useMemo, useCallback, useRef } from 'react';
 import {
   SEARCH_SCOPE,
   SORT_KEY,
