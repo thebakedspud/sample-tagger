@@ -1,7 +1,7 @@
 // src/features/filter/SearchFilterBar.jsx
 // UI for search, scope selection, sort menu, tag filters, and clear action.
 
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   SEARCH_SCOPE,
   SORT_KEY,
@@ -78,6 +78,14 @@ export default function SearchFilterBar({
     [sort],
   );
 
+  const scopeRefs = useRef(new Map());
+  const requestScopeFocus = useCallback((value) => {
+    const node = scopeRefs.current.get(value);
+    if (node) {
+      node.focus();
+    }
+  }, []);
+
   const handleSortChange = useCallback(
     (event) => {
       const value = event.target.value;
@@ -106,9 +114,44 @@ export default function SearchFilterBar({
 
   const handleScopeChange = useCallback(
     (event) => {
-      onScopeChange(event.target.value);
+      const nextValue = event.currentTarget.getAttribute('data-scope');
+      if (!nextValue) return;
+      onScopeChange(nextValue);
+      requestScopeFocus(nextValue);
     },
-    [onScopeChange],
+    [onScopeChange, requestScopeFocus],
+  );
+
+  const handleScopeKeyDown = useCallback(
+    (event) => {
+      const activeValue = event.currentTarget.getAttribute('data-scope') || scope;
+      const currentIndex = SCOPE_OPTIONS.findIndex((option) => option.value === activeValue);
+      if (currentIndex === -1) return;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        const next = SCOPE_OPTIONS[(currentIndex + 1) % SCOPE_OPTIONS.length];
+        onScopeChange(next.value);
+        requestScopeFocus(next.value);
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const next =
+          (currentIndex - 1 + SCOPE_OPTIONS.length) % SCOPE_OPTIONS.length;
+        const option = SCOPE_OPTIONS[next];
+        onScopeChange(option.value);
+        requestScopeFocus(option.value);
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        const first = SCOPE_OPTIONS[0];
+        onScopeChange(first.value);
+        requestScopeFocus(first.value);
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        const last = SCOPE_OPTIONS[SCOPE_OPTIONS.length - 1];
+        onScopeChange(last.value);
+        requestScopeFocus(last.value);
+      }
+    },
+    [onScopeChange, requestScopeFocus, scope],
   );
 
   const handleToggleNoteFilter = useCallback(
@@ -184,45 +227,52 @@ export default function SearchFilterBar({
         </div>
       </div>
 
-      <fieldset
-        style={{
-          border: 'none',
-          margin: 0,
-          padding: 0,
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 8,
-          alignItems: 'center',
-        }}
-      >
-        <legend style={{ fontWeight: 600 }}>Search in:</legend>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {SCOPE_OPTIONS.map(({ value, label }) => (
-            <label
-              key={value}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '4px 10px',
-                borderRadius: 999,
-                border: scope === value ? '1px solid var(--accent)' : '1px solid var(--border)',
-                background: scope === value ? 'var(--accent-muted)' : 'transparent',
-                cursor: 'pointer',
-              }}
-            >
-              <input
-                type="radio"
-                name="search-scope"
+      <div>
+        <span id="search-scope-label" style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>
+          Search in:
+        </span>
+        <div
+          role="radiogroup"
+          aria-labelledby="search-scope-label"
+          style={{ display: 'flex', gap: 4 }}
+        >
+          {SCOPE_OPTIONS.map(({ value, label }) => {
+            const isActive = scope === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                role="radio"
                 value={value}
-                checked={scope === value}
-                onChange={handleScopeChange}
-              />
-              {label}
-            </label>
-          ))}
+                aria-checked={isActive ? 'true' : 'false'}
+                tabIndex={isActive ? 0 : -1}
+                onClick={handleScopeChange}
+                onKeyDown={handleScopeKeyDown}
+                data-scope={value}
+                ref={(node) => {
+                  if (node) {
+                    scopeRefs.current.set(value, node);
+                  } else {
+                    scopeRefs.current.delete(value);
+                  }
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 14px',
+                  borderRadius: 999,
+                  border: isActive ? '1px solid var(--accent)' : '1px solid var(--border)',
+                  background: isActive ? 'var(--accent-muted)' : 'transparent',
+                  color: 'var(--fg)',
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
-      </fieldset>
+      </div>
 
       <div
         style={{
@@ -248,7 +298,14 @@ export default function SearchFilterBar({
             }}
           >
             {SORT_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
+              <option
+                key={option.value}
+                value={option.value}
+                style={{
+                  color: 'var(--fg)',
+                  background: 'var(--surface)',
+                }}
+              >
                 {option.label}
               </option>
             ))}
