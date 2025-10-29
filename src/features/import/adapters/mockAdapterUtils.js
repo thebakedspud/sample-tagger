@@ -35,6 +35,17 @@ function buildDataset(provider, baseTracks, totalCount = TOTAL_TRACKS) {
     const cycle = Math.floor(i / seeds.length);
     const index = i + 1;
 
+    const baseDate = template.dateAdded || template.addedAt || null;
+    const generatedDate = (() => {
+      if (baseDate) {
+        const parsed = Date.parse(baseDate);
+        if (!Number.isNaN(parsed)) {
+          return new Date(parsed - i * 60_000).toISOString();
+        }
+      }
+      return new Date(Date.now() - i * 60_000).toISOString();
+    })();
+
     const title = template.title || `Track ${index}`;
     const artist = template.artist || `Mock Artist ${index}`;
     const cycleSuffix = cycle > 0 ? ` - mock set ${cycle + 1}` : '';
@@ -46,6 +57,8 @@ function buildDataset(provider, baseTracks, totalCount = TOTAL_TRACKS) {
       title: `${title}${cycleSuffix}`,
       artist,
       sourceUrl: template.sourceUrl || `https://example.com/${paddedProvider}/track-${index}`,
+      album: template.album,
+      dateAdded: generatedDate,
     });
   }
 

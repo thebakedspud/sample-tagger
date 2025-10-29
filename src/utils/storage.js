@@ -29,6 +29,11 @@
  * @property {string=} sourceUrl
  * @property {number=} durationMs
  * @property {string[]=} tags
+ * @property {string=} album
+ * @property {string=} dateAdded
+ * @property {string=} importedAt
+ * @property {number=} originalIndex
+ * @property {'spotify' | 'youtube' | 'soundcloud'=} provider
  *
  * @typedef {Record<string, string[]>} NotesByTrack
  *
@@ -496,6 +501,26 @@ function sanitizeTracks(list) {
     const duration = Number(/** @type {any} */(t).durationMs);
     if (Number.isFinite(duration) && duration > 0) {
       record.durationMs = Math.round(duration);
+    }
+    const album = safeString(/** @type {any} */(t).album);
+    if (album) {
+      record.album = album;
+    }
+    const dateAddedTs = coerceTimestamp(/** @type {any} */(t).dateAdded ?? /** @type {any} */(t).addedAt);
+    if (dateAddedTs != null) {
+      record.dateAdded = new Date(dateAddedTs).toISOString();
+    }
+    const importedAtTs = coerceTimestamp(/** @type {any} */(t).importedAt);
+    if (importedAtTs != null) {
+      record.importedAt = new Date(importedAtTs).toISOString();
+    }
+    const originalIndex = Number(/** @type {any} */(t).originalIndex);
+    if (Number.isFinite(originalIndex) && originalIndex >= 0) {
+      record.originalIndex = Math.round(originalIndex);
+    }
+    const provider = canonicalProvider(/** @type {any} */(t).provider);
+    if (provider) {
+      record.provider = provider;
     }
     const cleanedTags = normalizeTagsArray(/** @type {any} */(t).tags);
     if (cleanedTags.length > 0) {

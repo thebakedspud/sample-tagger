@@ -119,6 +119,14 @@ function buildTracks(res, providerHint, startIndex = 0, existingIds) {
     if (track?.provider || provider) {
       normalizedTrack.provider = track?.provider ?? provider ?? undefined
     }
+    const album = ensureString(track?.album ?? '')
+    if (album) {
+      normalizedTrack.album = album
+    }
+    const dateAdded = ensureString(track?.dateAdded ?? '')
+    if (dateAdded) {
+      normalizedTrack.dateAdded = dateAdded
+    }
 
     mapped.push(normalizedTrack)
   })

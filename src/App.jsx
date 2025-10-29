@@ -63,6 +63,7 @@ const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
 const persistedRecents = Array.isArray(persisted?.recentPlaylists) ? [...persisted.recentPlaylists] : null
 const loadedRecents = persistedRecents ?? loadRecent()
 const INITIAL_RECENTS = Array.isArray(loadedRecents) ? [...loadedRecents] : []
+const PERSISTED_TRACKS = Array.isArray(persisted?.tracks) ? [...persisted.tracks] : []
 
 const MAX_TAGS_PER_TRACK = 32
 const MAX_TAG_LENGTH = 24
@@ -243,16 +244,84 @@ function ensureTagsEntries(baseMap, tracks) {
   return next;
 }
 
-function attachNotesToTracks(trackList, notesMap, tagsMap) {
+function attachNotesToTracks(trackList, notesMap, tagsMap, previousTracks = [], options = {}) {
   if (!Array.isArray(trackList)) return [];
   const safeMap = notesMap || Object.create(null);
   const safeTags = tagsMap || Object.create(null);
+  const prevList = Array.isArray(previousTracks) ? previousTracks : [];
+  /** @type {Map<string, any>} */
+  const prevMap = new Map();
+  prevList.forEach((prevTrack) => {
+    if (!prevTrack || typeof prevTrack !== 'object') return;
+    const id = prevTrack.id;
+    if (id == null) return;
+    const key = typeof id === 'string' || typeof id === 'number' ? String(id) : null;
+    if (!key) return;
+    prevMap.set(key, prevTrack);
+  });
+
+  const baseStampMs = normalizeTimestamp(options.importStamp);
+  const fallbackStamp =
+    baseStampMs != null ? new Date(baseStampMs).toISOString() : new Date().toISOString();
+
+  const seed = Number.isFinite(options.originalIndexSeed)
+    ? Math.round(options.originalIndexSeed)
+    : prevList.reduce((max, item) => {
+        const value =
+          typeof item?.originalIndex === 'number' && Number.isFinite(item.originalIndex)
+            ? item.originalIndex
+            : -1;
+        return value > max ? value : max;
+      }, -1) + 1;
+
+  let nextOriginalIndex = seed;
+
   return trackList.map((track) => {
     if (!track || typeof track !== 'object') return track;
     const id = track.id;
-    const mappedNotes = id && hasOwn(safeMap, id) ? [...safeMap[id]] : normalizeNotesList(track.notes);
-    const mappedTags = id && hasOwn(safeTags, id) ? [...safeTags[id]] : normalizeTagList(track.tags);
-    return { ...track, notes: mappedNotes, tags: mappedTags };
+    const key = typeof id === 'string' || typeof id === 'number' ? String(id) : null;
+    const prev = key ? prevMap.get(key) : null;
+    const mappedNotes =
+      key && hasOwn(safeMap, key) ? [...safeMap[key]] : normalizeNotesList(track.notes);
+    const mappedTags =
+      key && hasOwn(safeTags, key) ? [...safeTags[key]] : normalizeTagList(track.tags);
+
+    let importedAtIso =
+      typeof prev?.importedAt === 'string' && prev.importedAt.trim() ? prev.importedAt : null;
+    if (!importedAtIso) {
+      const candidateStamp = normalizeTimestamp(
+        track?.importedAt ?? options.importStamp ?? fallbackStamp,
+      );
+      if (candidateStamp != null) {
+        importedAtIso = new Date(candidateStamp).toISOString();
+      }
+    }
+    if (!importedAtIso) {
+      importedAtIso = fallbackStamp;
+    }
+
+    let originalIndex =
+      typeof prev?.originalIndex === 'number' && Number.isFinite(prev.originalIndex)
+        ? Math.round(prev.originalIndex)
+        : null;
+    if (originalIndex == null) {
+      const candidate = Number(track?.originalIndex);
+      if (Number.isFinite(candidate)) {
+        originalIndex = Math.round(candidate);
+      }
+    }
+    if (originalIndex == null) {
+      originalIndex = nextOriginalIndex;
+      nextOriginalIndex += 1;
+    }
+
+    return {
+      ...track,
+      notes: mappedNotes,
+      tags: mappedTags,
+      importedAt: importedAtIso,
+      originalIndex,
+    };
   });
 }
 
@@ -401,9 +470,9 @@ export default function App() {
   )
 
   const [notesByTrack, setNotesByTrack] = useState(() =>
-    ensureNotesEntries(INITIAL_NOTES_MAP, persisted?.tracks ?? []))
+    ensureNotesEntries(INITIAL_NOTES_MAP, PERSISTED_TRACKS))
   const [tagsByTrack, setTagsByTrack] = useState(() =>
-    ensureTagsEntries(INITIAL_TAGS_MAP, persisted?.tracks ?? []))
+    ensureTagsEntries(INITIAL_TAGS_MAP, PERSISTED_TRACKS))
   const hasLocalNotes = useMemo(
     () =>
       Object.values(notesByTrack || {}).some(
@@ -425,7 +494,13 @@ export default function App() {
 
   // DATA - normalize persisted tracks so notes always exist
   const [tracks, setTracks] = useState(() =>
-    attachNotesToTracks(persisted?.tracks ?? [], notesByTrack, tagsByTrack)
+    attachNotesToTracks(
+      PERSISTED_TRACKS,
+      notesByTrack,
+      tagsByTrack,
+      PERSISTED_TRACKS,
+      { importStamp: persisted?.importedAt ?? null }
+    )
   )
   const tracksRef = useRef(tracks)
 
@@ -514,11 +589,29 @@ export default function App() {
       const importedTimestamp = payload?.importedAt ?? null
       const resolvedTitle = payload?.title || fallbackTitle || 'Imported Playlist'
 
+      const previousTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
+      const samePlaylist =
+        previousTracks.length > 0 &&
+        importMeta?.provider &&
+        meta?.provider &&
+        importMeta?.playlistId &&
+        meta?.playlistId &&
+        importMeta.provider === meta.provider &&
+        importMeta.playlistId === meta.playlistId
+
       const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, mapped)
       const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, mapped)
       setNotesByTrack(nextNotesMap)
       setTagsByTrack(nextTagsMap)
-      setTracks(attachNotesToTracks(mapped, nextNotesMap, nextTagsMap))
+      setTracks(
+        attachNotesToTracks(
+          mapped,
+          nextNotesMap,
+          nextTagsMap,
+          samePlaylist ? previousTracks : [],
+          { importStamp: importedTimestamp ?? null }
+        )
+      )
       setImportMeta({
         ...EMPTY_IMPORT_META,
         ...meta,
@@ -567,7 +660,7 @@ export default function App() {
 
       return { trackCount, title: resolvedTitle }
     },
-    [announce, pushRecentPlaylist]
+    [announce, pushRecentPlaylist, importMeta]
   )
 
   const [editingId, setEditingId] = useState(null)
@@ -1429,13 +1522,21 @@ export default function App() {
       const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, additions)
       setNotesByTrack(nextNotesMap)
       setTagsByTrack(nextTagsMap)
-      const additionsWithNotes = attachNotesToTracks(additions, nextNotesMap, nextTagsMap)
+      const baseTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
+      const loadMoreStamp = new Date().toISOString()
+      const additionsWithNotes = attachNotesToTracks(
+        additions,
+        nextNotesMap,
+        nextTagsMap,
+        baseTracks,
+        { importStamp: loadMoreStamp }
+      )
       setTracks(prev => [...prev, ...additionsWithNotes])
       setImportMeta(prev => ({
         ...prev,
         ...meta,
       }))
-      setImportedAt(new Date().toISOString())
+      setImportedAt(loadMoreStamp)
       const firstNewId = additions[0]?.id
       if (firstNewId) {
         focusById(`track-${firstNewId}`)
@@ -1552,7 +1653,7 @@ export default function App() {
       const nextTagsMap = ensureTagsEntries(mergedTags, tracks)
       setNotesByTrack(nextMap)
       setTagsByTrack(nextTagsMap)
-      setTracks(prev => attachNotesToTracks(prev, nextMap, nextTagsMap))
+      setTracks(prev => attachNotesToTracks(prev, nextMap, nextTagsMap, prev))
       announce('Notes restored from backup.')
     } catch (err) {
       console.error('[notes restore error]', err)
@@ -1995,6 +2096,7 @@ export default function App() {
                 reimportBtnRef={reimportBtnRef}
                 loadMoreBtnRef={loadMoreBtnRef}
                 onLoadMore={handleLoadMore}
+                announce={announce}
               />
             )}
           </>

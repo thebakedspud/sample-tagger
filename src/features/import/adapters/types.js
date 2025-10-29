@@ -21,6 +21,10 @@
  * @property {number} [durationMs]
  * @property {string} [thumbnailUrl]
  * @property {any[]} [notes]
+ * @property {string} [album]
+ * @property {string} [dateAdded]
+ * @property {string} [importedAt]
+ * @property {number} [originalIndex]
  */
 
 /**
