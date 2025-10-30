@@ -6,19 +6,6 @@ import { SORT_KEY } from '../filter/filterTracks.js'
 import TrackCard from './TrackCard.jsx'
 
 /**
- * @typedef {'idle'|'pending'|'loading'|'complete'|'error'} BackgroundSyncStatus
- * @typedef {{ status: BackgroundSyncStatus, loaded: number, total: number|null, lastError: string|null }} BackgroundSyncState
- */
-
-/** @type {BackgroundSyncState} */
-const DEFAULT_BACKGROUND_SYNC = {
-  status: 'idle',
-  loaded: 0,
-  total: null,
-  lastError: null,
-}
-
-/**
  * @param {object} props
  * @param {string} props.playlistTitle
  * @param {string|null} props.importedAt
@@ -38,18 +25,19 @@ const DEFAULT_BACKGROUND_SYNC = {
  * @param {(trackId: string|number, tag: string) => boolean} props.onAddTag
  * @param {(trackId: string|number, tag: string) => void} props.onRemoveTag
  * @param {(pendingId: string) => void} props.onUndo
-* @param {(pendingId: string) => void} props.onDismissUndo
-* @param {() => void} props.onReimport
-* @param {() => void} props.onClear
-* @param {() => void} props.onBack
+ * @param {(pendingId: string) => void} props.onDismissUndo
+ * @param {() => void} props.onReimport
+ * @param {() => void} props.onClear
+ * @param {() => void} props.onBack
  * @param {boolean} props.canReimport
  * @param {import('react').RefObject<HTMLButtonElement>} props.reimportBtnRef
  * @param {import('react').RefObject<HTMLButtonElement>} props.loadMoreBtnRef
  * @param {() => void} props.onLoadMore
  * @param {string[]} props.stockTags
  * @param {string[]} props.customTags
-* @param {(message: string) => void} props.announce
+ * @param {(message: string) => void} props.announce
  * @param {BackgroundSyncState} [props.backgroundSync]
+ * @param {{ reason: string|null, ts: number }} [props.focusContext]
  * @param {boolean} [props.skipFocusManagement] - When true, the filter-aware focus management
  *   effect will not run. This is a one-shot guard used during initial imports to prevent
  *   PlaylistView from interfering with App's focus handoff. Consumers are responsible for
@@ -59,7 +47,7 @@ const DEFAULT_BACKGROUND_SYNC = {
  *   whenever the first visible track changes (due to sorting, filtering, or data updates).
  *   Receives the ID of the first track in the filtered/sorted list, or null if no tracks are
  *   visible. This enables App to focus the correct track even when adapter order differs from
- *   display order (e.g., oldest→newest import with newest-first sort).
+ *   display order (e.g., oldest-to-newest import with newest-first sort).
  */
 export default function PlaylistView({
   playlistTitle,
@@ -92,6 +80,7 @@ export default function PlaylistView({
   customTags,
   announce,
   backgroundSync = DEFAULT_BACKGROUND_SYNC,
+  focusContext,
   skipFocusManagement = false,
   onFirstVisibleTrackChange,
 }) {
@@ -101,6 +90,7 @@ export default function PlaylistView({
   const showLoadMore = Boolean(importMeta?.hasMore && importMeta?.cursor)
 
   const searchInputRef = useRef(null)
+  const lastFocusContextTsRef = useRef(null)
   const availableTags = useMemo(() => {
     const bucket = new Set()
     if (Array.isArray(stockTags)) {
@@ -160,6 +150,18 @@ export default function PlaylistView({
   // imports, App sets this flag to prevent PlaylistView from interfering with its own
   // focus handoff. App is responsible for resetting the flag after focus completes.
   useEffect(() => {
+    const contextTs = focusContext?.ts ?? null
+    const contextReason = focusContext?.reason ?? null
+
+    if (contextTs == null) {
+      lastFocusContextTsRef.current = null
+    } else if (contextTs !== lastFocusContextTsRef.current) {
+      lastFocusContextTsRef.current = contextTs
+      if (contextReason === 'background-load-more') {
+        return
+      }
+    }
+
     if (skipFocusManagement) return // Exit early - App is handling focus
 
     if (!Array.isArray(tracks) || tracks.length === 0) return
@@ -168,6 +170,13 @@ export default function PlaylistView({
       return
     }
     const active = document.activeElement
+    if (active === document.body) {
+      const firstId = filteredTracks[0]?.id
+      if (firstId != null) {
+        focusById(`add-note-btn-${firstId}`)
+      }
+      return
+    }
     if (!active || typeof active.closest !== 'function') return
     const container = active.closest('[data-track-id]')
     if (!container) return
@@ -181,7 +190,7 @@ export default function PlaylistView({
         focusById(`add-note-btn-${firstId}`)
       }
     }
-  }, [skipFocusManagement, filteredTracks, tracks])
+  }, [skipFocusManagement, filteredTracks, tracks, focusContext])
 
   const handleFilterTag = useCallback(
     (tag) => {

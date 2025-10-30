@@ -1,7 +1,14 @@
-import { render, screen, fireEvent } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { render, screen, fireEvent, act } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PlaylistView from '../PlaylistView.jsx'
 
+const { focusByIdMock } = vi.hoisted(() => ({
+  focusByIdMock: vi.fn(),
+}))
+
+vi.mock('../../../utils/focusById.js', () => ({
+  default: focusByIdMock,
+}))
 vi.mock('../../../components/UndoPlaceholder.jsx', () => ({
   default: ({ pendingId, onUndo }) => (
     <button
@@ -13,6 +20,10 @@ vi.mock('../../../components/UndoPlaceholder.jsx', () => ({
     </button>
   ),
 }))
+
+beforeEach(() => {
+  focusByIdMock?.mockReset()
+})
 
 const createProps = (overrides = {}) => {
   const defaultPending = new Map([
@@ -64,6 +75,16 @@ const createProps = (overrides = {}) => {
     reimportBtnRef: { current: null },
     loadMoreBtnRef: { current: null },
     onLoadMore: vi.fn(),
+    announce: vi.fn(),
+    backgroundSync: {
+      status: 'idle',
+      loaded: 0,
+      total: null,
+      lastError: null,
+    },
+    focusContext: { reason: null, ts: 0 },
+    skipFocusManagement: false,
+    onFirstVisibleTrackChange: vi.fn(),
     ...overrides,
   }
 }
@@ -211,5 +232,63 @@ describe('PlaylistView', () => {
 
     // Should call with the first track's ID
     expect(onFirstVisibleTrackChange).toHaveBeenCalledWith('track-1')
+  })
+
+  it('restores focus to the next visible track when the active track is removed', () => {
+    const baseProps = createProps({
+      tracks: [
+        { id: 'track-1', title: 'Track 1', artist: 'Artist A', notes: [] },
+        { id: 'track-2', title: 'Track 2', artist: 'Artist B', notes: [] },
+      ],
+    })
+
+    const view = render(<PlaylistView {...baseProps} />)
+
+    const firstButton = document.getElementById('add-note-btn-track-1')
+    expect(firstButton).not.toBeNull()
+    act(() => {
+      firstButton.focus()
+    })
+
+    focusByIdMock.mockClear()
+
+    const nextProps = {
+      ...baseProps,
+      tracks: [baseProps.tracks[1]],
+      focusContext: { reason: 'manual-load-more', ts: Date.now() + 1 },
+    }
+
+    view.rerender(<PlaylistView {...nextProps} />)
+
+    expect(focusByIdMock).toHaveBeenCalledWith('add-note-btn-track-2')
+  })
+
+  it('skips focus restoration when the change comes from background pagination', () => {
+    const baseProps = createProps({
+      tracks: [
+        { id: 'track-1', title: 'Track 1', artist: 'Artist A', notes: [] },
+        { id: 'track-2', title: 'Track 2', artist: 'Artist B', notes: [] },
+      ],
+    })
+
+    const view = render(<PlaylistView {...baseProps} />)
+
+    const firstButton = document.getElementById('add-note-btn-track-1')
+    expect(firstButton).not.toBeNull()
+    act(() => {
+      firstButton.focus()
+    })
+
+    focusByIdMock.mockClear()
+
+    const nextProps = {
+      ...baseProps,
+      tracks: [baseProps.tracks[1]],
+      focusContext: { reason: 'background-load-more', ts: Date.now() + 1 },
+    }
+
+    view.rerender(<PlaylistView {...nextProps} />)
+
+    expect(focusByIdMock).not.toHaveBeenCalled()
   })
 })

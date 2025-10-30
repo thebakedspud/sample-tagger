@@ -518,9 +518,10 @@ useEffect(() => {
     )
   )
   const tracksRef = useRef(tracks)
-  const initialFocusAppliedRef = useRef(false)
   const [skipPlaylistFocusManagement, setSkipPlaylistFocusManagement] = useState(false)
   const firstVisibleTrackIdRef = useRef(null)
+  const [trackFocusContext, setTrackFocusContext] = useState({ reason: null, ts: 0 })
+  const initialFocusAppliedRef = useRef(false)
   const backgroundPagerRef = useRef(null)
   /** @type {[BackgroundSyncState, import('react').Dispatch<import('react').SetStateAction<BackgroundSyncState>>]} */
   const [backgroundSync, setBackgroundSync] = useState(() => ({
@@ -625,6 +626,10 @@ useEffect(() => {
     firstVisibleTrackIdRef.current = trackId
   }, [])
 
+  const markTrackFocusContext = useCallback((reason) => {
+    setTrackFocusContext({ reason, ts: Date.now() })
+  }, [])
+
   const applyImportResult = useCallback(
     (
       payload,
@@ -677,6 +682,7 @@ useEffect(() => {
             { importStamp: importedTimestamp ?? null }
           )
         )
+        markTrackFocusContext('initial-import')
         setImportMeta({
           ...EMPTY_IMPORT_META,
           ...meta,
@@ -694,33 +700,61 @@ useEffect(() => {
             : `Playlist imported. ${trackCount} tracks.`
         announce(message)
 
+        const releaseFocusGate = () => {
+          setSkipPlaylistFocusManagement(false)
+        }
+
+        const focusButtonForTrack = (trackId) => {
+          if (!trackId) return false
+          const node = document.getElementById('add-note-btn-' + trackId)
+          if (node && typeof node.focus === 'function') {
+            node.focus()
+            return true
+          }
+          return false
+        }
+
+        const focusFirstVisibleWithRetry = (attempt = 0) => {
+          const MAX_RETRIES = 5
+          const targetId = firstVisibleTrackIdRef.current
+
+          if (focusButtonForTrack(targetId)) {
+            initialFocusAppliedRef.current = true
+            releaseFocusGate()
+            return
+          }
+
+          if (attempt < MAX_RETRIES) {
+            requestAnimationFrame(() => focusFirstVisibleWithRetry(attempt + 1))
+            return
+          }
+
+          const firstAddNoteBtn = document.querySelector('button[id^="add-note-btn-"]')
+          if (firstAddNoteBtn && typeof firstAddNoteBtn.focus === 'function') {
+            firstAddNoteBtn.focus()
+            initialFocusAppliedRef.current = true
+          } else {
+            focusById('playlist-title')
+          }
+          releaseFocusGate()
+        }
+
         requestAnimationFrame(() => {
           try {
             if (focusBehavior === 'heading') {
               focusById('playlist-title')
+              releaseFocusGate()
               return
             }
-            if (
-              focusBehavior === 'first-track' &&
-              !initialFocusAppliedRef.current &&
-              trackCount > 0
-            ) {
-              // Use the first visible filtered/sorted track from PlaylistView.
-              // This ensures focus lands on the topmost DISPLAYED track, which may differ
-              // from adapter order (e.g., adapter returns oldest→newest, display shows newest-first).
-              // MANUAL TEST: Import a playlist where adapter order ≠ display order and verify
-              // focus lands on the topmost visible "Add note" button, not the first in import order.
-              const targetId = firstVisibleTrackIdRef.current || mapped[0]?.id
-              if (targetId) {
-                focusById('add-note-btn-' + targetId)
-                initialFocusAppliedRef.current = true
-                return
-              }
+            if (focusBehavior === 'first-track' && !initialFocusAppliedRef.current && trackCount > 0) {
+              focusFirstVisibleWithRetry(0)
+              return
             }
             focusById('playlist-title')
-          } finally {
-            // Always re-enable PlaylistView's focus management after focus completes
-            setSkipPlaylistFocusManagement(false)
+            releaseFocusGate()
+          } catch (err) {
+            releaseFocusGate()
+            throw err
           }
         })
       } catch (err) {
@@ -762,7 +796,7 @@ useEffect(() => {
 
       return { trackCount, title: resolvedTitle }
     },
-    [announce, cancelBackgroundPagination, pushRecentPlaylist, importMeta]
+    [announce, cancelBackgroundPagination, pushRecentPlaylist, importMeta, markTrackFocusContext]
   )
 
   const [editingId, setEditingId] = useState(null)
@@ -1699,6 +1733,7 @@ useEffect(() => {
           { importStamp: loadMoreStamp }
         )
         setTracks((prev) => [...prev, ...additionsWithNotes])
+        markTrackFocusContext(isBackground ? 'background-load-more' : 'manual-load-more')
         setImportMeta((prev) => ({
           ...prev,
           ...meta,
@@ -1730,7 +1765,7 @@ useEffect(() => {
         return { ok: false, code }
       }
     },
-    [announce, cancelBackgroundPagination, loadMoreTracks, msgFromCode],
+    [announce, cancelBackgroundPagination, loadMoreTracks, markTrackFocusContext, msgFromCode],
   )
 
   const startBackgroundPagination = useCallback(
@@ -2386,6 +2421,7 @@ useEffect(() => {
                 announce={announce}
                 backgroundSync={backgroundSync}
                 skipFocusManagement={skipPlaylistFocusManagement}
+                focusContext={trackFocusContext}
                 onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
               />
             )}
