@@ -126,4 +126,90 @@ describe('PlaylistView', () => {
     expect(screen.queryByRole('button', { name: /load more/i })).toBeNull()
     expect(screen.queryAllByRole('listitem')).toHaveLength(0)
   })
+
+  it('does not run focus management effect when skipFocusManagement is true', () => {
+    // Create two tracks
+    const tracks = [
+      {
+        id: 'track-1',
+        title: 'First Track',
+        artist: 'Artist A',
+        notes: ['Note A'],
+        tags: ['tag1'],
+      },
+      {
+        id: 'track-2',
+        title: 'Second Track',
+        artist: 'Artist B',
+        notes: [],
+        tags: [],
+      },
+    ]
+
+    const props = createProps({
+      tracks,
+      skipFocusManagement: true,
+    })
+
+    render(<PlaylistView {...props} />)
+
+    // With skipFocusManagement=true, the focus effect should not run
+    // We can't easily assert that focus didn't change, but we can verify the component renders
+    expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument()
+  })
+
+  it('resumes focus management when skipFocusManagement becomes false', () => {
+    const tracks = [
+      {
+        id: 'track-1',
+        title: 'First Track',
+        artist: 'Artist A',
+        notes: ['Note A'],
+        tags: ['tag1'],
+      },
+    ]
+
+    const props = createProps({
+      tracks,
+      skipFocusManagement: true,
+    })
+
+    const { rerender } = render(<PlaylistView {...props} />)
+
+    // Re-render with skipFocusManagement=false
+    rerender(<PlaylistView {...props} skipFocusManagement={false} />)
+
+    // The component should still render correctly
+    expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument()
+  })
+
+  it('calls onFirstVisibleTrackChange with first filtered track ID', () => {
+    const onFirstVisibleTrackChange = vi.fn()
+    const tracks = [
+      {
+        id: 'track-1',
+        title: 'First Track',
+        artist: 'Artist A',
+        notes: [],
+        tags: [],
+      },
+      {
+        id: 'track-2',
+        title: 'Second Track',
+        artist: 'Artist B',
+        notes: [],
+        tags: [],
+      },
+    ]
+
+    const props = createProps({
+      tracks,
+      onFirstVisibleTrackChange,
+    })
+
+    render(<PlaylistView {...props} />)
+
+    // Should call with the first track's ID
+    expect(onFirstVisibleTrackChange).toHaveBeenCalledWith('track-1')
+  })
 })

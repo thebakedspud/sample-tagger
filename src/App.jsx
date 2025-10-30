@@ -519,6 +519,8 @@ useEffect(() => {
   )
   const tracksRef = useRef(tracks)
   const initialFocusAppliedRef = useRef(false)
+  const [skipPlaylistFocusManagement, setSkipPlaylistFocusManagement] = useState(false)
+  const firstVisibleTrackIdRef = useRef(null)
   const backgroundPagerRef = useRef(null)
   /** @type {[BackgroundSyncState, import('react').Dispatch<import('react').SetStateAction<BackgroundSyncState>>]} */
   const [backgroundSync, setBackgroundSync] = useState(() => ({
@@ -619,6 +621,10 @@ useEffect(() => {
  * }} [recents]
  */
 
+  const handleFirstVisibleTrackChange = useCallback((trackId) => {
+    firstVisibleTrackIdRef.current = trackId
+  }, [])
+
   const applyImportResult = useCallback(
     (
       payload,
@@ -638,69 +644,89 @@ useEffect(() => {
 
       initialFocusAppliedRef.current = false
 
-      const mapped = Array.isArray(payload?.tracks) ? payload.tracks : []
-      const meta = payload?.meta ?? {}
-      const importedTimestamp = payload?.importedAt ?? null
-      const resolvedTitle = payload?.title || fallbackTitle || 'Imported Playlist'
+      try {
+        setSkipPlaylistFocusManagement(true) // Gate PlaylistView's focus effect
 
-      const previousTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
-      const samePlaylist =
-        previousTracks.length > 0 &&
-        importMeta?.provider &&
-        meta?.provider &&
-        importMeta?.playlistId &&
-        meta?.playlistId &&
-        importMeta.provider === meta.provider &&
-        importMeta.playlistId === meta.playlistId
+        const mapped = Array.isArray(payload?.tracks) ? payload.tracks : []
+        const meta = payload?.meta ?? {}
+        const importedTimestamp = payload?.importedAt ?? null
+        const resolvedTitle = payload?.title || fallbackTitle || 'Imported Playlist'
 
-      const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, mapped)
-      const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, mapped)
-      setNotesByTrack(nextNotesMap)
-      setTagsByTrack(nextTagsMap)
-      setTracks(
-        attachNotesToTracks(
-          mapped,
-          nextNotesMap,
-          nextTagsMap,
-          samePlaylist ? previousTracks : [],
-          { importStamp: importedTimestamp ?? null }
+        const previousTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
+        const samePlaylist =
+          previousTracks.length > 0 &&
+          importMeta?.provider &&
+          meta?.provider &&
+          importMeta?.playlistId &&
+          meta?.playlistId &&
+          importMeta.provider === meta.provider &&
+          importMeta.playlistId === meta.playlistId
+
+        const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, mapped)
+        const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, mapped)
+        setNotesByTrack(nextNotesMap)
+        setTagsByTrack(nextTagsMap)
+        setTracks(
+          attachNotesToTracks(
+            mapped,
+            nextNotesMap,
+            nextTagsMap,
+            samePlaylist ? previousTracks : [],
+            { importStamp: importedTimestamp ?? null }
+          )
         )
-      )
-      setImportMeta({
-        ...EMPTY_IMPORT_META,
-        ...meta,
-      })
-      setPlaylistTitle(resolvedTitle)
-      setImportedAt(importedTimestamp)
-      if (updateLastImportUrl && typeof sourceUrl === 'string') {
-        setLastImportUrl(sourceUrl)
+        setImportMeta({
+          ...EMPTY_IMPORT_META,
+          ...meta,
+        })
+        setPlaylistTitle(resolvedTitle)
+        setImportedAt(importedTimestamp)
+        if (updateLastImportUrl && typeof sourceUrl === 'string') {
+          setLastImportUrl(sourceUrl)
+        }
+        setScreen('playlist')
+
+        const trackCount = mapped.length
+        const message =
+          typeof announceMessage === 'string'
+            ? announceMessage
+            : `Playlist imported. ${trackCount} tracks.`
+        announce(message)
+
+        requestAnimationFrame(() => {
+          try {
+            if (focusBehavior === 'heading') {
+              focusById('playlist-title')
+              return
+            }
+            if (
+              focusBehavior === 'first-track' &&
+              !initialFocusAppliedRef.current &&
+              trackCount > 0
+            ) {
+              // Use the first visible filtered/sorted track from PlaylistView.
+              // This ensures focus lands on the topmost DISPLAYED track, which may differ
+              // from adapter order (e.g., adapter returns oldest→newest, display shows newest-first).
+              // MANUAL TEST: Import a playlist where adapter order ≠ display order and verify
+              // focus lands on the topmost visible "Add note" button, not the first in import order.
+              const targetId = firstVisibleTrackIdRef.current || mapped[0]?.id
+              if (targetId) {
+                focusById('add-note-btn-' + targetId)
+                initialFocusAppliedRef.current = true
+                return
+              }
+            }
+            focusById('playlist-title')
+          } finally {
+            // Always re-enable PlaylistView's focus management after focus completes
+            setSkipPlaylistFocusManagement(false)
+          }
+        })
+      } catch (err) {
+        // Ensure gate is reset on errors
+        setSkipPlaylistFocusManagement(false)
+        throw err
       }
-      setScreen('playlist')
-
-      const trackCount = mapped.length
-      const message =
-        typeof announceMessage === 'string'
-          ? announceMessage
-          : `Playlist imported. ${trackCount} tracks.`
-      announce(message)
-
-      requestAnimationFrame(() => {
-        if (focusBehavior === 'heading') {
-          focusById('playlist-title')
-          return
-        }
-        if (
-          focusBehavior === 'first-track' &&
-          !initialFocusAppliedRef.current &&
-          trackCount > 0 &&
-          mapped[0]?.id
-        ) {
-          focusById('add-note-btn-' + mapped[0].id)
-          initialFocusAppliedRef.current = true
-          return
-        }
-        focusById('playlist-title')
-      })
 
       if (recents) {
         const importedAtMs =
@@ -2358,6 +2384,8 @@ useEffect(() => {
                 onLoadMore={handleLoadMore}
                 announce={announce}
                 backgroundSync={backgroundSync}
+                skipFocusManagement={skipPlaylistFocusManagement}
+                onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
               />
             )}
           </>

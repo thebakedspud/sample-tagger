@@ -50,6 +50,16 @@ const DEFAULT_BACKGROUND_SYNC = {
  * @param {string[]} props.customTags
 * @param {(message: string) => void} props.announce
  * @param {BackgroundSyncState} [props.backgroundSync]
+ * @param {boolean} [props.skipFocusManagement] - When true, the filter-aware focus management
+ *   effect will not run. This is a one-shot guard used during initial imports to prevent
+ *   PlaylistView from interfering with App's focus handoff. Consumers are responsible for
+ *   managing their own focus when this flag is set, and must reset it to false after focus
+ *   completes to restore normal filter-based focus management behavior.
+ * @param {(trackId: string | null) => void} [props.onFirstVisibleTrackChange] - Callback invoked
+ *   whenever the first visible track changes (due to sorting, filtering, or data updates).
+ *   Receives the ID of the first track in the filtered/sorted list, or null if no tracks are
+ *   visible. This enables App to focus the correct track even when adapter order differs from
+ *   display order (e.g., oldest→newest import with newest-first sort).
  */
 export default function PlaylistView({
   playlistTitle,
@@ -82,6 +92,8 @@ export default function PlaylistView({
   customTags,
   announce,
   backgroundSync = DEFAULT_BACKGROUND_SYNC,
+  skipFocusManagement = false,
+  onFirstVisibleTrackChange,
 }) {
   const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
   const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
@@ -133,7 +145,23 @@ export default function PlaylistView({
     announce,
   })
 
+  // Notify App of the first visible track ID for focus management.
+  // This runs on every filteredTracks change to keep App's focus target in sync with the
+  // actual display order (which may differ from import order due to sorting).
   useEffect(() => {
+    if (onFirstVisibleTrackChange) {
+      const firstId = filteredTracks[0]?.id ?? null
+      onFirstVisibleTrackChange(firstId)
+    }
+  }, [filteredTracks, onFirstVisibleTrackChange])
+
+  // Filter-aware focus management: restore focus when current track is hidden by filters.
+  // IMPORTANT: This effect must not run when skipFocusManagement is true. During initial
+  // imports, App sets this flag to prevent PlaylistView from interfering with its own
+  // focus handoff. App is responsible for resetting the flag after focus completes.
+  useEffect(() => {
+    if (skipFocusManagement) return // Exit early - App is handling focus
+
     if (!Array.isArray(tracks) || tracks.length === 0) return
     if (filteredTracks.length === 0) {
       searchInputRef.current?.focus()
@@ -149,10 +177,11 @@ export default function PlaylistView({
     if (!stillVisible) {
       const firstId = filteredTracks[0]?.id
       if (firstId != null) {
-        focusById(`track-${firstId}`)
+        // Focus the Add note button instead of the container for consistency
+        focusById(`add-note-btn-${firstId}`)
       }
     }
-  }, [filteredTracks, tracks])
+  }, [skipFocusManagement, filteredTracks, tracks])
 
   const handleFilterTag = useCallback(
     (tag) => {
