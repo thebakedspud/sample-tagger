@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import focusById from '../../utils/focusById.js'
 import SearchFilterBar from '../filter/SearchFilterBar.jsx'
 import useTrackFilter from '../filter/useTrackFilter.js'
@@ -148,7 +148,7 @@ export default function PlaylistView({
   // Notify App of the first visible track ID for focus management.
   // This runs on every filteredTracks change to keep App's focus target in sync with the
   // actual display order (which may differ from import order due to sorting).
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (onFirstVisibleTrackChange) {
       const firstId = filteredTracks[0]?.id ?? null
       onFirstVisibleTrackChange(firstId)
