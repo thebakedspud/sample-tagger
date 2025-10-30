@@ -644,13 +644,15 @@ useEffect(() => {
 
       initialFocusAppliedRef.current = false
 
+      // Declare variables outside try block so they're accessible in the recents block below
+      const mapped = Array.isArray(payload?.tracks) ? payload.tracks : []
+      const meta = payload?.meta ?? {}
+      const importedTimestamp = payload?.importedAt ?? null
+      const resolvedTitle = payload?.title || fallbackTitle || 'Imported Playlist'
+      const trackCount = mapped.length
+
       try {
         setSkipPlaylistFocusManagement(true) // Gate PlaylistView's focus effect
-
-        const mapped = Array.isArray(payload?.tracks) ? payload.tracks : []
-        const meta = payload?.meta ?? {}
-        const importedTimestamp = payload?.importedAt ?? null
-        const resolvedTitle = payload?.title || fallbackTitle || 'Imported Playlist'
 
         const previousTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
         const samePlaylist =
@@ -686,7 +688,6 @@ useEffect(() => {
         }
         setScreen('playlist')
 
-        const trackCount = mapped.length
         const message =
           typeof announceMessage === 'string'
             ? announceMessage
