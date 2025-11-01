@@ -475,29 +475,6 @@ export default function App() {
 
   const { message: announceMsg, announce } = useAnnounce({ debounceMs: 60 })
 
-  useEffect(() => {
-    if (!DEBUG_FOCUS || typeof document === 'undefined') return undefined
-    const handler = (event) => {
-      const target = /** @type {Element | null} */ (event.target)
-      const trackId =
-        typeof target?.closest === 'function'
-          ? target.closest('[data-track-id]')?.getAttribute('data-track-id') ?? null
-          : null
-      const payload = {
-        targetId: target?.id ?? null,
-        targetRole: typeof target?.getAttribute === 'function' ? target.getAttribute('role') : null,
-        trackId,
-        ts: Date.now(),
-      }
-      // eslint-disable-next-line no-console
-      console.log('[focus dbg] document:focusin', payload)
-    }
-    document.addEventListener('focusin', handler, true)
-    return () => {
-      document.removeEventListener('focusin', handler, true)
-    }
-  }, [])
-
   // IMPORT state
   const [importUrl, setImportUrl] = useState('')
   const providerChip = detectProvider(importUrl || '')
