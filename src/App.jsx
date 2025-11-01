@@ -721,7 +721,7 @@ useEffect(() => {
     // Reassert focus during background pagination if first visible track changed and focus was lost
     if (prevTrackId && prevTrackId !== trackId && document.activeElement === document.body) {
       requestAnimationFrame(() => {
-        const buttonId = `add-note-btn-${prevTrackId}`
+        const buttonId = `add-note-btn-${trackId}`
         const elem = document.getElementById(buttonId)
         if (elem) {
           debugFocus('app:first-visible:refocus', {
