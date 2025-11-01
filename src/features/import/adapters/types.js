@@ -199,6 +199,7 @@ export function isKnownAdapterErrorObject(e) {
  * @property {{provider?: string, playlistId?: string|null, snapshotId?: string|null, sourceUrl?: string, debug?: any}=} existingMeta
  * @property {number=} startIndex           Starting index for fallback IDs of the next page (1-based internally).
  * @property {Iterable<string>=} existingIds Set/array of IDs to skip when appending (client-side dedupe).
+ * @property {AbortSignal=} signal           Optional abort signal for cancelling the request.
  */
 
 /**

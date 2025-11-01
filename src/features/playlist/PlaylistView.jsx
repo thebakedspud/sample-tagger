@@ -4,7 +4,22 @@ import SearchFilterBar from '../filter/SearchFilterBar.jsx'
 import useTrackFilter from '../filter/useTrackFilter.js'
 import { SORT_KEY } from '../filter/filterTracks.js'
 
-const DEBUG_FOCUS = process.env.NODE_ENV !== 'production'
+const DEBUG_FOCUS = (() => {
+  if (typeof globalThis === 'undefined') return true
+  const maybeProcess = /** @type {{ env?: { NODE_ENV?: string } }} */ (globalThis).process
+  if (maybeProcess && maybeProcess.env && typeof maybeProcess.env.NODE_ENV === 'string') {
+    return maybeProcess.env.NODE_ENV !== 'production'
+  }
+  return true
+})()
+
+const DEFAULT_BACKGROUND_SYNC = Object.freeze({
+  status: 'idle',
+  loaded: 0,
+  total: null,
+  lastError: null,
+  snapshotId: null,
+})
 
 function debugFocus(label, details = {}) {
   if (!DEBUG_FOCUS || typeof document === 'undefined') return
@@ -15,7 +30,6 @@ function debugFocus(label, details = {}) {
     activeRole: typeof active?.getAttribute === 'function' ? active.getAttribute('role') : null,
     ts: Date.now(),
   }
-  // eslint-disable-next-line no-console
   console.log(`[focus dbg] ${label}`, payload)
 }
 import TrackCard from './TrackCard.jsx'
@@ -245,6 +259,7 @@ export default function PlaylistView({
   const showFilteringBanner = showLoadMore && hasActiveFilters
   const isDateSort = sort?.key === SORT_KEY.DATE
   const loadingStatus = backgroundSync?.status ?? 'idle'
+  const isCooldown = loadingStatus === 'cooldown'
   const showBackgroundBanner =
     isDateSort && loadingStatus === 'loading' && showLoadMore
   const loadedLabel =
@@ -257,6 +272,11 @@ export default function PlaylistView({
       : null
   const showBackgroundError =
     loadingStatus === 'error' && typeof backgroundSync?.lastError === 'string'
+  const cooldownMessage =
+    isCooldown && typeof backgroundSync?.lastError === 'string'
+      ? backgroundSync.lastError
+      : ''
+  const cooldownMessageId = cooldownMessage ? 'load-more-cooldown' : undefined
 
   return (
     <section aria-labelledby="playlist-title">
@@ -437,17 +457,36 @@ export default function PlaylistView({
       )}
 
       {showLoadMore && (
-        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
+        <div
+          style={{
+            marginTop: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
           <button
             type="button"
             ref={loadMoreBtnRef}
             className="btn"
             onClick={onLoadMore}
-            disabled={isAnyImportBusy}
+            disabled={isAnyImportBusy || isCooldown}
             aria-busy={showLoadMoreSpinner ? 'true' : 'false'}
+            aria-describedby={cooldownMessageId}
           >
             {showLoadMoreSpinner ? 'Loading more...' : 'Load more'}
           </button>
+          {cooldownMessage && (
+            <p
+              id="load-more-cooldown"
+              role="status"
+              aria-live="polite"
+              style={{ color: 'var(--muted)', textAlign: 'center', maxWidth: 360 }}
+            >
+              {cooldownMessage}
+            </p>
+          )}
         </div>
       )}
     </section>

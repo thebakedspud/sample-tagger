@@ -329,7 +329,10 @@ export default function usePlaylistImportFlow() {
     setErrorCode(null)
 
     try {
-      const res = await importNext({ context: { importBusyKind: 'load-more' } })
+      const res = await importNext({
+        context: { importBusyKind: 'load-more' },
+        signal: options.signal,
+      })
 
       if (requestId !== requestIdRef.current) {
         // Another request started after this one; mark as stale so callers can ignore without side effects.

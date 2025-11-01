@@ -26,7 +26,14 @@ import './styles/primitives.css';
 import './styles/app.css';
 import useAnnounce from './features/a11y/useAnnounce.js'
 
-const DEBUG_FOCUS = process.env.NODE_ENV !== 'production'
+const DEBUG_FOCUS = (() => {
+  if (typeof globalThis === 'undefined') return true
+  const maybeProcess = /** @type {{ env?: { NODE_ENV?: string } }} */ (globalThis).process
+  if (maybeProcess && maybeProcess.env && typeof maybeProcess.env.NODE_ENV === 'string') {
+    return maybeProcess.env.NODE_ENV !== 'production'
+  }
+  return true
+})()
 
 function debugFocus(label, details = {}) {
   if (!DEBUG_FOCUS || typeof document === 'undefined') return
@@ -37,7 +44,6 @@ function debugFocus(label, details = {}) {
     activeRole: typeof active?.getAttribute === 'function' ? active.getAttribute('role') : null,
     ts: Date.now(),
   }
-  // eslint-disable-next-line no-console
   console.log(`[focus dbg] ${label}`, payload)
 }
 
@@ -86,7 +92,7 @@ const MAX_TAG_LENGTH = 24
 const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/
 
 /**
- * @typedef {'idle' | 'pending' | 'loading' | 'complete' | 'error'} BackgroundSyncStatus
+ * @typedef {'idle' | 'pending' | 'loading' | 'cooldown' | 'complete' | 'error'} BackgroundSyncStatus
  * @typedef {{ status: BackgroundSyncStatus, loaded: number, total: number|null, lastError: string|null, snapshotId: string|null }} BackgroundSyncState
  */
 
@@ -537,7 +543,16 @@ useEffect(() => {
   const firstVisibleTrackIdRef = useRef(null)
   const [trackFocusContext, setTrackFocusContext] = useState({ reason: null, ts: 0 })
   const initialFocusAppliedRef = useRef(false)
+  /** @type {import('react').MutableRefObject<{ key: string | null, requestId: number | null } | null>} */
   const backgroundPagerRef = useRef(null)
+  /** @type {import('react').MutableRefObject<Map<string, { promise: Promise<any>, controller: AbortController, mode: 'manual' | 'background', requestId: number }>>} */
+  const pagerFlightsRef = useRef(new Map())
+  /** @type {import('react').MutableRefObject<Map<string, true>>} */
+  const pagerLastSuccessRef = useRef(new Map())
+  const pagerCooldownRef = useRef({ until: 0 })
+  const pagerResumeTimerRef = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null))
+  const pagerRequestIdRef = useRef(0)
+  const startBackgroundPaginationRef = useRef(() => {})
   /** @type {[BackgroundSyncState, import('react').Dispatch<import('react').SetStateAction<BackgroundSyncState>>]} */
   const [backgroundSync, setBackgroundSync] = useState(() => ({
     status: importMeta?.hasMore ? 'pending' : 'complete',
@@ -552,23 +567,49 @@ useEffect(() => {
     snapshotId: importMeta?.snapshotId ?? null,
   }))
 
-  const cancelBackgroundPagination = useCallback(() => {
-    const controller = backgroundPagerRef.current
-    if (controller && typeof controller.cancel === 'function') {
+  const getPagerKey = useCallback((meta) => {
+    if (!meta || typeof meta !== 'object') return null
+    const provider = typeof meta.provider === 'string' && meta.provider.trim()
+      ? meta.provider.trim()
+      : 'no-provider'
+    const playlistId = typeof meta.playlistId === 'string' && meta.playlistId.trim()
+      ? meta.playlistId.trim()
+      : 'no-playlist'
+    const snapshotId = typeof meta.snapshotId === 'string' && meta.snapshotId.trim()
+      ? meta.snapshotId.trim()
+      : 'no-snap'
+    const cursor =
+      typeof meta.cursor === 'string' && meta.cursor.trim()
+        ? meta.cursor.trim()
+        : '∅'
+    return `${provider}::${playlistId}::${snapshotId}::${cursor}`
+  }, [])
+
+  const cancelBackgroundPagination = useCallback((options = {}) => {
+    if (pagerResumeTimerRef.current) {
+      clearTimeout(pagerResumeTimerRef.current)
+      pagerResumeTimerRef.current = null
+    }
+    pagerFlightsRef.current.forEach((flight) => {
       try {
-        controller.cancel()
+        flight.controller.abort()
       } catch {
         // ignore cancellation errors
       }
-    }
+    })
+    pagerFlightsRef.current.clear()
     backgroundPagerRef.current = null
+    if (options && options.resetHistory) {
+      pagerLastSuccessRef.current.clear()
+      pagerCooldownRef.current.until = 0
+    }
     setBackgroundSync((prev) => {
       const hasMore = Boolean(importMetaRef.current?.hasMore)
-      if (!hasMore) {
-        return { ...prev, status: 'complete', lastError: null }
+      return {
+        ...prev,
+        status: hasMore ? 'pending' : 'complete',
+        lastError: null,
       }
-      if (prev.status === 'pending') return prev
-      return { ...prev, status: 'pending' }
     })
   }, [setBackgroundSync])
 
@@ -606,6 +647,15 @@ useEffect(() => {
     recentRef.current = next
     setRecentPlaylists(next)
     saveRecent(next)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (pagerResumeTimerRef.current) {
+        clearTimeout(pagerResumeTimerRef.current)
+        pagerResumeTimerRef.current = null
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -661,7 +711,7 @@ useEffect(() => {
         updateLastImportUrl = true,
       } = options || {}
 
-      cancelBackgroundPagination()
+      cancelBackgroundPagination({ resetHistory: true })
 
       initialFocusAppliedRef.current = false
 
@@ -759,7 +809,9 @@ useEffect(() => {
             return
           }
 
-          const firstAddNoteBtn = document.querySelector('button[id^="add-note-btn-"]')
+          const firstAddNoteBtn = /** @type {HTMLButtonElement | null} */ (
+            document.querySelector('button[id^="add-note-btn-"]')
+          )
           if (firstAddNoteBtn && typeof firstAddNoteBtn.focus === 'function') {
             debugFocus('app:init-import:fallback-first-rendered', {
               reportedTrackId: targetId,
@@ -1497,7 +1549,7 @@ useEffect(() => {
   const handleImport = async (e) => {
     e?.preventDefault?.()
     setImportError(null)
-    cancelBackgroundPagination()
+    cancelBackgroundPagination({ resetHistory: true })
     const trimmedUrl = importUrl.trim()
 
     if (!trimmedUrl) {
@@ -1580,7 +1632,7 @@ useEffect(() => {
       return { ok: false, error: msg }
     }
 
-    cancelBackgroundPagination()
+    cancelBackgroundPagination({ resetHistory: true })
     setImportUrl(trimmedUrl)
     setImportError(null)
     updateRecentCardState(recent.id, { loading: true, error: null })
@@ -1642,7 +1694,7 @@ useEffect(() => {
 
   const handleReimport = async () => {
     if (!lastImportUrl) return
-    cancelBackgroundPagination()
+    cancelBackgroundPagination({ resetHistory: true })
     const wasActive = document.activeElement === reimportBtnRef.current
     setImportError(null)
     announce('Re-importing playlist.')
@@ -1702,130 +1754,306 @@ useEffect(() => {
     async (options = {}) => {
       const mode = options?.mode === 'background' ? 'background' : 'manual'
       const isBackground = mode === 'background'
+      const metaSnapshot = options?.metaOverride ?? importMetaRef.current
       const sourceUrl = lastImportUrlRef.current
-      const metaSnapshot = importMetaRef.current
 
       if (!metaSnapshot?.cursor || !metaSnapshot?.provider || !sourceUrl) {
         return { ok: false, reason: 'unavailable' }
       }
 
-      if (!isBackground) {
-        cancelBackgroundPagination()
+      const key = getPagerKey(metaSnapshot)
+      if (!key) {
+        return { ok: false, reason: 'unavailable' }
       }
 
-      setImportError(null)
       if (!isBackground) {
-        announce('Loading more tracks.')
+        setImportError(null)
       }
 
-      try {
-        const currentTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
-        const existingIds = currentTracks.map((t) => t.id)
-        const result = await loadMoreTracks({
-          providerHint: metaSnapshot.provider ?? null,
-          existingMeta: metaSnapshot,
-          startIndex: currentTracks.length,
-          existingIds,
-          sourceUrl,
-        })
-
-        if (result?.stale) {
-          return { ok: false, stale: true }
+      const finalizeManualResult = (result) => {
+        if (!result || result.stale || result.aborted) {
+          return result
         }
-
-        if (!result.ok) {
-          const code = result.code ?? CODES.ERR_UNKNOWN
-          const msg = msgFromCode(code)
-          console.log('[load-more error]', { code, raw: result.error })
-          setImportError(msg)
-          if (!isBackground) {
-            announce(msg)
+        if (result.ok) {
+          if (result.added > 0) {
+            const targetId = result.firstNewTrackId ?? null
+            if (targetId) {
+              debugFocus('app:load-more:manual', {
+                firstNewTrackId: targetId,
+                added: result.added,
+              })
+              focusById(`track-${targetId}`)
+            } else {
+              requestAnimationFrame(() => {
+                debugFocus('app:load-more:manual-fallback', {
+                  added: result.added,
+                })
+                loadMoreBtnRef.current?.focus()
+              })
+            }
+            announce(`${result.added} more tracks loaded.`)
+          } else {
+            announce('No additional tracks available.')
           }
-          return { ok: false, code }
+          setImportError(null)
+        } else if (result.code === CODES.ERR_RATE_LIMITED && result.retryAt) {
+          const base = msgFromCode(CODES.ERR_RATE_LIMITED)
+          const resumeLabel =
+            typeof result.retryAt === 'number'
+              ? new Date(result.retryAt).toLocaleTimeString()
+              : null
+          const message = resumeLabel ? `${base} Resume after ${resumeLabel}.` : base
+          setImportError(message)
+          announce(message)
+        } else if (result.code) {
+          const message = msgFromCode(result.code)
+          setImportError(message)
+          announce(message)
+        } else {
+          const fallback = msgFromCode(CODES.ERR_UNKNOWN)
+          setImportError(fallback)
+          announce(fallback)
         }
+        return result
+      }
 
-        const additions = result.data.tracks
-        const meta = result.data.meta ?? {}
+      const resolveRetryAfterMs = (error) => {
+        if (!error || typeof error !== 'object') return null
+        const directMs = Number(error.retryAfterMs)
+        if (Number.isFinite(directMs) && directMs > 0) return directMs
+        const retrySeconds = Number(error.retryAfterSeconds ?? error.retryAfter)
+        if (Number.isFinite(retrySeconds) && retrySeconds > 0) return retrySeconds * 1000
+        return null
+      }
 
-        if (!additions.length) {
+      const scheduleResume = (resumeAtMs) => {
+        if (!resumeAtMs) return
+        const normalized = Math.max(resumeAtMs, Date.now() + 1000)
+        pagerCooldownRef.current.until = normalized
+        if (pagerResumeTimerRef.current) {
+          clearTimeout(pagerResumeTimerRef.current)
+        }
+        const delay = Math.max(0, normalized - Date.now())
+        pagerResumeTimerRef.current = setTimeout(() => {
+          pagerResumeTimerRef.current = null
+          pagerCooldownRef.current.until = 0
+          startBackgroundPaginationRef.current()
+        }, delay)
+      }
+
+      const now = Date.now()
+      const cooldownUntil = pagerCooldownRef.current.until ?? 0
+      if (cooldownUntil > now) {
+        const resumeTime = new Date(cooldownUntil).toLocaleTimeString()
+        const cooldownMessage = `${msgFromCode(CODES.ERR_RATE_LIMITED)} Resume after ${resumeTime}.`
+        setBackgroundSync((prev) => ({
+          ...prev,
+          status: 'cooldown',
+          lastError: cooldownMessage,
+        }))
+        if (!isBackground) {
+          setImportError(cooldownMessage)
+          announce(cooldownMessage)
+        }
+        return { ok: false, code: CODES.ERR_RATE_LIMITED, retryAt: cooldownUntil }
+      }
+
+      if (pagerLastSuccessRef.current.has(key)) {
+        return { ok: true, done: !metaSnapshot?.hasMore, added: 0, skipped: true }
+      }
+
+      const existingFlight = pagerFlightsRef.current.get(key)
+      if (existingFlight) {
+        if (isBackground) {
+          backgroundPagerRef.current = { key, requestId: existingFlight.requestId }
+          return existingFlight.promise
+        }
+        announce('Loading more tracks.')
+        return existingFlight.promise.then((res) => finalizeManualResult(res))
+      }
+
+      const controller = new AbortController()
+      const requestId = ++pagerRequestIdRef.current
+
+      if (isBackground) {
+        backgroundPagerRef.current = { key, requestId }
+      }
+
+      const flightPromise = (async () => {
+        try {
+          if (isBackground) {
+            setBackgroundSync((prev) => ({
+              ...prev,
+              status: 'loading',
+              lastError: null,
+            }))
+          } else {
+            announce('Loading more tracks.')
+          }
+
+          const currentTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
+          const existingIds = currentTracks.map((t) => t.id)
+          const result = await loadMoreTracks({
+            providerHint: metaSnapshot.provider ?? null,
+            existingMeta: metaSnapshot,
+            startIndex: currentTracks.length,
+            existingIds,
+            sourceUrl,
+            signal: controller.signal,
+          })
+
+          if (result?.stale) {
+            return { ok: false, stale: true }
+          }
+
+          if (!result.ok) {
+            const code = result.code ?? CODES.ERR_UNKNOWN
+            const msg = msgFromCode(code)
+            console.log('[load-more error]', { code, raw: result.error })
+            if (code === CODES.ERR_RATE_LIMITED) {
+              const retryMs = resolveRetryAfterMs(result.error) ?? 60000
+              const resumeAt = Date.now() + retryMs
+              scheduleResume(resumeAt)
+              const resumeTime = new Date(resumeAt).toLocaleTimeString()
+              const cooldownMessage = `${msg} Resume after ${resumeTime}.`
+              setBackgroundSync((prev) => ({
+                ...prev,
+                status: 'cooldown',
+                lastError: cooldownMessage,
+              }))
+              return { ok: false, code, retryAt: resumeAt }
+            }
+            if (isBackground) {
+              setBackgroundSync((prev) => ({
+                ...prev,
+                status: 'error',
+                lastError: msg,
+              }))
+            } else {
+              setImportError(msg)
+              announce(msg)
+            }
+            return { ok: false, code }
+          }
+
+          const additions = Array.isArray(result.data?.tracks) ? result.data.tracks : []
+          const meta = result.data?.meta ?? {}
+          const hasMore = Boolean(meta?.hasMore)
+
+          if (!additions.length) {
+            setImportMeta((prev) => ({
+              ...prev,
+              ...meta,
+            }))
+            pagerLastSuccessRef.current.set(key, true)
+            if (isBackground) {
+              setBackgroundSync((prev) => ({
+                ...prev,
+                status: hasMore ? 'pending' : 'complete',
+                lastError: null,
+                snapshotId: meta?.snapshotId ?? prev.snapshotId ?? null,
+              }))
+            }
+            return { ok: true, done: !hasMore, added: 0, firstNewTrackId: null }
+          }
+
+          const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, additions)
+          const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, additions)
+          setNotesByTrack(nextNotesMap)
+          setTagsByTrack(nextTagsMap)
+          const baseTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
+          const loadMoreStamp = new Date().toISOString()
+          const additionsWithNotes = attachNotesToTracks(
+            additions,
+            nextNotesMap,
+            nextTagsMap,
+            baseTracks,
+            { importStamp: loadMoreStamp },
+          )
+          setTracks((prev) => [...prev, ...additionsWithNotes])
+          markTrackFocusContext(isBackground ? 'background-load-more' : 'manual-load-more')
           setImportMeta((prev) => ({
             ...prev,
             ...meta,
           }))
-          if (!isBackground) {
-            announce('No additional tracks available.')
-          }
-          return { ok: true, done: !meta?.hasMore, added: 0 }
-        }
+          setImportedAt(loadMoreStamp)
+          pagerLastSuccessRef.current.set(key, true)
 
-        const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, additions)
-        const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, additions)
-        setNotesByTrack(nextNotesMap)
-        setTagsByTrack(nextTagsMap)
-        const baseTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
-        const loadMoreStamp = new Date().toISOString()
-        const additionsWithNotes = attachNotesToTracks(
-          additions,
-          nextNotesMap,
-          nextTagsMap,
-          baseTracks,
-          { importStamp: loadMoreStamp }
-        )
-        setTracks((prev) => [...prev, ...additionsWithNotes])
-        markTrackFocusContext(isBackground ? 'background-load-more' : 'manual-load-more')
-        setImportMeta((prev) => ({
-          ...prev,
-          ...meta,
-        }))
-        setImportedAt(loadMoreStamp)
-        if (isBackground) {
-          debugFocus('app:load-more:auto', {
-            added: additions.length,
-          })
-        }
-        if (!isBackground) {
-          const firstNewId = additions[0]?.id
-          if (firstNewId) {
-            debugFocus('app:load-more:manual', {
-              firstNewTrackId: firstNewId,
+          const firstNewId = additions[0]?.id ?? null
+
+          if (isBackground) {
+            setBackgroundSync((prev) => ({
+              ...prev,
+              status: hasMore ? 'pending' : 'complete',
+              lastError: null,
+              snapshotId: meta?.snapshotId ?? prev.snapshotId ?? null,
+            }))
+            debugFocus('app:load-more:auto', {
               added: additions.length,
             })
-            focusById(`track-${firstNewId}`)
-          } else {
-            requestAnimationFrame(() => {
-              debugFocus('app:load-more:manual-fallback', {
-                added: additions.length,
-              })
-              loadMoreBtnRef.current?.focus()
-            })
+            if (!hasMore) {
+              announce('All tracks loaded; order complete.')
+            }
           }
-          announce(additions.length + ' more tracks loaded.')
+
+          return { ok: true, done: !hasMore, added: additions.length, firstNewTrackId: firstNewId }
+        } catch (err) {
+          if (err?.name === 'AbortError') {
+            if (isBackground) {
+              setBackgroundSync((prev) => ({
+                ...prev,
+                status: 'pending',
+              }))
+            }
+            return { ok: false, aborted: true }
+          }
+          const code = extractErrorCode(err)
+          const msg = msgFromCode(code)
+          console.log('[load-more error]', { code, raw: err })
+          if (isBackground) {
+            setBackgroundSync((prev) => ({
+              ...prev,
+              status: 'error',
+              lastError: msg,
+            }))
+          }
+          return { ok: false, code }
+        } finally {
+          pagerFlightsRef.current.delete(key)
+          if (backgroundPagerRef.current && backgroundPagerRef.current.key === key && backgroundPagerRef.current.requestId === requestId) {
+            backgroundPagerRef.current = null
+          }
         }
-        return { ok: true, done: !meta?.hasMore, added: additions.length }
-      } catch (err) {
-        if (err?.name === 'AbortError') {
-          return { ok: false, aborted: true }
-        }
-        const code = extractErrorCode(err)
-        const msg = msgFromCode(code)
-        console.log('[load-more error]', { code, raw: err })
-        setImportError(msg)
-        if (!isBackground) {
-          announce(msg)
-        }
-        return { ok: false, code }
-      }
+      })()
+
+      pagerFlightsRef.current.set(key, { promise: flightPromise, controller, mode, requestId })
+      return isBackground ? flightPromise : flightPromise.then((res) => finalizeManualResult(res))
     },
-    [announce, cancelBackgroundPagination, loadMoreTracks, markTrackFocusContext, msgFromCode],
+    [
+      announce,
+      getPagerKey,
+      loadMoreTracks,
+      markTrackFocusContext,
+      msgFromCode,
+      setBackgroundSync,
+      setImportError,
+      setImportMeta,
+      setImportedAt,
+      setNotesByTrack,
+      setTagsByTrack,
+      setTracks,
+    ],
   )
 
   const startBackgroundPagination = useCallback(
     (metaOverride) => {
+      if (importStatus !== ImportFlowStatus.IDLE) return
+
       const meta = metaOverride ?? importMetaRef.current
-      const snapshotId = meta?.snapshotId ?? null
+      if (!meta) return
+
       const hasMore = Boolean(meta?.hasMore && meta?.cursor)
       const sourceUrl = lastImportUrlRef.current
-
       if (!hasMore || !sourceUrl) {
         setBackgroundSync((prev) => ({
           ...prev,
@@ -1835,97 +2063,59 @@ useEffect(() => {
         return
       }
 
-      cancelBackgroundPagination()
+      const key = getPagerKey(meta)
+      if (!key) return
 
-      let cancelled = false
-      const controller = {
-        cancel: () => {
-          cancelled = true
-        },
-      }
-      backgroundPagerRef.current = controller
-
-      setBackgroundSync((prev) => ({
-        ...prev,
-        status: 'loading',
-        lastError: null,
-      }))
-
-      const loop = async () => {
-        while (!cancelled) {
-          const currentMeta = importMetaRef.current
-          if (!currentMeta || currentMeta.snapshotId !== snapshotId) {
-            break
-          }
-          if (!currentMeta.hasMore || !currentMeta.cursor) {
-            break
-          }
-
-          const result = await handleLoadMore({ mode: 'background' })
-          if (!result) break
-          if (result.aborted) return
-          if (result.stale) {
-            continue
-          }
-          if (!result.ok) {
-            const msg = msgFromCode(result.code ?? CODES.ERR_UNKNOWN)
-            setBackgroundSync((prevState) => ({
-              ...prevState,
-              status: 'error',
-              lastError: msg,
-            }))
-            return
-          }
-        }
-
-        if (!cancelled) {
-          setBackgroundSync((prevState) => ({
-            ...prevState,
-            status: 'complete',
-            lastError: null,
-          }))
-          announce('All tracks loaded; order complete.')
-        }
+      if (pagerLastSuccessRef.current.has(key)) {
+        return
       }
 
-      loop()
-        .catch((err) => {
-          if (err?.name === 'AbortError') return
-          const msg = msgFromCode(extractErrorCode(err))
-          setBackgroundSync((prevState) => ({
-            ...prevState,
-            status: 'error',
-            lastError: msg,
-          }))
-        })
-        .finally(() => {
-          if (backgroundPagerRef.current === controller) {
-            backgroundPagerRef.current = null
-          }
-        })
+      const now = Date.now()
+      const cooldownUntil = pagerCooldownRef.current.until ?? 0
+      if (cooldownUntil > now) {
+        setBackgroundSync((prev) => ({
+          ...prev,
+          status: 'cooldown',
+        }))
+        if (!pagerResumeTimerRef.current) {
+          const delay = Math.max(0, cooldownUntil - now)
+          pagerResumeTimerRef.current = setTimeout(() => {
+            pagerResumeTimerRef.current = null
+            pagerCooldownRef.current.until = 0
+            startBackgroundPaginationRef.current()
+          }, delay)
+        }
+        return
+      }
+
+      const existingFlight = pagerFlightsRef.current.get(key)
+      if (existingFlight) {
+        backgroundPagerRef.current = { key, requestId: existingFlight.requestId }
+        return
+      }
+
+      handleLoadMore({ mode: 'background', metaOverride: meta })
     },
-    [announce, cancelBackgroundPagination, handleLoadMore, msgFromCode],
+    [getPagerKey, handleLoadMore, importStatus, lastImportUrlRef, setBackgroundSync],
   )
 
   useEffect(() => {
-    const meta = importMetaRef.current
-    const hasMore = Boolean(importMeta?.hasMore && meta?.hasMore)
-    const cursor = meta?.cursor ?? importMeta?.cursor ?? null
+    startBackgroundPaginationRef.current = startBackgroundPagination
+    return () => {
+      startBackgroundPaginationRef.current = () => {}
+    }
+  }, [startBackgroundPagination])
 
+  useEffect(() => {
     if (screen !== 'playlist') return
-    if (!hasMore || !cursor) return
-    if (backgroundSync.status !== 'pending') return
+    if (!importMeta?.hasMore || !importMeta?.cursor) return
     if (!lastImportUrl) return
     if (importStatus !== ImportFlowStatus.IDLE) return
-    if (backgroundPagerRef.current) return
-
-    startBackgroundPagination(meta)
+    startBackgroundPagination()
   }, [
     screen,
     importMeta.hasMore,
     importMeta.cursor,
-    importMeta.snapshotId,
-    backgroundSync.status,
     importStatus,
     lastImportUrl,
     startBackgroundPagination,
@@ -2038,7 +2228,7 @@ useEffect(() => {
   }
 
   const handleClearAll = () => {
-    cancelBackgroundPagination()
+    cancelBackgroundPagination({ resetHistory: true })
     // Reset transient UI and timers
     clearInlineUndo()
     setEditingId(null); setDraft(''); setError(null)
