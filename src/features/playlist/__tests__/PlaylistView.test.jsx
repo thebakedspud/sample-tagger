@@ -1,4 +1,6 @@
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
+import '@testing-library/jest-dom/vitest'
+import { render, screen, fireEvent, act, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PlaylistView from '../PlaylistView.jsx'
 
@@ -85,6 +87,10 @@ const createProps = (overrides = {}) => {
     focusContext: { reason: null, ts: 0 },
     skipFocusManagement: false,
     onFirstVisibleTrackChange: vi.fn(),
+    onAddTag: vi.fn(),
+    onRemoveTag: vi.fn(),
+    stockTags: [],
+    customTags: [],
     ...overrides,
   }
 }
@@ -108,10 +114,7 @@ describe('PlaylistView', () => {
       screen.getByRole('button', { name: /re-import/i })
     ).toBeInTheDocument()
 
-    const loadMoreButton = screen
-      .getAllByRole('button', { name: /load/i })
-      .find((btn) => btn.textContent?.toLowerCase().includes('load'))
-    expect(loadMoreButton).toBeTruthy()
+    const loadMoreButton = screen.getByRole('button', { name: /load more/i })
     expect(loadMoreButton).toBeEnabled()
 
     fireEvent.click(screen.getByTestId('undo-pending-1'))
@@ -126,10 +129,7 @@ describe('PlaylistView', () => {
 
     render(<PlaylistView {...props} />)
 
-    const loadMoreButton = screen
-      .getAllByRole('button', { name: /load/i })
-      .find((btn) => btn.textContent?.toLowerCase().includes('load'))
-    expect(loadMoreButton).toBeTruthy()
+    const loadMoreButton = screen.getByRole('button', { name: /load more/i })
     expect(loadMoreButton).toBeDisabled()
     expect(loadMoreButton).toHaveAttribute('aria-busy', 'true')
   })
@@ -232,6 +232,61 @@ describe('PlaylistView', () => {
 
     // Should call with the first track's ID
     expect(onFirstVisibleTrackChange).toHaveBeenCalledWith('track-1')
+  })
+
+  it('reports new first visible track when background pagination changes order', () => {
+    const onFirstVisibleTrackChange = vi.fn()
+    const initialTracks = [
+      {
+        id: 'track-100',
+        title: 'Track 100',
+        artist: 'Artist',
+        notes: [],
+        tags: [],
+      },
+      {
+        id: 'track-99',
+        title: 'Track 99',
+        artist: 'Artist',
+        notes: [],
+        tags: [],
+      },
+    ]
+
+    const props = createProps({
+      tracks: initialTracks,
+      onFirstVisibleTrackChange,
+    })
+
+    const { rerender } = render(<PlaylistView {...props} />)
+
+    // Initial render should report first track
+    expect(onFirstVisibleTrackChange).toHaveBeenCalledWith('track-100')
+    onFirstVisibleTrackChange.mockClear()
+
+    // Simulate background pagination prepending newer tracks (like DATE DESC sort)
+    const updatedTracks = [
+      {
+        id: 'track-200',
+        title: 'Track 200',
+        artist: 'Artist',
+        notes: [],
+        tags: [],
+      },
+      {
+        id: 'track-199',
+        title: 'Track 199',
+        artist: 'Artist',
+        notes: [],
+        tags: [],
+      },
+      ...initialTracks,
+    ]
+
+    rerender(<PlaylistView {...createProps({ ...props, tracks: updatedTracks })} />)
+
+    // Should report the new first visible track
+    expect(onFirstVisibleTrackChange).toHaveBeenCalledWith('track-200')
   })
 
   it('restores focus to the next visible track when the active track is removed', () => {
