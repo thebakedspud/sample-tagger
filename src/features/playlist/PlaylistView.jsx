@@ -3,6 +3,21 @@ import focusById from '../../utils/focusById.js'
 import SearchFilterBar from '../filter/SearchFilterBar.jsx'
 import useTrackFilter from '../filter/useTrackFilter.js'
 import { SORT_KEY } from '../filter/filterTracks.js'
+
+const DEBUG_FOCUS = process.env.NODE_ENV !== 'production'
+
+function debugFocus(label, details = {}) {
+  if (!DEBUG_FOCUS || typeof document === 'undefined') return
+  const active = document.activeElement
+  const payload = {
+    ...details,
+    activeId: active?.id ?? null,
+    activeRole: typeof active?.getAttribute === 'function' ? active.getAttribute('role') : null,
+    ts: Date.now(),
+  }
+  // eslint-disable-next-line no-console
+  console.log(`[focus dbg] ${label}`, payload)
+}
 import TrackCard from './TrackCard.jsx'
 
 /**
@@ -141,6 +156,10 @@ export default function PlaylistView({
   useLayoutEffect(() => {
     if (onFirstVisibleTrackChange) {
       const firstId = filteredTracks[0]?.id ?? null
+      debugFocus('playlist:first-visible-report', {
+        reportedTrackId: firstId,
+        filteredLength: filteredTracks.length,
+      })
       onFirstVisibleTrackChange(firstId)
     }
   }, [filteredTracks, onFirstVisibleTrackChange])
@@ -152,20 +171,35 @@ export default function PlaylistView({
   useEffect(() => {
     const contextTs = focusContext?.ts ?? null
     const contextReason = focusContext?.reason ?? null
+    debugFocus('playlist:focus-effect:start', {
+      skipFocusManagement,
+      contextReason,
+      contextTs,
+      filteredLength: filteredTracks.length,
+    })
 
     if (contextTs == null) {
       lastFocusContextTsRef.current = null
     } else if (contextTs !== lastFocusContextTsRef.current) {
       lastFocusContextTsRef.current = contextTs
       if (contextReason === 'background-load-more') {
+        debugFocus('playlist:focus-effect:skip-background', {
+          contextReason,
+        })
         return
       }
     }
 
-    if (skipFocusManagement) return // Exit early - App is handling focus
+    if (skipFocusManagement) {
+      debugFocus('playlist:focus-effect:skip-gate', {})
+      return // Exit early - App is handling focus
+    }
 
     if (!Array.isArray(tracks) || tracks.length === 0) return
     if (filteredTracks.length === 0) {
+      debugFocus('playlist:focus-effect:focus-search', {
+        reason: 'no-filtered-tracks',
+      })
       searchInputRef.current?.focus()
       return
     }
@@ -173,6 +207,9 @@ export default function PlaylistView({
     if (active === document.body) {
       const firstId = filteredTracks[0]?.id
       if (firstId != null) {
+        debugFocus('playlist:focus-effect:body-recovery', {
+          targetId: `add-note-btn-${firstId}`,
+        })
         focusById(`add-note-btn-${firstId}`)
       }
       return
@@ -187,6 +224,10 @@ export default function PlaylistView({
       const firstId = filteredTracks[0]?.id
       if (firstId != null) {
         // Focus the Add note button instead of the container for consistency
+        debugFocus('playlist:focus-effect:restore', {
+          targetId: `add-note-btn-${firstId}`,
+          cause: 'filter-hide',
+        })
         focusById(`add-note-btn-${firstId}`)
       }
     }

@@ -26,6 +26,21 @@ import './styles/primitives.css';
 import './styles/app.css';
 import useAnnounce from './features/a11y/useAnnounce.js'
 
+const DEBUG_FOCUS = process.env.NODE_ENV !== 'production'
+
+function debugFocus(label, details = {}) {
+  if (!DEBUG_FOCUS || typeof document === 'undefined') return
+  const active = document.activeElement
+  const payload = {
+    ...details,
+    activeId: active?.id ?? null,
+    activeRole: typeof active?.getAttribute === 'function' ? active.getAttribute('role') : null,
+    ts: Date.now(),
+  }
+  // eslint-disable-next-line no-console
+  console.log(`[focus dbg] ${label}`, payload)
+}
+
 // NEW: inline undo
 import useInlineUndo from './features/undo/useInlineUndo.js'
 import PlaylistView from './features/playlist/PlaylistView.jsx'
@@ -624,6 +639,7 @@ useEffect(() => {
 
   const handleFirstVisibleTrackChange = useCallback((trackId) => {
     firstVisibleTrackIdRef.current = trackId
+    debugFocus('app:first-visible-change', { reportedTrackId: trackId })
   }, [])
 
   const markTrackFocusContext = useCallback((reason) => {
@@ -701,24 +717,38 @@ useEffect(() => {
         announce(message)
 
         const releaseFocusGate = () => {
+          debugFocus('app:init-import:gate-release', {})
           setSkipPlaylistFocusManagement(false)
         }
 
-        const focusButtonForTrack = (trackId) => {
+        const focusButtonForTrack = (trackId, meta = {}) => {
           if (!trackId) return false
           const node = document.getElementById('add-note-btn-' + trackId)
           if (node && typeof node.focus === 'function') {
+            debugFocus('app:init-import:focus-track', {
+              requestedTrackId: trackId,
+              resolvedTargetId: node.id,
+              ...meta,
+            })
             node.focus()
             return true
           }
+          debugFocus('app:init-import:target-missing', {
+            requestedTrackId: trackId,
+            ...meta,
+          })
           return false
         }
 
         const focusFirstVisibleWithRetry = (attempt = 0) => {
           const MAX_RETRIES = 5
           const targetId = firstVisibleTrackIdRef.current
+          debugFocus('app:init-import:retry', {
+            attempt,
+            reportedTrackId: targetId,
+          })
 
-          if (focusButtonForTrack(targetId)) {
+          if (focusButtonForTrack(targetId, { attempt, source: 'first-visible' })) {
             initialFocusAppliedRef.current = true
             releaseFocusGate()
             return
@@ -731,9 +761,16 @@ useEffect(() => {
 
           const firstAddNoteBtn = document.querySelector('button[id^="add-note-btn-"]')
           if (firstAddNoteBtn && typeof firstAddNoteBtn.focus === 'function') {
+            debugFocus('app:init-import:fallback-first-rendered', {
+              reportedTrackId: targetId,
+              resolvedTargetId: firstAddNoteBtn.id,
+            })
             firstAddNoteBtn.focus()
             initialFocusAppliedRef.current = true
           } else {
+            debugFocus('app:init-import:fallback-heading', {
+              reportedTrackId: targetId,
+            })
             focusById('playlist-title')
           }
           releaseFocusGate()
@@ -742,6 +779,7 @@ useEffect(() => {
         requestAnimationFrame(() => {
           try {
             if (focusBehavior === 'heading') {
+              debugFocus('app:init-import:heading-request', {})
               focusById('playlist-title')
               releaseFocusGate()
               return
@@ -750,6 +788,7 @@ useEffect(() => {
               focusFirstVisibleWithRetry(0)
               return
             }
+            debugFocus('app:init-import:default-heading', {})
             focusById('playlist-title')
             releaseFocusGate()
           } catch (err) {
@@ -1739,12 +1778,24 @@ useEffect(() => {
           ...meta,
         }))
         setImportedAt(loadMoreStamp)
+        if (isBackground) {
+          debugFocus('app:load-more:auto', {
+            added: additions.length,
+          })
+        }
         if (!isBackground) {
           const firstNewId = additions[0]?.id
           if (firstNewId) {
+            debugFocus('app:load-more:manual', {
+              firstNewTrackId: firstNewId,
+              added: additions.length,
+            })
             focusById(`track-${firstNewId}`)
           } else {
             requestAnimationFrame(() => {
+              debugFocus('app:load-more:manual-fallback', {
+                added: additions.length,
+              })
               loadMoreBtnRef.current?.focus()
             })
           }
