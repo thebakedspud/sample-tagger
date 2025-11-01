@@ -2015,6 +2015,53 @@ useEffect(() => {
               added: additions.length,
               activeAfter: document.activeElement?.id ?? null,
             })
+
+            // Phase 1: Reassert focus if button unmounted during React reconciliation
+            const reassertFocusAfterBackground = (attempt = 0) => {
+              const MAX_RETRIES = 5
+              const targetId = firstVisibleTrackIdRef.current
+
+              if (!targetId) {
+                debugFocus('app:background-load:skip-refocus', {
+                  reason: 'no-target-id',
+                })
+                return
+              }
+
+              // Only restore if focus was lost to body (indicates unmount)
+              if (document.activeElement !== document.body) {
+                debugFocus('app:background-load:skip-refocus', {
+                  reason: 'focus-not-lost',
+                  activeElement: document.activeElement?.id ?? null,
+                })
+                return
+              }
+
+              const buttonId = `add-note-btn-${targetId}`
+              const elem = document.getElementById(buttonId)
+
+              if (elem) {
+                debugFocus('app:background-load:refocus', {
+                  attempt,
+                  buttonId,
+                  reason: 'unmount-recovery',
+                })
+                elem.focus()
+                return
+              }
+
+              if (attempt < MAX_RETRIES) {
+                requestAnimationFrame(() => reassertFocusAfterBackground(attempt + 1))
+              } else {
+                debugFocus('app:background-load:refocus-failed', {
+                  targetId,
+                  maxRetries: MAX_RETRIES,
+                })
+              }
+            }
+
+            requestAnimationFrame(reassertFocusAfterBackground)
+
             if (!hasMore) {
               announce('All tracks loaded; order complete.')
             }
