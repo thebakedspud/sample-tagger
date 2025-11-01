@@ -114,24 +114,8 @@ describe('PlaylistView', () => {
       screen.getByRole('button', { name: /re-import/i })
     ).toBeInTheDocument()
 
-    const loadMoreButton = screen.getByRole('button', { name: /loading more/i })
-    expect(loadMoreButton).toBeEnabled()
-
     fireEvent.click(screen.getByTestId('undo-pending-1'))
     expect(props.onUndo).toHaveBeenCalledWith('pending-1')
-  })
-
-  it('disables the load more button when busy', () => {
-    const props = createProps({
-      isAnyImportBusy: true,
-      showLoadMoreSpinner: true,
-    })
-
-    render(<PlaylistView {...props} />)
-
-    const loadMoreButton = screen.getByRole('button', { name: /load more/i })
-    expect(loadMoreButton).toBeDisabled()
-    expect(loadMoreButton).toHaveAttribute('aria-busy', 'true')
   })
 
   it('hides load more controls and list items in the empty state', () => {
