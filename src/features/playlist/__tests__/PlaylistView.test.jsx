@@ -114,7 +114,7 @@ describe('PlaylistView', () => {
       screen.getByRole('button', { name: /re-import/i })
     ).toBeInTheDocument()
 
-    const loadMoreButton = screen.getByRole('button', { name: /load more/i })
+    const loadMoreButton = screen.getByRole('button', { name: /loading more/i })
     expect(loadMoreButton).toBeEnabled()
 
     fireEvent.click(screen.getByTestId('undo-pending-1'))
