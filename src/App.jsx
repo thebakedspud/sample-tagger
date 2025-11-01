@@ -28,7 +28,10 @@ import useAnnounce from './features/a11y/useAnnounce.js'
 
 const DEBUG_FOCUS = (() => {
   if (typeof globalThis === 'undefined') return true
-  const maybeProcess = /** @type {{ env?: { NODE_ENV?: string } }} */ (globalThis).process
+  const maybeProcess =
+    typeof globalThis === 'object' && globalThis && 'process' in globalThis
+      ? /** @type {{ env?: { NODE_ENV?: string } }} */ (globalThis.process)
+      : undefined
   if (maybeProcess && maybeProcess.env && typeof maybeProcess.env.NODE_ENV === 'string') {
     return maybeProcess.env.NODE_ENV !== 'production'
   }
@@ -75,17 +78,34 @@ import {
   ensureRecoveryCsrfToken,
 } from './lib/deviceState.js'
 
-// -- Derive initial state from storage (v3 structured: { importMeta, tracks, ... })
-const persisted = loadAppState()
-const pendingMigrationSnapshot = getPendingMigrationSnapshot()
-const INITIAL_NOTES_MAP = createInitialNotesMap(persisted)
-const INITIAL_TAGS_MAP = createInitialTagsMap(persisted)
-const HAS_VALID_PLAYLIST = !!(persisted?.importMeta?.provider && persisted?.tracks?.length)
-const INITIAL_SCREEN = HAS_VALID_PLAYLIST ? 'playlist' : 'landing'
-const persistedRecents = Array.isArray(persisted?.recentPlaylists) ? [...persisted.recentPlaylists] : null
-const loadedRecents = persistedRecents ?? loadRecent()
-const INITIAL_RECENTS = Array.isArray(loadedRecents) ? [...loadedRecents] : []
-const PERSISTED_TRACKS = Array.isArray(persisted?.tracks) ? [...persisted.tracks] : []
+function bootstrapStorageState() {
+  if (typeof window === 'undefined') {
+    return {
+      persisted: null,
+      pendingMigrationSnapshot: null,
+      initialRecents: [],
+      persistedTracks: [],
+      initialScreen: 'landing',
+    }
+  }
+
+  const persisted = loadAppState()
+  const pendingMigrationSnapshot = getPendingMigrationSnapshot()
+  const persistedRecents = Array.isArray(persisted?.recentPlaylists)
+    ? [...persisted.recentPlaylists]
+    : null
+  const loadedRecents = persistedRecents ?? loadRecent()
+  const persistedTracks = Array.isArray(persisted?.tracks) ? [...persisted.tracks] : []
+  const hasValidPlaylist = Boolean(persisted?.importMeta?.provider && persistedTracks.length)
+
+  return {
+    persisted,
+    pendingMigrationSnapshot,
+    initialRecents: Array.isArray(loadedRecents) ? [...loadedRecents] : [],
+    persistedTracks,
+    initialScreen: hasValidPlaylist ? 'playlist' : 'landing',
+  }
+}
 
 const MAX_TAGS_PER_TRACK = 32
 const MAX_TAG_LENGTH = 24
@@ -440,6 +460,18 @@ function createRecentCandidate(meta, options = {}) {
 }
 
 export default function App() {
+  const [bootstrapState] = useState(bootstrapStorageState)
+  const {
+    persisted,
+    pendingMigrationSnapshot,
+    initialRecents,
+    persistedTracks,
+    initialScreen,
+  } = bootstrapState
+
+  const initialNotesMap = useMemo(() => createInitialNotesMap(persisted), [persisted])
+  const initialTagsMap = useMemo(() => createInitialTagsMap(persisted), [persisted])
+
   const [anonContext, setAnonContext] = useState(() => ({
     deviceId: getDeviceId(),
     anonId: getAnonId(),
@@ -471,7 +503,7 @@ export default function App() {
   const [showMigrationNotice, setShowMigrationNotice] = useState(Boolean(pendingMigrationSnapshot))
   const migrationSnapshotRef = useRef(pendingMigrationSnapshot)
   // SIMPLE "ROUTING"
-  const [screen, setScreen] = useState(INITIAL_SCREEN)
+  const [screen, setScreen] = useState(() => initialScreen)
 
   const { message: announceMsg, announce } = useAnnounce({ debounceMs: 60 })
 
@@ -481,20 +513,20 @@ export default function App() {
   const [importError, setImportError] = useState(null)
   const importInputRef = useRef(null)
   // PLAYLIST META (local state; persisted via storage v3 importMeta)
-const [importMeta, setImportMeta] = useState(() => {
-  const initialMeta = persisted?.importMeta ?? {}
-  const sourceUrl = initialMeta.sourceUrl ?? (persisted?.lastImportUrl ?? '')
-  return {
-    ...EMPTY_IMPORT_META,
-    ...initialMeta,
-    sourceUrl,
-    hasMore: Boolean(initialMeta.cursor || initialMeta.hasMore),
-  }
-})
-const importMetaRef = useRef(importMeta)
-useEffect(() => {
-  importMetaRef.current = importMeta
-}, [importMeta])
+  const [importMeta, setImportMeta] = useState(() => {
+    const initialMeta = persisted?.importMeta ?? {}
+    const sourceUrl = initialMeta.sourceUrl ?? (persisted?.lastImportUrl ?? '')
+    return {
+      ...EMPTY_IMPORT_META,
+      ...initialMeta,
+      sourceUrl,
+      hasMore: Boolean(initialMeta.cursor || initialMeta.hasMore),
+    }
+  })
+  const importMetaRef = useRef(importMeta)
+  useEffect(() => {
+    importMetaRef.current = importMeta
+  }, [importMeta])
   const [playlistTitle, setPlaylistTitle] = useState(persisted?.playlistTitle ?? 'My Playlist')
   const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null)
   const [lastImportUrl, setLastImportUrl] = useState(
@@ -506,9 +538,9 @@ useEffect(() => {
   }, [lastImportUrl])
 
   const [notesByTrack, setNotesByTrack] = useState(() =>
-    ensureNotesEntries(INITIAL_NOTES_MAP, PERSISTED_TRACKS))
+    ensureNotesEntries(initialNotesMap, persistedTracks))
   const [tagsByTrack, setTagsByTrack] = useState(() =>
-    ensureTagsEntries(INITIAL_TAGS_MAP, PERSISTED_TRACKS))
+    ensureTagsEntries(initialTagsMap, persistedTracks))
   const hasLocalNotes = useMemo(
     () =>
       Object.values(notesByTrack || {}).some(
@@ -531,10 +563,10 @@ useEffect(() => {
   // DATA - normalize persisted tracks so notes always exist
   const [tracks, setTracks] = useState(() =>
     attachNotesToTracks(
-      PERSISTED_TRACKS,
+      persistedTracks,
       notesByTrack,
       tagsByTrack,
-      PERSISTED_TRACKS,
+      persistedTracks,
       { importStamp: persisted?.importedAt ?? null }
     )
   )
@@ -556,13 +588,13 @@ useEffect(() => {
   /** @type {[BackgroundSyncState, import('react').Dispatch<import('react').SetStateAction<BackgroundSyncState>>]} */
   const [backgroundSync, setBackgroundSync] = useState(() => ({
     status: importMeta?.hasMore ? 'pending' : 'complete',
-    loaded: PERSISTED_TRACKS.length,
+    loaded: persistedTracks.length,
     total:
       typeof importMeta?.total === 'number'
         ? importMeta.total
         : importMeta?.hasMore
           ? null
-          : PERSISTED_TRACKS.length,
+          : persistedTracks.length,
     lastError: null,
     snapshotId: importMeta?.snapshotId ?? null,
   }))
@@ -613,7 +645,7 @@ useEffect(() => {
     })
   }, [setBackgroundSync])
 
-  const [recentPlaylists, setRecentPlaylists] = useState(() => INITIAL_RECENTS)
+  const [recentPlaylists, setRecentPlaylists] = useState(() => initialRecents)
   const recentRef = useRef(recentPlaylists)
   useEffect(() => {
     recentRef.current = recentPlaylists
