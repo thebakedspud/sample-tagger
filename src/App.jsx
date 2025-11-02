@@ -25,30 +25,7 @@ import './styles/tokens.css';
 import './styles/primitives.css';
 import './styles/app.css';
 import useAnnounce from './features/a11y/useAnnounce.js'
-
-const DEBUG_FOCUS = (() => {
-  if (typeof globalThis === 'undefined') return true
-  const maybeProcess =
-    typeof globalThis === 'object' && globalThis && 'process' in globalThis
-      ? /** @type {{ env?: { NODE_ENV?: string } }} */ (globalThis.process)
-      : undefined
-  if (maybeProcess && maybeProcess.env && typeof maybeProcess.env.NODE_ENV === 'string') {
-    return maybeProcess.env.NODE_ENV !== 'production'
-  }
-  return true
-})()
-
-function debugFocus(label, details = {}) {
-  if (!DEBUG_FOCUS || typeof document === 'undefined') return
-  const active = document.activeElement
-  const payload = {
-    ...details,
-    activeId: active?.id ?? null,
-    activeRole: typeof active?.getAttribute === 'function' ? active.getAttribute('role') : null,
-    ts: Date.now(),
-  }
-  console.log(`[focus dbg] ${label}`, payload)
-}
+import { DEBUG_FOCUS, debugFocus } from './utils/debug.js'
 
 // NEW: inline undo
 import useInlineUndo from './features/undo/useInlineUndo.js'

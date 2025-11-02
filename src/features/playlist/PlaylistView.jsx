@@ -3,15 +3,8 @@ import focusById from '../../utils/focusById.js'
 import SearchFilterBar from '../filter/SearchFilterBar.jsx'
 import useTrackFilter from '../filter/useTrackFilter.js'
 import { SORT_KEY } from '../filter/filterTracks.js'
-
-const DEBUG_FOCUS = (() => {
-  if (typeof globalThis === 'undefined') return true
-  const maybeProcess = /** @type {{ env?: { NODE_ENV?: string } }} */ (globalThis).process
-  if (maybeProcess && maybeProcess.env && typeof maybeProcess.env.NODE_ENV === 'string') {
-    return maybeProcess.env.NODE_ENV !== 'production'
-  }
-  return true
-})()
+import { DEBUG_FOCUS, debugFocus } from '../../utils/debug.js'
+import TrackCard from './TrackCard.jsx'
 
 const DEFAULT_BACKGROUND_SYNC = Object.freeze({
   status: 'idle',
@@ -20,19 +13,6 @@ const DEFAULT_BACKGROUND_SYNC = Object.freeze({
   lastError: null,
   snapshotId: null,
 })
-
-function debugFocus(label, details = {}) {
-  if (!DEBUG_FOCUS || typeof document === 'undefined') return
-  const active = document.activeElement
-  const payload = {
-    ...details,
-    activeId: active?.id ?? null,
-    activeRole: typeof active?.getAttribute === 'function' ? active.getAttribute('role') : null,
-    ts: Date.now(),
-  }
-  console.log(`[focus dbg] ${label}`, payload)
-}
-import TrackCard from './TrackCard.jsx'
 
 /**
  * @param {object} props
