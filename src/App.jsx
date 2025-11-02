@@ -122,7 +122,9 @@ export default function App() {
   const [showMigrationNotice, setShowMigrationNotice] = useState(Boolean(pendingMigrationSnapshot))
   const migrationSnapshotRef = useRef(pendingMigrationSnapshot)
   // SIMPLE "ROUTING"
-  const [screen, setScreen] = useState(() => initialScreen)
+  const [screen, setScreen] = useState(
+    /** @type {'landing' | 'playlist' | 'account'} */ (initialScreen)
+  )
 
   const { message: announceMsg, announce } = useAnnounce({ debounceMs: 60 })
 
