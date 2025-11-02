@@ -2,15 +2,20 @@
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,
+    "baseUrl": ".",
     "jsx": "react-jsx",
     "module": "esnext",
     "moduleResolution": "bundler",
     "target": "esnext",
-    "types": ["vite/client"]
+    "skipLibCheck": true,
+    "types": ["vite/client", "vitest/globals", "./types/prop-types"],
+    "paths": {
+      "prop-types/factoryWithTypeCheckers": ["types/prop-types/factoryWithTypeCheckers.d.ts"],
+      "prop-types/factoryWithTypeCheckers.js": ["types/prop-types/factoryWithTypeCheckers.d.ts"]
+    }
   },
   "include": [
     "src/**/*",
     "api/**/*"
   ]
 }
-

@@ -2,6 +2,17 @@
 import PropTypes from 'prop-types'
 import { forwardRef } from 'react'
 
+/**
+ * @param {{
+ *   tag: string;
+ *   onRemove?: (tag: string) => void;
+ *   onFilter?: (tag: string) => void;
+ *   onClick?: (event: import('react').MouseEvent<HTMLButtonElement>) => void;
+ *   className?: string;
+ *   [key: string]: unknown;
+ * }} props
+ * @param {import('react').Ref<HTMLButtonElement>} ref
+ */
 const TagChip = forwardRef(function TagChip(props, ref) {
   const {
     tag,

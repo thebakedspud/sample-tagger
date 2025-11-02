@@ -3,6 +3,20 @@ import PropTypes from 'prop-types';
 import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { getTagSuggestions, normalizeTag } from './tagUtils.js';
 
+/**
+ * @param {{
+ *   stockTags?: string[];
+ *   customTags?: string[];
+ *   existingTags?: string[];
+ *   onAdd?: (tag: string) => boolean | void;
+ *   onCancel?: () => void;
+ *   placeholder?: string;
+ *   autoFocus?: boolean;
+ *   className?: string;
+ *   [key: string]: unknown;
+ * }} props
+ * @param {import('react').Ref<HTMLInputElement>} ref
+ */
 const TagInput = forwardRef(function TagInput(props, ref) {
   const {
     stockTags,
