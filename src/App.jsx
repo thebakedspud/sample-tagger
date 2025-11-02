@@ -49,6 +49,7 @@ import { DEBUG_FOCUS, debugFocus } from './utils/debug.js'
 import useInlineUndo from './features/undo/useInlineUndo.js'
 import PlaylistView from './features/playlist/PlaylistView.jsx'
 import AccountView from './features/account/AccountView.jsx'
+import useDeviceRecovery from './features/account/useDeviceRecovery.js'
 
 // Extracted helpers
 import detectProvider from './features/import/detectProvider'
@@ -58,20 +59,6 @@ import usePlaylistImportFlow, { ImportFlowStatus } from './features/import/usePl
 import { extractErrorCode, CODES } from './features/import/adapters/types.js'
 import { ERROR_MAP } from './features/import/errors.js'
 import { apiFetch } from './lib/apiClient.js'
-import {
-  getDeviceId,
-  setDeviceId,
-  getAnonId,
-  setAnonId,
-  saveRecoveryCode,
-  getStoredRecoveryCode,
-  hasAcknowledgedRecovery,
-  markRecoveryAcknowledged,
-  getRecoveryAcknowledgement,
-  clearRecoveryAcknowledgement,
-  clearDeviceContext,
-  ensureRecoveryCsrfToken,
-} from './lib/deviceState.js'
 
 /**
  * @typedef {'idle' | 'pending' | 'loading' | 'cooldown' | 'complete' | 'error'} BackgroundSyncStatus
@@ -91,34 +78,6 @@ export default function App() {
   const initialNotesMap = useMemo(() => createInitialNotesMap(persisted), [persisted])
   const initialTagsMap = useMemo(() => createInitialTagsMap(persisted), [persisted])
 
-  const [anonContext, setAnonContext] = useState(() => ({
-    deviceId: getDeviceId(),
-    anonId: getAnonId(),
-  }))
-  const initialRecoveryCode = getStoredRecoveryCode()
-  const initialRecoveryMeta = getRecoveryAcknowledgement()
-  const initialRecoveryAcknowledged = initialRecoveryCode
-    ? hasAcknowledgedRecovery(initialRecoveryCode)
-    : false
-  const [recoveryAckMeta, setRecoveryAckMeta] = useState(() => {
-    if (!initialRecoveryCode || !initialRecoveryMeta) return null
-    return initialRecoveryMeta.code === initialRecoveryCode
-      ? initialRecoveryMeta
-      : null
-  })
-  const [recoveryCode, setRecoveryCode] = useState(initialRecoveryCode)
-  const [showRecoveryModal, setShowRecoveryModal] = useState(
-    Boolean(initialRecoveryCode) && !initialRecoveryAcknowledged
-  )
-  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
-  const [restoreBusy, setRestoreBusy] = useState(false)
-  const [restoreError, setRestoreError] = useState(null)
-  const [regeneratingRecovery, setRegeneratingRecovery] = useState(false)
-  const [recoveryRotationError, setRecoveryRotationError] = useState(null)
-  const [showBackupReminder, setShowBackupReminder] = useState(false)
-  const recoveryCopyButtonRef = useRef(null)
-  const [recoveryCsrfToken, setRecoveryCsrfToken] = useState(() => ensureRecoveryCsrfToken())
-  const [bootstrapError, setBootstrapError] = useState(null)
   const [showMigrationNotice, setShowMigrationNotice] = useState(Boolean(pendingMigrationSnapshot))
   const migrationSnapshotRef = useRef(pendingMigrationSnapshot)
   // SIMPLE "ROUTING"
@@ -686,125 +645,33 @@ export default function App() {
     resetFlow: resetImportFlow,
   } = usePlaylistImportFlow()
 
-  const bootstrapDevice = useCallback(async (allowRetry = true) => {
-    const existingDeviceId = getDeviceId()
-    try {
-      const response = await apiFetch('/api/anon/bootstrap', {
-        method: 'POST',
-      })
-      const payload = await response.json().catch(() => ({}))
-      if (response.status === 404 && existingDeviceId && allowRetry) {
-        clearDeviceContext()
-        setAnonContext({ deviceId: null, anonId: null })
-        setRecoveryCode(null)
-        setShowRecoveryModal(false)
-        return bootstrapDevice(false)
-      }
-      if (!response.ok) {
-        setBootstrapError(payload?.error ?? 'Failed to bootstrap device')
-        return
-      }
-      const headerDeviceId = response.headers.get('x-device-id')
-      if (headerDeviceId) {
-        setDeviceId(headerDeviceId)
-      }
-      if (payload?.anonId) {
-        setAnonId(payload.anonId)
-      }
-      if (payload?.recoveryCode) {
-        const normalizedCode = payload.recoveryCode
-        saveRecoveryCode(normalizedCode)
-        setRecoveryCode(normalizedCode)
-        const ackMeta = getRecoveryAcknowledgement()
-        if (ackMeta?.code === normalizedCode && hasAcknowledgedRecovery(normalizedCode)) {
-          setRecoveryAckMeta(ackMeta)
-          setShowRecoveryModal(false)
-        } else {
-          setRecoveryAckMeta(null)
-          setShowRecoveryModal(true)
-        }
-      }
-      setAnonContext({
-        deviceId: getDeviceId(),
-        anonId: payload?.anonId ?? getAnonId(),
-      })
-      setBootstrapError(null)
-    } catch (err) {
-      console.error('[bootstrap] error', err)
-      setBootstrapError('Failed to reach bootstrap endpoint')
-    }
-  }, [])
-
-  const handleRecoveryModalConfirm = useCallback(() => {
-    if (!recoveryCode) return
-    markRecoveryAcknowledged(recoveryCode)
-    setRecoveryAckMeta({
-      code: recoveryCode,
-      acknowledgedAt: Date.now(),
-    })
-    setShowRecoveryModal(false)
-    announce('Recovery code saved. You can now continue.')
-    setShowBackupReminder(false)
-  }, [announce, recoveryCode])
-
-  const openRestoreDialog = useCallback(() => {
-    setRestoreError(null)
-    setRestoreDialogOpen(true)
-  }, [])
-
-  const closeRestoreDialog = useCallback(() => {
-    if (restoreBusy) return
-    setRestoreDialogOpen(false)
-    setRestoreError(null)
-  }, [restoreBusy])
-
-  const handleRestoreSubmit = useCallback(
-    async (rawCode) => {
-      const normalized = rawCode?.trim().toUpperCase()
-      if (!normalized) return
-      setRestoreBusy(true)
-      setRestoreError(null)
-      try {
-        const response = await apiFetch('/api/anon/restore', {
-          method: 'POST',
-          body: JSON.stringify({ recoveryCode: normalized }),
-        })
-        const payload = await response.json().catch(() => ({}))
-        if (!response.ok) {
-          let message = payload?.error ?? 'Restore failed. Please try again.'
-          if (response.status === 401) {
-            message = 'Recovery code was not recognised.'
-          } else if (response.status === 429) {
-            message = 'Too many attempts. Wait a bit and try again.'
-          } else if (response.status === 410) {
-            const rotatedAt = payload?.rotatedAt
-            if (rotatedAt) {
-              const formatted = new Date(rotatedAt).toLocaleString()
-              message = `Code was replaced on ${formatted}.`
-            } else {
-              message = 'That recovery code was replaced on another device.'
-            }
-          }
-          setRestoreError(message)
-          return
-        }
-
-        const latestDeviceId = getDeviceId()
-        setAnonId(payload?.anonId ?? '')
-        setAnonContext({
-          deviceId: latestDeviceId,
-          anonId: payload?.anonId ?? null,
-        })
-        saveRecoveryCode(normalized)
-        markRecoveryAcknowledged(normalized)
-        setRecoveryAckMeta({
-          code: normalized,
-          acknowledgedAt: Date.now(),
-        })
-        setRecoveryCode(normalized)
-        setShowRecoveryModal(false)
-        setShowBackupReminder(false)
-
+  // Device & Recovery Management
+  const {
+    deviceId,
+    anonId,
+    recoveryCode,
+    recoveryAcknowledgedAt,
+    showRecoveryModal,
+    restoreDialogOpen,
+    showBackupReminder,
+    bootstrapError,
+    restoreBusy,
+    restoreError,
+    regeneratingRecovery,
+    recoveryRotationError,
+    acknowledgeRecoveryModal,
+    openRecoveryModal,
+    copyRecoveryCode,
+    regenerateRecoveryCode,
+    openRestoreDialog,
+    closeRestoreDialog,
+    submitRestore,
+    recoveryCopyButtonRef,
+  } = useDeviceRecovery({
+    announce,
+    onAppReset: useCallback(
+      async ({ announcement, screenTarget }) => {
+        // Clear all app state
         clearAppState()
         setNotesByTrack(Object.create(null))
         setTracks([])
@@ -814,132 +681,23 @@ export default function App() {
         setLastImportUrl('')
         setImportUrl('')
         resetImportFlow()
-        setScreen('landing')
+        setScreen(screenTarget ?? 'landing')
 
-        announce('Recovery successful. This device is now linked to your notes.')
-        setRestoreDialogOpen(false)
-        setRestoreError(null)
-      } catch (err) {
-        console.error('[restore] request failed', err)
-        setRestoreError('Restore failed. Check your connection and try again.')
-      } finally {
-        setRestoreBusy(false)
-      }
-    },
-    [announce, resetImportFlow]
+        if (announcement) announce(announcement)
+      },
+      [announce, resetImportFlow]
+    ),
+  })
+
+  // Reconstruct anonContext for migration/sync effects
+  const anonContext = useMemo(
+    () => ({ deviceId, anonId }),
+    [deviceId, anonId]
   )
-
-  const handleCopyRecoveryCode = useCallback(async () => {
-    if (!recoveryCode) return
-    const value = recoveryCode
-    try {
-      if (
-        typeof navigator !== 'undefined' &&
-        navigator?.clipboard &&
-        typeof navigator.clipboard.writeText === 'function'
-      ) {
-        await navigator.clipboard.writeText(value)
-        announce('Recovery code copied.')
-        return
-      }
-      throw new Error('Clipboard API unavailable')
-    } catch (_err) {
-      try {
-        if (typeof document !== 'undefined') {
-          const textarea = document.createElement('textarea')
-          textarea.value = value
-          textarea.setAttribute('readonly', '')
-          textarea.style.position = 'absolute'
-          textarea.style.left = '-9999px'
-          document.body.appendChild(textarea)
-          textarea.select()
-          document.execCommand('copy')
-          document.body.removeChild(textarea)
-          announce('Recovery code copied.')
-          return
-        }
-      } catch (_err) {
-        // fall through to failure
-      }
-    }
-    announce('Copy failed. Please copy the code manually.')
-  }, [announce, recoveryCode])
-
-  const handleRegenerateRecoveryCode = useCallback(async () => {
-    if (regeneratingRecovery) return
-    setRegeneratingRecovery(true)
-    setRecoveryRotationError(null)
-    try {
-      const headers = recoveryCsrfToken
-        ? { 'x-recovery-csrf': recoveryCsrfToken }
-        : undefined
-      const response = await apiFetch('/api/anon/recovery', {
-        method: 'POST',
-        headers,
-      })
-      const payload = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        const message =
-          payload?.error ?? 'Unable to regenerate recovery code.'
-        setRecoveryRotationError(message)
-        announce('Could not regenerate recovery code.')
-        return
-      }
-      const nextCode =
-        typeof payload?.recoveryCode === 'string'
-          ? payload.recoveryCode.trim().toUpperCase()
-          : ''
-      if (payload?.anonId) {
-        setAnonId(payload.anonId)
-        setAnonContext((prev) => ({
-          deviceId: prev?.deviceId ?? getDeviceId(),
-          anonId: payload.anonId,
-        }))
-      }
-      if (nextCode) {
-        clearRecoveryAcknowledgement()
-        saveRecoveryCode(nextCode)
-        setRecoveryCode(nextCode)
-        setRecoveryAckMeta(null)
-        setShowRecoveryModal(true)
-        setShowBackupReminder(true)
-        announce('Recovery code regenerated. You must save this new code.')
-        requestAnimationFrame(() => {
-          if (recoveryCopyButtonRef.current) {
-            recoveryCopyButtonRef.current.focus()
-          }
-        })
-      } else {
-        announce('Recovery code updated, but no code returned.')
-      }
-    } catch (err) {
-      console.error('[recovery:regenerate] request failed', err)
-      const message =
-        typeof err?.message === 'string'
-          ? err.message
-          : 'Failed to regenerate recovery code. Please try again.'
-      setRecoveryRotationError(message)
-      announce('Could not regenerate recovery code.')
-    } finally {
-      setRegeneratingRecovery(false)
-    }
-  }, [announce, recoveryCsrfToken, regeneratingRecovery])
-
-  const handleOpenRecoveryOptions = useCallback(() => {
-    if (!recoveryCode) return
-    setShowRecoveryModal(true)
-    announce('Recovery code ready. Choose how you want to back it up.')
-  }, [announce, recoveryCode])
 
   const handleOpenSpotifyLink = useCallback(() => {
     announce('Spotify linking is coming soon.')
   }, [announce])
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-    const token = ensureRecoveryCsrfToken()
-    setRecoveryCsrfToken(token)
-  }, [])
 
   // REIMPORT focus pattern
   useEffect(() => {
@@ -947,10 +705,6 @@ export default function App() {
       navigator.storage.persist().catch(() => { /* best effort */ })
     }
   }, [])
-
-  useEffect(() => {
-    bootstrapDevice()
-  }, [bootstrapDevice])
 
   useEffect(() => {
     const snapshot = migrationSnapshotRef.current
@@ -1914,16 +1668,6 @@ export default function App() {
     setImportError(null)
     // Clear persisted data
     clearAppState()
-    clearDeviceContext()
-    setAnonContext({ deviceId: null, anonId: null })
-    setRecoveryCode(null)
-    setRecoveryAckMeta(null)
-    setShowBackupReminder(false)
-    setShowRecoveryModal(false)
-    setRestoreDialogOpen(false)
-    setRestoreError(null)
-    setRestoreBusy(false)
-    bootstrapDevice()
 
     // Reset in-memory app state
     setNotesByTrack(Object.create(null))
@@ -2232,13 +1976,13 @@ export default function App() {
       <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px', paddingBottom: 128 }}>
         {screen === 'account' ? (
           <AccountView
-            anonId={anonContext?.anonId}
-            deviceId={anonContext?.deviceId}
+            anonId={anonId}
+            deviceId={deviceId}
             recoveryCode={recoveryCode}
-            recoveryAcknowledgedAt={recoveryAckMeta?.acknowledgedAt ?? null}
+            recoveryAcknowledgedAt={recoveryAcknowledgedAt}
             recoveryCopyButtonRef={recoveryCopyButtonRef}
-            onCopyRecoveryCode={handleCopyRecoveryCode}
-            onConfirmRegenerate={handleRegenerateRecoveryCode}
+            onCopyRecoveryCode={copyRecoveryCode}
+            onConfirmRegenerate={regenerateRecoveryCode}
             regeneratingRecoveryCode={regeneratingRecovery}
             regenerationError={recoveryRotationError}
             onOpenRestoreDialog={openRestoreDialog}
@@ -2246,7 +1990,7 @@ export default function App() {
             spotifyLinked={false}
             spotifyAccountLabel=""
             emailLinkingEnabled={false}
-            onRequestRecoveryModal={handleOpenRecoveryOptions}
+            onRequestRecoveryModal={openRecoveryModal}
             showBackupPrompt={showBackupReminder}
           />
         ) : (
@@ -2381,14 +2125,14 @@ export default function App() {
       <RecoveryModal
         open={showRecoveryModal}
         code={recoveryCode}
-        onAcknowledge={handleRecoveryModalConfirm}
+        onAcknowledge={acknowledgeRecoveryModal}
         onCopy={() => announce('Recovery code copied.')}
         onDownload={() => announce('Recovery code downloaded.')}
       />
       <RestoreDialog
         open={restoreDialogOpen}
         onClose={closeRestoreDialog}
-        onSubmit={handleRestoreSubmit}
+        onSubmit={submitRestore}
         onRequestBackup={handleBackupNotes}
         busy={restoreBusy}
         error={restoreError}
