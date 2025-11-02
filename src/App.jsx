@@ -21,6 +21,23 @@ import { normalizeTag } from './features/tags/tagUtils.js'
 import { STOCK_TAGS } from './features/tags/constants.js'
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from './features/tags/validation.js'
 import { createTagSyncScheduler } from './features/tags/tagSyncQueue.js'
+import {
+  getNotes,
+  normalizeNotesList,
+  hasOwn,
+  cloneNotesMap,
+  normalizeTagList,
+  cloneTagsMap,
+  createInitialNotesMap,
+  createInitialTagsMap,
+  ensureNotesEntries,
+  ensureTagsEntries,
+  updateNotesMap,
+  updateTagsMap,
+  groupRemoteNotes,
+  mergeRemoteNotes,
+  mergeRemoteTags,
+} from './utils/notesTagsData.js'
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
@@ -102,170 +119,6 @@ const EMPTY_IMPORT_META = {
   total: null,
 }
 
-// Handy helper so we never explode on undefined notes
-function getNotes(t) {
-  return Array.isArray(t?.notes) ? t.notes : [];
-}
-
-function normalizeNotesList(value) {
-  if (!Array.isArray(value)) return [];
-  /** @type {string[]} */
-  const out = [];
-  value.forEach((note) => {
-    if (typeof note !== 'string') return;
-    const trimmed = note.trim();
-    if (!trimmed) return;
-    out.push(trimmed);
-  });
-  return out;
-}
-
-function hasOwn(map, key) {
-  return Object.prototype.hasOwnProperty.call(map, key);
-}
-
-function cloneNotesMap(source) {
-  const out = Object.create(null);
-  if (!source || typeof source !== 'object') return out;
-  Object.entries(source).forEach(([key, raw]) => {
-    const id = typeof key === 'string' ? key : String(key);
-    if (!id) return;
-    const cleaned = normalizeNotesList(raw);
-    if (cleaned.length > 0) {
-      out[id] = cleaned;
-    }
-  });
-  return out;
-}
-
-function normalizeTagList(value) {
-  if (!Array.isArray(value)) return [];
-  const out = [];
-  const seen = new Set();
-  value.forEach((tag) => {
-    const normalized = normalizeTag(tag);
-    if (!normalized || normalized.length > MAX_TAG_LENGTH) return;
-    if (!TAG_ALLOWED_RE.test(normalized)) return;
-    if (seen.has(normalized)) return;
-    if (out.length >= MAX_TAGS_PER_TRACK) return;
-    seen.add(normalized);
-    out.push(normalized);
-  });
-  out.sort();
-  return out;
-}
-
-function cloneTagsMap(source) {
-  const out = Object.create(null);
-  if (!source || typeof source !== 'object') return out;
-  Object.entries(source).forEach(([key, raw]) => {
-    const id = typeof key === 'string' ? key : String(key);
-    if (!id) return;
-    const cleaned = normalizeTagList(raw);
-    if (cleaned.length > 0) {
-      out[id] = cleaned;
-    }
-  });
-  return out;
-}
-
-function createInitialNotesMap(state) {
-  const fromState = cloneNotesMap(state?.notesByTrack);
-  if (Array.isArray(state?.tracks)) {
-    state.tracks.forEach((track) => {
-      if (!track || typeof track !== 'object') return;
-      const id = track.id;
-      if (!id || hasOwn(fromState, id)) return;
-      const cleaned = normalizeNotesList(track.notes);
-      if (cleaned.length > 0) {
-        fromState[id] = cleaned;
-      }
-    });
-  }
-  return fromState;
-}
-
-function createInitialTagsMap(state) {
-  const fromState = cloneTagsMap(state?.tagsByTrack);
-  if (Array.isArray(state?.tracks)) {
-    state.tracks.forEach((track) => {
-      if (!track || typeof track !== 'object') return;
-      const id = track.id;
-      if (!id || hasOwn(fromState, id)) return;
-      const cleaned = normalizeTagList(track.tags);
-      if (cleaned.length > 0) {
-        fromState[id] = cleaned;
-      }
-    });
-  }
-  return fromState;
-}
-
-function ensureNotesEntries(baseMap, tracks) {
-  const next = cloneNotesMap(baseMap);
-  if (!Array.isArray(tracks)) return next;
-  tracks.forEach((track) => {
-    if (!track || typeof track !== 'object') return;
-    const id = track.id;
-    if (!id || hasOwn(next, id)) return;
-    next[id] = [];
-  });
-  return next;
-}
-
-function groupRemoteNotes(rows) {
-  const noteMap = Object.create(null);
-  const tagMap = Object.create(null);
-  if (!Array.isArray(rows)) return { notes: noteMap, tags: tagMap };
-  rows.forEach((row) => {
-    if (!row || typeof row !== 'object') return;
-    const trackId =
-      typeof row.trackId === 'string' ? row.trackId : row.track_id;
-    if (!trackId) return;
-    const body = typeof row.body === 'string' ? row.body.trim() : '';
-    if (body) {
-      if (!Array.isArray(noteMap[trackId])) noteMap[trackId] = [];
-      noteMap[trackId].push(body);
-    }
-    if ('tags' in row) {
-      const cleaned = normalizeTagList(row.tags);
-      tagMap[trackId] = cleaned;
-    }
-  });
-  return { notes: noteMap, tags: tagMap };
-}
-
-function mergeRemoteNotes(localMap, remoteMap) {
-  const merged = cloneNotesMap(localMap);
-  Object.entries(remoteMap).forEach(([trackId, remoteNotes]) => {
-    if (!Array.isArray(remoteNotes) || remoteNotes.length === 0) return;
-    if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
-      merged[trackId] = [...remoteNotes];
-    }
-  });
-  return merged;
-}
-
-function mergeRemoteTags(localMap, remoteMap) {
-  const merged = cloneTagsMap(localMap);
-  Object.entries(remoteMap).forEach(([trackId, remoteTags]) => {
-    merged[trackId] = Array.isArray(remoteTags) ? [...remoteTags] : [];
-  });
-  return merged;
-}
-
-function ensureTagsEntries(baseMap, tracks) {
-  const next = cloneTagsMap(baseMap);
-  if (!Array.isArray(tracks)) return next;
-  tracks.forEach((track) => {
-    if (!track || typeof track !== 'object') return;
-    const id = track.id;
-    if (!id || hasOwn(next, id)) return;
-    next[id] = [];
-  });
-  return next;
-}
-
 function attachNotesToTracks(trackList, notesMap, tagsMap, previousTracks = [], options = {}) {
   if (!Array.isArray(trackList)) return [];
   const safeMap = notesMap || Object.create(null);
@@ -345,28 +198,6 @@ function attachNotesToTracks(trackList, notesMap, tagsMap, previousTracks = [], 
       originalIndex,
     };
   });
-}
-
-function updateNotesMap(baseMap, trackId, nextNotes) {
-  const map = cloneNotesMap(baseMap);
-  if (!trackId) return map;
-  if (Array.isArray(nextNotes) && nextNotes.length > 0) {
-    map[trackId] = [...nextNotes];
-  } else if (hasOwn(map, trackId)) {
-    delete map[trackId];
-  }
-  return map;
-}
-
-function updateTagsMap(baseMap, trackId, nextTags) {
-  const map = cloneTagsMap(baseMap);
-  if (!trackId) return map;
-  if (Array.isArray(nextTags) && nextTags.length > 0) {
-    map[trackId] = [...nextTags];
-  } else if (hasOwn(map, trackId)) {
-    delete map[trackId];
-  }
-  return map;
 }
 
 function normalizeTimestamp(value) {
