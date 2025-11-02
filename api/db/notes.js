@@ -9,6 +9,10 @@ import {
 
 // Conflict policy: server state is treated as canonical (union/merge planned in Phase 2).
 
+// NOTE: These constants are duplicated from src/features/tags/validation.js
+// Serverless functions cannot import from src/ directory (separate deployment).
+// Keep in sync manually or create shared package in future.
+// Current values: MAX_TAG_LENGTH=24, MAX_TAGS_PER_TRACK=32, TAG_ALLOWED_RE=/^[a-z0-9][a-z0-9\s\-_]*$/
 const MAX_TAGS_PER_TRACK = 32;
 const MAX_TAG_LENGTH = 24;
 const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/;

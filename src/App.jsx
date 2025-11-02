@@ -19,6 +19,7 @@ import {
 } from './utils/storage.js'
 import { normalizeTag } from './features/tags/tagUtils.js'
 import { STOCK_TAGS } from './features/tags/constants.js'
+import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from './features/tags/validation.js'
 import { createTagSyncScheduler } from './features/tags/tagSyncQueue.js'
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
@@ -83,10 +84,6 @@ function bootstrapStorageState() {
     initialScreen: hasValidPlaylist ? 'playlist' : 'landing',
   }
 }
-
-const MAX_TAGS_PER_TRACK = 32
-const MAX_TAG_LENGTH = 24
-const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/
 
 /**
  * @typedef {'idle' | 'pending' | 'loading' | 'cooldown' | 'complete' | 'error'} BackgroundSyncStatus
