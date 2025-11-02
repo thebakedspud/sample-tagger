@@ -10,6 +10,8 @@
     "skipLibCheck": true,
     "types": ["vite/client", "vitest/globals", "./types/prop-types"],
     "paths": {
+      "prop-types": ["types/prop-types/index.d.ts"],
+      "prop-types/*": ["types/prop-types/index.d.ts"],
       "prop-types/factoryWithTypeCheckers": ["types/prop-types/factoryWithTypeCheckers.d.ts"],
       "prop-types/factoryWithTypeCheckers.js": ["types/prop-types/factoryWithTypeCheckers.d.ts"]
     }

@@ -38,6 +38,9 @@ import {
 import { normalizeTimestamp, attachNotesToTracks } from './utils/trackProcessing.js'
 import { bootstrapStorageState, EMPTY_IMPORT_META } from './utils/storageBootstrap.js'
 import { createRecentCandidate } from './features/recent/recentUtils.js'
+
+/** @typedef {import('./features/import/adapters/types.js').ImportMeta} ImportMeta */
+/** @typedef {import('./features/import/adapters/types.js').ImportResult} ImportResult */
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
@@ -96,14 +99,14 @@ export default function App() {
   const [importMeta, setImportMeta] = useState(() => {
     const initialMeta = persisted?.importMeta ?? {}
     const sourceUrl = initialMeta.sourceUrl ?? (persisted?.lastImportUrl ?? '')
-    return {
+    return /** @type {ImportMeta} */ ({
       ...EMPTY_IMPORT_META,
       ...initialMeta,
       sourceUrl,
       hasMore: Boolean(initialMeta.cursor || initialMeta.hasMore),
-    }
+    })
   })
-  const importMetaRef = useRef(importMeta)
+  const importMetaRef = useRef(/** @type {ImportMeta} */ (importMeta))
   useEffect(() => {
     importMetaRef.current = importMeta
   }, [importMeta])
@@ -1186,7 +1189,9 @@ export default function App() {
     async (options = {}) => {
       const mode = options?.mode === 'background' ? 'background' : 'manual'
       const isBackground = mode === 'background'
-      const metaSnapshot = options?.metaOverride ?? importMetaRef.current
+      const currentMeta = importMetaRef.current
+      const metaSnapshot =
+        /** @type {ImportMeta | undefined} */ (options?.metaOverride ?? currentMeta)
       const sourceUrl = lastImportUrlRef.current
 
       if (!metaSnapshot?.cursor || !metaSnapshot?.provider || !sourceUrl) {
@@ -1325,14 +1330,16 @@ export default function App() {
 
           const currentTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
           const existingIds = currentTracks.map((t) => t.id)
-          const result = await loadMoreTracks({
-            providerHint: metaSnapshot.provider ?? null,
-            existingMeta: metaSnapshot,
-            startIndex: currentTracks.length,
-            existingIds,
-            sourceUrl,
-            signal: controller.signal,
-          })
+          const result = /** @type {ImportResult} */ (
+            await loadMoreTracks({
+              providerHint: metaSnapshot.provider ?? null,
+              existingMeta: metaSnapshot,
+              startIndex: currentTracks.length,
+              existingIds,
+              sourceUrl,
+              signal: controller.signal,
+            })
+          )
 
           if (result?.stale) {
             return { ok: false, stale: true }
@@ -1369,8 +1376,11 @@ export default function App() {
           }
 
           const additions = Array.isArray(result.data?.tracks) ? result.data.tracks : []
-          const meta = result.data?.meta ?? {}
-          const hasMore = Boolean(meta?.hasMore)
+          const meta = /** @type {ImportMeta} */ ({
+            ...EMPTY_IMPORT_META,
+            ...(result.data?.meta ?? {}),
+          })
+          const hasMore = Boolean(meta.hasMore)
 
           if (!additions.length) {
             setImportMeta((prev) => ({
