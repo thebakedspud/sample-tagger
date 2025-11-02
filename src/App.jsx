@@ -39,6 +39,7 @@ import {
   mergeRemoteTags,
 } from './utils/notesTagsData.js'
 import { normalizeTimestamp, attachNotesToTracks } from './utils/trackProcessing.js'
+import { createRecentCandidate } from './features/recent/recentUtils.js'
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
@@ -118,54 +119,6 @@ const EMPTY_IMPORT_META = {
   sourceUrl: '',
   debug: null,
   total: null,
-}
-
-function createRecentCandidate(meta, options = {}) {
-  if (!meta || typeof meta !== 'object') return null
-  const provider =
-    typeof meta.provider === 'string' && meta.provider.trim()
-      ? meta.provider.trim().toLowerCase()
-      : null
-  const playlistId =
-    typeof meta.playlistId === 'string' && meta.playlistId.trim()
-      ? meta.playlistId.trim()
-      : null
-  const fallbackUrl =
-    typeof meta.sourceUrl === 'string' && meta.sourceUrl.trim()
-      ? meta.sourceUrl.trim()
-      : null
-  const sourceCandidate =
-    typeof options.sourceUrl === 'string' && options.sourceUrl.trim()
-      ? options.sourceUrl.trim()
-      : fallbackUrl
-  if (!provider || !playlistId || !sourceCandidate) return null
-
-  const next = {
-    provider,
-    playlistId,
-    title:
-      typeof options.title === 'string' && options.title.trim()
-        ? options.title.trim()
-        : 'Imported Playlist',
-    sourceUrl: sourceCandidate,
-  }
-
-  const importedAt = normalizeTimestamp(options.importedAt)
-  if (importedAt != null) next.importedAt = importedAt
-  const lastUsedAt = normalizeTimestamp(options.lastUsedAt)
-  if (lastUsedAt != null) next.lastUsedAt = lastUsedAt
-
-  if (typeof options.total === 'number' && Number.isFinite(options.total) && options.total >= 0) {
-    next.total = Math.round(options.total)
-  }
-  if (typeof options.coverUrl === 'string' && options.coverUrl.trim()) {
-    next.coverUrl = options.coverUrl.trim()
-  }
-  if (options.pinned) {
-    next.pinned = true
-  }
-
-  return next
 }
 
 export default function App() {
