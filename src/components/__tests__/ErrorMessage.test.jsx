@@ -1,10 +1,10 @@
-/* global describe, it, expect */
 import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import ErrorMessage from '../ErrorMessage.jsx'
 
 describe('ErrorMessage', () => {
   it('renders error message with role="alert"', () => {
-    render(<ErrorMessage>Something went wrong</ErrorMessage>)
+    render(<ErrorMessage id="error-message">Something went wrong</ErrorMessage>)
 
     const alert = screen.getByRole('alert')
     expect(alert).toHaveTextContent('Something went wrong')
@@ -17,7 +17,11 @@ describe('ErrorMessage', () => {
   })
 
   it('accepts custom className', () => {
-    render(<ErrorMessage className="custom-error">Error</ErrorMessage>)
+    render(
+      <ErrorMessage id="custom-error" className="custom-error">
+        Error
+      </ErrorMessage>,
+    )
 
     const alert = screen.getByRole('alert')
     expect(alert).toHaveClass('error-message')
@@ -25,19 +29,25 @@ describe('ErrorMessage', () => {
   })
 
   it('returns null when children is empty', () => {
-    const { container } = render(<ErrorMessage>{null}</ErrorMessage>)
+    const { container } = render(
+      <ErrorMessage id="null-children">{null}</ErrorMessage>,
+    )
 
     expect(container.firstChild).toBeNull()
   })
 
   it('returns null when children is undefined', () => {
-    const { container } = render(<ErrorMessage>{undefined}</ErrorMessage>)
+    const { container } = render(
+      <ErrorMessage id="undefined-children">{undefined}</ErrorMessage>,
+    )
 
     expect(container.firstChild).toBeNull()
   })
 
   it('returns null when children is empty string', () => {
-    const { container } = render(<ErrorMessage>{''}</ErrorMessage>)
+    const { container } = render(
+      <ErrorMessage id="empty-string">{''}</ErrorMessage>,
+    )
 
     expect(container.firstChild).toBeNull()
   })
