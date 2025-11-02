@@ -6,14 +6,11 @@ import RestoreDialog from './components/RestoreDialog.jsx'
 import RecentPlaylists from './features/recent/RecentPlaylists.jsx'
 import ErrorMessage from './components/ErrorMessage.jsx'
 import {
-  loadAppState,
   saveAppState,
   clearAppState,
-  getPendingMigrationSnapshot,
   clearPendingMigrationSnapshot,
   writeAutoBackupSnapshot,
   stashPendingMigrationSnapshot,
-  loadRecent,
   saveRecent,
   upsertRecent,
 } from './utils/storage.js'
@@ -39,6 +36,7 @@ import {
   mergeRemoteTags,
 } from './utils/notesTagsData.js'
 import { normalizeTimestamp, attachNotesToTracks } from './utils/trackProcessing.js'
+import { bootstrapStorageState, EMPTY_IMPORT_META } from './utils/storageBootstrap.js'
 import { createRecentCandidate } from './features/recent/recentUtils.js'
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
@@ -75,51 +73,10 @@ import {
   ensureRecoveryCsrfToken,
 } from './lib/deviceState.js'
 
-function bootstrapStorageState() {
-  if (typeof window === 'undefined') {
-    return {
-      persisted: null,
-      pendingMigrationSnapshot: null,
-      initialRecents: [],
-      persistedTracks: [],
-      initialScreen: 'landing',
-    }
-  }
-
-  const persisted = loadAppState()
-  const pendingMigrationSnapshot = getPendingMigrationSnapshot()
-  const persistedRecents = Array.isArray(persisted?.recentPlaylists)
-    ? [...persisted.recentPlaylists]
-    : null
-  const loadedRecents = persistedRecents ?? loadRecent()
-  const persistedTracks = Array.isArray(persisted?.tracks) ? [...persisted.tracks] : []
-  const hasValidPlaylist = Boolean(persisted?.importMeta?.provider && persistedTracks.length)
-
-  return {
-    persisted,
-    pendingMigrationSnapshot,
-    initialRecents: Array.isArray(loadedRecents) ? [...loadedRecents] : [],
-    persistedTracks,
-    initialScreen: hasValidPlaylist ? 'playlist' : 'landing',
-  }
-}
-
 /**
  * @typedef {'idle' | 'pending' | 'loading' | 'cooldown' | 'complete' | 'error'} BackgroundSyncStatus
  * @typedef {{ status: BackgroundSyncStatus, loaded: number, total: number|null, lastError: string|null, snapshotId: string|null }} BackgroundSyncState
  */
-
-// Safe default importMeta shape (mirrors storage v3)
-const EMPTY_IMPORT_META = {
-  provider: null,
-  playlistId: null,
-  snapshotId: null,
-  cursor: null,
-  hasMore: false,
-  sourceUrl: '',
-  debug: null,
-  total: null,
-}
 
 export default function App() {
   const [bootstrapState] = useState(bootstrapStorageState)
