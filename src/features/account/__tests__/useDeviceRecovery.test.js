@@ -206,6 +206,11 @@ describe('useDeviceRecovery', () => {
       deviceStateMocks.getStoredRecoveryCode.mockReturnValue('TEST-CODE-1234')
       // @ts-ignore - Mock function type
       deviceStateMocks.hasAcknowledgedRecovery.mockReturnValue(true)
+      // @ts-ignore - Mock function type
+      deviceStateMocks.getRecoveryAcknowledgement.mockReturnValue({
+        code: 'TEST-CODE-1234',
+        acknowledgedAt: Date.now(),
+      })
 
       // @ts-ignore - Mock function type
       apiFetchMock.mockResolvedValueOnce({
