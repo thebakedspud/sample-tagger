@@ -38,6 +38,7 @@ import {
   mergeRemoteNotes,
   mergeRemoteTags,
 } from './utils/notesTagsData.js'
+import { normalizeTimestamp, attachNotesToTracks } from './utils/trackProcessing.js'
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
@@ -117,103 +118,6 @@ const EMPTY_IMPORT_META = {
   sourceUrl: '',
   debug: null,
   total: null,
-}
-
-function attachNotesToTracks(trackList, notesMap, tagsMap, previousTracks = [], options = {}) {
-  if (!Array.isArray(trackList)) return [];
-  const safeMap = notesMap || Object.create(null);
-  const safeTags = tagsMap || Object.create(null);
-  const prevList = Array.isArray(previousTracks) ? previousTracks : [];
-  /** @type {Map<string, any>} */
-  const prevMap = new Map();
-  prevList.forEach((prevTrack) => {
-    if (!prevTrack || typeof prevTrack !== 'object') return;
-    const id = prevTrack.id;
-    if (id == null) return;
-    const key = typeof id === 'string' || typeof id === 'number' ? String(id) : null;
-    if (!key) return;
-    prevMap.set(key, prevTrack);
-  });
-
-  const baseStampMs = normalizeTimestamp(options.importStamp);
-  const fallbackStamp =
-    baseStampMs != null ? new Date(baseStampMs).toISOString() : new Date().toISOString();
-
-  const seed = Number.isFinite(options.originalIndexSeed)
-    ? Math.round(options.originalIndexSeed)
-    : prevList.reduce((max, item) => {
-        const value =
-          typeof item?.originalIndex === 'number' && Number.isFinite(item.originalIndex)
-            ? item.originalIndex
-            : -1;
-        return value > max ? value : max;
-      }, -1) + 1;
-
-  let nextOriginalIndex = seed;
-
-  return trackList.map((track) => {
-    if (!track || typeof track !== 'object') return track;
-    const id = track.id;
-    const key = typeof id === 'string' || typeof id === 'number' ? String(id) : null;
-    const prev = key ? prevMap.get(key) : null;
-    const mappedNotes =
-      key && hasOwn(safeMap, key) ? [...safeMap[key]] : normalizeNotesList(track.notes);
-    const mappedTags =
-      key && hasOwn(safeTags, key) ? [...safeTags[key]] : normalizeTagList(track.tags);
-
-    let importedAtIso =
-      typeof prev?.importedAt === 'string' && prev.importedAt.trim() ? prev.importedAt : null;
-    if (!importedAtIso) {
-      const candidateStamp = normalizeTimestamp(
-        track?.importedAt ?? options.importStamp ?? fallbackStamp,
-      );
-      if (candidateStamp != null) {
-        importedAtIso = new Date(candidateStamp).toISOString();
-      }
-    }
-    if (!importedAtIso) {
-      importedAtIso = fallbackStamp;
-    }
-
-    let originalIndex =
-      typeof prev?.originalIndex === 'number' && Number.isFinite(prev.originalIndex)
-        ? Math.round(prev.originalIndex)
-        : null;
-    if (originalIndex == null) {
-      const candidate = Number(track?.originalIndex);
-      if (Number.isFinite(candidate)) {
-        originalIndex = Math.round(candidate);
-      }
-    }
-    if (originalIndex == null) {
-      originalIndex = nextOriginalIndex;
-      nextOriginalIndex += 1;
-    }
-
-    return {
-      ...track,
-      notes: mappedNotes,
-      tags: mappedTags,
-      importedAt: importedAtIso,
-      originalIndex,
-    };
-  });
-}
-
-function normalizeTimestamp(value) {
-  if (value == null) return null
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Math.trunc(value)
-  }
-  if (value instanceof Date) {
-    const ms = value.getTime()
-    return Number.isFinite(ms) ? Math.trunc(ms) : null
-  }
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value)
-    return Number.isNaN(parsed) ? null : Math.trunc(parsed)
-  }
-  return null
 }
 
 function createRecentCandidate(meta, options = {}) {
