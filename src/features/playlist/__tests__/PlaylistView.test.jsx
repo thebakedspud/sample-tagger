@@ -44,6 +44,14 @@ const createProps = (overrides = {}) => {
     ],
   ])
 
+  const backgroundSync = /** @type {import('../../../App.jsx').BackgroundSyncState} */ ({
+    status: 'idle',
+    loaded: 0,
+    total: null,
+    lastError: null,
+    snapshotId: null,
+  })
+
   return /** @type {Parameters<typeof PlaylistView>[0]} */ ({
     playlistTitle: 'My Playlist',
     importedAt: '2023-01-01T12:00:00.000Z',
@@ -82,13 +90,7 @@ const createProps = (overrides = {}) => {
     loadMoreBtnRef: { current: null },
     onLoadMore: vi.fn(),
     announce: vi.fn(),
-    backgroundSync: {
-      status: 'idle',
-      loaded: 0,
-      total: null,
-      lastError: null,
-      snapshotId: null,
-    },
+    backgroundSync,
     focusContext: { reason: null, ts: 0 },
     skipFocusManagement: false,
     onFirstVisibleTrackChange: vi.fn(),

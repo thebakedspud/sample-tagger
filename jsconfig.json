@@ -8,7 +8,8 @@
     "moduleResolution": "bundler",
     "target": "esnext",
     "skipLibCheck": true,
-    "types": ["vite/client", "vitest/globals", "./types/prop-types"],
+    "types": ["vite/client"],
+    "typeRoots": ["./types", "./node_modules/@types"],
     "paths": {
       "prop-types": ["types/prop-types/index.d.ts"],
       "prop-types/*": ["types/prop-types/index.d.ts"],

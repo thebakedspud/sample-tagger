@@ -241,9 +241,11 @@ describe('useDeviceRecovery', () => {
     const originalExecCommand = document.execCommand
 
     afterEach(() => {
-      if (originalClipboard) {
-        globalThis.navigator.clipboard = originalClipboard
-      }
+      Object.defineProperty(globalThis.navigator, 'clipboard', {
+        configurable: true,
+        writable: true,
+        value: originalClipboard,
+      })
       document.execCommand = originalExecCommand
     })
 
@@ -259,9 +261,10 @@ describe('useDeviceRecovery', () => {
         json: async () => ({ anonId: 'test', recoveryCode: 'AAAA-BBBB-CCCC-DDDD' }),
       })
 
-      // @ts-ignore - Overriding readonly property for test
-      Object.assign(globalThis.navigator, {
-        clipboard: {
+      Object.defineProperty(globalThis.navigator, 'clipboard', {
+        configurable: true,
+        writable: true,
+        value: {
           writeText: vi.fn().mockResolvedValue(undefined),
         },
       })
@@ -280,8 +283,11 @@ describe('useDeviceRecovery', () => {
       // @ts-ignore - Mock function type
       deviceStateMocks.getStoredRecoveryCode.mockReturnValue('BBBB-CCCC-DDDD-EEEE')
 
-      // @ts-ignore - Modifying readonly property for test
-      delete globalThis.navigator.clipboard
+      Object.defineProperty(globalThis.navigator, 'clipboard', {
+        configurable: true,
+        writable: true,
+        value: undefined,
+      })
       // @ts-ignore - Overriding readonly property for test
       document.execCommand = vi.fn().mockReturnValue(true)
 

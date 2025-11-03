@@ -1,3 +1,6 @@
+/** @typedef {import('./adapters/types.js').NormalizedTrack} NormalizedTrack */
+/** @typedef {import('./adapters/types.js').PlaylistProvider} PlaylistProvider */
+
 // Keep as a NAMED export to match your hook import
 function sanitizeText(value) {
   if (typeof value !== 'string') return '';
@@ -23,28 +26,35 @@ function coerceIsoString(value) {
   return undefined;
 }
 
+/**
+ * @param {(Partial<NormalizedTrack> & { addedAt?: string | number | Date | null | undefined }) | undefined} t
+ * @param {number} i
+ * @param {PlaylistProvider | null | undefined} provider
+ * @returns {NormalizedTrack}
+ */
 export function normalizeTrack(t = {}, i, provider) {
-  const safeTitle = sanitizeText(t?.title ?? '');
-  const safeArtist = sanitizeText(t?.artist ?? '');
-  const normalized = {
-    ...t,
-    id: t?.id ?? `${provider}-${i + 1}`,
+  const source = /** @type {Partial<NormalizedTrack> & { addedAt?: string | number | Date | null | undefined }} */ (t ?? {});
+  const safeTitle = sanitizeText(source?.title ?? '');
+  const safeArtist = sanitizeText(source?.artist ?? '');
+  const normalized = /** @type {NormalizedTrack} */ ({
+    ...source,
+    id: source?.id ?? `${provider ?? 'track'}-${i + 1}`,
     title: safeTitle || `Untitled Track ${i + 1}`,
     artist: safeArtist || 'Unknown Artist',
-    provider: t?.provider ?? provider ?? undefined,
-  };
+    provider: source?.provider ?? provider ?? undefined,
+  });
 
-  const album = sanitizeText(t?.album ?? '');
+  const album = sanitizeText(source?.album ?? '');
   if (album) {
     normalized.album = album;
-  } else {
+  } else if ('album' in normalized) {
     delete normalized.album;
   }
 
-  const normalizedDate = coerceIsoString(t?.dateAdded ?? t?.addedAt);
+  const normalizedDate = coerceIsoString(source?.dateAdded ?? source?.addedAt);
   if (normalizedDate) {
     normalized.dateAdded = normalizedDate;
-  } else {
+  } else if ('dateAdded' in normalized) {
     delete normalized.dateAdded;
   }
 
