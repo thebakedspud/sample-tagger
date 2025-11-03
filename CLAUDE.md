@@ -13,7 +13,7 @@ Key capabilities:
 - Per-track notes with inline undo (10-minute window)
 - Tag management with debounced sync (350ms)
 - Multi-device sync via anonymous device IDs and recovery codes
-- localStorage persistence (versioned schema v5) with auto-migration
+- localStorage persistence (versioned schema v6) with auto-migration
 - Accessibility-first: ARIA live regions, keyboard shortcuts, focus management
 
 ---
@@ -96,18 +96,18 @@ useImportPlaylist() → adapter registry lookup (ADAPTER_REGISTRY)
   ↓
 AdapterA.importPlaylist() → { provider, tracks[], meta, pageInfo }
   ↓
-buildTracks() → normalizes to { id, title, artist, notes[], tags[] }
+usePlaylistImportFlow (internal: buildTracks/buildMeta) → normalizes to { id, title, artist, notes[], tags[] }
   ↓
-applyImportResult() → attaches notesByTrack, tagsByTrack, routes to playlist screen
+App.jsx applyImportResult() → attaches notesByTrack, tagsByTrack, routes to playlist screen
   ↓
-saveAppState() → localStorage (LS_KEY: 'sta:v5')
+saveAppState() → localStorage (LS_KEY: 'sta:v6')
   ↓
 Tracks display with note/tag UI
 ```
 
 ### Adapter Pattern (Import Providers)
 
-**Contract Definition:** `src/features/import/types.js`
+**Contract Definition:** `src/features/import/adapters/types.js`
 
 ```javascript
 PlaylistAdapter(options) → Promise<PlaylistAdapterResult>
@@ -169,14 +169,14 @@ All API routes are serverless functions deployed to Vercel:
 
 ## localStorage & Persistence
 
-### Versioned Storage Schema (v5)
+### Versioned Storage Schema (v6)
 
-**Key:** `sta:v5`
+**Key:** `sta:v6`
 
 **Shape:**
 ```javascript
 {
-  version: 5
+  version: 6
   theme: 'dark' | 'light'
   playlistTitle: string
   importedAt: ISO timestamp | null
@@ -189,7 +189,7 @@ All API routes are serverless functions deployed to Vercel:
 }
 ```
 
-**Migration System (v4 → v5):**
+**Migration System (v5 → v6):**
 1. On load, if old version detected, creates pending snapshot
 2. Bootstraps device, then runs async migration
 3. Fetches existing remote notes/tags from Supabase
@@ -291,7 +291,7 @@ focusById('track-note-btn-0')  // Uses requestAnimationFrame
 - **src/features/import/adapters/** → Spotify/YouTube/SoundCloud adapters
 - **src/features/import/normalizeTrack.js** → Track normalization
 - **src/features/account/useDeviceRecovery.js** → Device identity & recovery management hook
-- **src/features/tags/tagSyncScheduler.js** → Debounced tag sync queue
+- **src/features/tags/tagSyncQueue.js** → Debounced tag sync queue (exports createTagSyncScheduler)
 - **src/features/undo/useInlineUndo.js** → Inline undo hook
 - **src/features/a11y/useAnnounce.js** → Accessibility announcements
 
@@ -357,7 +357,7 @@ api/**/__tests__/           → API endpoint tests
 ### Adding a New Playlist Adapter
 
 1. Create adapter in `src/features/import/adapters/newAdapter.js`
-2. Follow the adapter contract in `src/features/import/types.js`
+2. Follow the adapter contract in `src/features/import/adapters/types.js`
 3. Return `createAdapterError(code, details)` for known errors
 4. Add to `ADAPTER_REGISTRY` in `src/features/import/useImportPlaylist.js`
 5. Update `detectProvider` in `src/features/import/detectProvider.js`

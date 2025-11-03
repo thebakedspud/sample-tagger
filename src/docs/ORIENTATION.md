@@ -48,8 +48,8 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 4. **Track + meta normalization**  
    - `src/features/import/normalizeTrack.js` plus `usePlaylistImportFlow` utilities (`buildTracks`, `buildMeta`) enforce stable `id`, `title`, `artist`, optional `thumbnailUrl/sourceUrl/durationMs`, and structured meta `{ provider, playlistId, snapshotId, cursor, hasMore, sourceUrl, debug }`.
 
-5. **Persistence, recents, backups**  
-   - `src/utils/storage.js` serializes `PersistedState` version 5 (`STORAGE_VERSION = 5`) under `sta:v5`, including theme, playlist title, `importMeta`, `tracks`, `notesByTrack`, `tagsByTrack`, and `recentPlaylists` (capped by `RECENT_DEFAULT_MAX = 8`).  
+5. **Persistence, recents, backups**
+   - `src/utils/storage.js` serializes `PersistedState` version 6 (`STORAGE_VERSION = 6`) under `sta:v6`, including theme, playlist title, `importMeta`, `tracks`, `notesByTrack`, `tagsByTrack`, and `recentPlaylists` (capped by `RECENT_DEFAULT_MAX = 8`).  
    - Migration helpers (`getPendingMigrationSnapshot`, `stashPendingMigrationSnapshot`, `writeAutoBackupSnapshot`) protect data between schema updates and auto-backups.
 
 6. **Device + recovery context**
@@ -63,7 +63,7 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 
 | Handler | Purpose |
 |---------|---------|
-| `handleImport(url)` | Calls `importInitial`, builds playlist state, persists to storage, updates recents, and focuses the first track. |
+| `handleImport(e)` | Form submit handler that calls `importInitial` with URL from state, builds playlist state, persists to storage, updates recents, and focuses the first track. |
 | `handleReimport()` | Reuses the stored URL/meta with `reimportPlaylist`, refreshes tracks and recents, and restores focus to the Re-import button. |
 | `handleLoadMore()` | Invokes `loadMoreTracks`, appends deduped pages, and moves focus to the first newly loaded track. |
 | `onAddNote / onSaveNote / onDeleteNote` | Manage per-track note drafts, persistence (`notesByTrack`), and inline undo metadata. |
