@@ -20,6 +20,7 @@ import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from '../features/
  * @property {string | null} [cursor]
  * @property {boolean} [hasMore]
  * @property {string | null} [sourceUrl]
+ * @property {number | null} [total]
  * @property {{ isMock?: boolean, lastErrorCode?: string | null } | null} [debug]
  *
  * @typedef {Object} PersistedTrack

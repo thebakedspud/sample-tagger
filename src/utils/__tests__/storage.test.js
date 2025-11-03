@@ -13,21 +13,38 @@ import {
   upsertRecent,
 } from '../storage.js';
 
+/** @typedef {import('../storage.js').RecentPlaylist} RecentPlaylist */
+/** @typedef {import('../storage.js').ImportMeta} ImportMeta */
+
+/** @implements {Storage} */
 class MemoryStorage {
   constructor() {
+    /** @type {Map<string, string>} */
     this.store = new Map();
   }
 
+  get length() {
+    return this.store.size;
+  }
+
+  key(index) {
+    if (typeof index !== 'number' || index < 0 || index >= this.store.size) {
+      return null;
+    }
+    return Array.from(this.store.keys())[index] ?? null;
+  }
+
   getItem(key) {
-    return this.store.has(key) ? this.store.get(key) : null;
+    const normalizedKey = String(key);
+    return this.store.has(normalizedKey) ? this.store.get(normalizedKey) ?? null : null;
   }
 
   setItem(key, value) {
-    this.store.set(key, String(value));
+    this.store.set(String(key), String(value));
   }
 
   removeItem(key) {
-    this.store.delete(key);
+    this.store.delete(String(key));
   }
 
   clear() {
@@ -37,7 +54,7 @@ class MemoryStorage {
 
 describe('storage cursors', () => {
   beforeEach(() => {
-    globalThis.localStorage = new MemoryStorage();
+    globalThis.localStorage = /** @type {Storage} */ (new MemoryStorage());
   });
 
   afterEach(() => {
@@ -230,7 +247,7 @@ describe('track persistence', () => {
 
 describe('tag helpers', () => {
   beforeEach(() => {
-    globalThis.localStorage = new MemoryStorage();
+    globalThis.localStorage = /** @type {Storage} */ (new MemoryStorage());
   });
 
   it('adds, removes, and lists tags with normalization', () => {
@@ -255,7 +272,7 @@ describe('tag helpers', () => {
 
 describe('recent playlists storage', () => {
   beforeEach(() => {
-    globalThis.localStorage = new MemoryStorage();
+    globalThis.localStorage = /** @type {Storage} */ (new MemoryStorage());
     vi.restoreAllMocks();
   });
 
@@ -263,6 +280,7 @@ describe('recent playlists storage', () => {
     vi.restoreAllMocks();
   });
 
+  /** @returns {Partial<RecentPlaylist>} */
   function baseRecentData() {
     return {
       id: 'spotify:abc123',
@@ -297,7 +315,7 @@ describe('recent playlists storage', () => {
     for (let i = 0; i < 5; i += 1) {
       list = upsertRecent(
         list,
-        {
+        /** @type {Partial<RecentPlaylist>} */ ({
           id: `spotify:${i}`,
           provider: 'spotify',
           playlistId: String(i),
@@ -305,7 +323,7 @@ describe('recent playlists storage', () => {
           sourceUrl: `https://example.com/${i}`,
           importedAt: i + 1,
           lastUsedAt: i + 1,
-        },
+        }),
         5,
       );
     }
@@ -317,7 +335,7 @@ describe('recent playlists storage', () => {
       return item;
     });
 
-    const result = upsertRecent(list, {
+    const result = upsertRecent(list, /** @type {Partial<RecentPlaylist>} */ ({
       id: 'spotify:new',
       provider: 'spotify',
       playlistId: 'new',
@@ -326,7 +344,7 @@ describe('recent playlists storage', () => {
       importedAt: 999,
       lastUsedAt: 999,
       pinned: false,
-    }, 5);
+    }), 5);
 
     expect(result).toHaveLength(5);
     const pinnedFirst = result.slice(0, 2);
@@ -335,7 +353,7 @@ describe('recent playlists storage', () => {
   });
 
   it('preserves recents when saveAppState runs without providing them', () => {
-    saveRecent([baseRecentData()]);
+    saveRecent(upsertRecent([], baseRecentData(), 10));
     saveAppState({
       theme: 'dark',
       playlistTitle: 'Notes Test',
@@ -375,4 +393,3 @@ describe('recent playlists storage', () => {
     expect(migrated?.tagsByTrack).toEqual({});
   });
 });
-
