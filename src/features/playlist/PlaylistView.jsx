@@ -6,6 +6,8 @@ import { SORT_KEY } from '../filter/filterTracks.js'
 import { DEBUG_FOCUS, debugFocus } from '../../utils/debug.js'
 import TrackCard from './TrackCard.jsx'
 
+/** @typedef {import('../../App.jsx').BackgroundSyncState} BackgroundSyncState */
+
 const DEFAULT_BACKGROUND_SYNC = Object.freeze({
   status: 'idle',
   loaded: 0,

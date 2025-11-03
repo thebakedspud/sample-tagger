@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 
+/** @type {import('react').CSSProperties} */
 const overlayStyle = {
   position: 'fixed',
   inset: 0,
@@ -11,6 +12,7 @@ const overlayStyle = {
   zIndex: 1000,
 };
 
+/** @type {import('react').CSSProperties} */
 const dialogStyle = {
   width: 'min(520px, 100%)',
   backgroundColor: 'var(--surface, #0f1115)',

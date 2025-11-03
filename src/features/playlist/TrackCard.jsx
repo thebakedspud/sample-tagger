@@ -6,7 +6,19 @@ import ErrorMessage from '../../components/ErrorMessage.jsx'
 
 /**
  * @param {object} props
- * @param {{ id: string|number, title: string, artist: string, notes: string[], tags?: string[], dateAdded?: string }} props.track
+ * @param {{
+ *   id: string|number,
+ *   title: string,
+ *   artist: string,
+ *   notes: string[],
+ *   tags?: string[],
+ *   dateAdded?: string,
+ *   thumbnailUrl?: string,
+ *   sourceUrl?: string,
+ *   durationMs?: number,
+ *   album?: string,
+ *   provider?: string
+ * }} props.track
  * @param {number} props.index
  * @param {Map<string, any>} props.pending
  * @param {(id: string) => boolean} props.isPending

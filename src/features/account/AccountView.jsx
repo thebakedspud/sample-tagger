@@ -176,7 +176,7 @@ export default function AccountView({
             Backup options
           </button>
         </div>
-        <ErrorMessage className="account-summary__error">
+        <ErrorMessage id="account-summary-error" className="account-summary__error">
           {regenerationError}
         </ErrorMessage>
         {showBackupPrompt && (

@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 
+/** @type {import('react').CSSProperties} */
 const overlayStyle = {
   position: 'fixed',
   inset: 0,
@@ -11,6 +12,7 @@ const overlayStyle = {
   zIndex: 1000,
 };
 
+/** @type {import('react').CSSProperties} */
 const modalStyle = {
   width: 'min(560px, 100%)',
   backgroundColor: 'var(--surface, #0f1115)',
@@ -21,6 +23,7 @@ const modalStyle = {
   boxShadow: '0 24px 48px rgba(0,0,0,0.45)',
 };
 
+/** @type {import('react').CSSProperties} */
 const codeStyle = {
   fontFamily: 'var(--mono, "Fira Code", monospace)',
   fontSize: '1.4rem',

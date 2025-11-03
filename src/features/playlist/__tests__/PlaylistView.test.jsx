@@ -27,6 +27,10 @@ beforeEach(() => {
   focusByIdMock?.mockReset()
 })
 
+/**
+ * @param {Partial<Parameters<typeof PlaylistView>[0]>} [overrides]
+ * @returns {Parameters<typeof PlaylistView>[0]}
+ */
 const createProps = (overrides = {}) => {
   const defaultPending = new Map([
     [
@@ -40,7 +44,7 @@ const createProps = (overrides = {}) => {
     ],
   ])
 
-  return {
+  return /** @type {Parameters<typeof PlaylistView>[0]} */ ({
     playlistTitle: 'My Playlist',
     importedAt: '2023-01-01T12:00:00.000Z',
     importMeta: {
@@ -83,6 +87,7 @@ const createProps = (overrides = {}) => {
       loaded: 0,
       total: null,
       lastError: null,
+      snapshotId: null,
     },
     focusContext: { reason: null, ts: 0 },
     skipFocusManagement: false,
@@ -92,7 +97,7 @@ const createProps = (overrides = {}) => {
     stockTags: [],
     customTags: [],
     ...overrides,
-  }
+  })
 }
 
 describe('PlaylistView', () => {
