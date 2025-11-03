@@ -54,10 +54,11 @@ npx vitest watch src/components/__tests__/RestoreDialog.test.jsx
 
 ### Monolithic App Component Pattern
 
-The core `src/App.jsx` (~1,850 lines) is intentionally monolithic, managing all application state:
+The core `src/App.jsx` (~2,160 lines) is intentionally monolithic, managing all application state:
 - Playlist imports (tracks, metadata, pagination cursors)
 - Notes and tags (notesByTrack, tagsByTrack maps)
-- Recent playlists, undo history, device context
+- Recent playlists, undo history
+- Device/recovery flows managed via useDeviceRecovery hook
 - Screen routing (landing → playlist) without URL-based routing
 
 **Rationale:** Single source of truth makes complex state interactions explicit; easier to trace data flows; avoids prop drilling through deep component trees.
@@ -69,6 +70,8 @@ Code is organized by domain, not by file type:
 ```
 src/features/
 ├── a11y/          # Accessibility (useAnnounce hook, LiveRegion)
+├── account/       # Device recovery & identity management (useDeviceRecovery hook)
+├── filter/        # Filtering utilities
 ├── import/        # Import orchestration + adapters
 ├── playlist/      # Playlist UI (PlaylistView, TrackCard)
 ├── recent/        # Recent playlists management
@@ -287,6 +290,7 @@ focusById('track-note-btn-0')  // Uses requestAnimationFrame
 - **src/features/import/useImportPlaylist.js** → Adapter registry + provider detection
 - **src/features/import/adapters/** → Spotify/YouTube/SoundCloud adapters
 - **src/features/import/normalizeTrack.js** → Track normalization
+- **src/features/account/useDeviceRecovery.js** → Device identity & recovery management hook
 - **src/features/tags/tagSyncScheduler.js** → Debounced tag sync queue
 - **src/features/undo/useInlineUndo.js** → Inline undo hook
 - **src/features/a11y/useAnnounce.js** → Accessibility announcements
@@ -327,7 +331,7 @@ focusById('track-note-btn-0')  // Uses requestAnimationFrame
 
 ## Testing Strategy
 
-### Test Organization (21 test files)
+### Test Organization (36 test files)
 ```
 src/__tests__/              → Integration tests
 src/features/**/__tests__/  → Feature-specific unit tests
@@ -339,6 +343,7 @@ api/**/__tests__/           → API endpoint tests
 - **src/App.tagging.test.jsx** → End-to-end tagging integration test
 - **src/features/import/__tests__/adapterContracts.test.js** → Validates all adapters follow contract
 - **src/features/import/__tests__/usePlaylistImportFlow.test.js** → Import flow state machine
+- **src/features/account/__tests__/useDeviceRecovery.test.js** → Device recovery hook behavior
 - **src/features/undo/__tests__/useInlineUndo.test.js** → Undo timer behavior
 
 ### Testing Utilities

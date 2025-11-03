@@ -1,5 +1,5 @@
 # ORIENTATION - Import Flow Overview
-_Last updated: 23 Oct 2025_
+_Last updated: 3 Nov 2025_
 
 A quick map of how the import, notes, and recovery pieces currently fit together. Use this to re-anchor after a break.
 
@@ -52,9 +52,10 @@ A quick map of how the import, notes, and recovery pieces currently fit together
    - `src/utils/storage.js` serializes `PersistedState` version 5 (`STORAGE_VERSION = 5`) under `sta:v5`, including theme, playlist title, `importMeta`, `tracks`, `notesByTrack`, `tagsByTrack`, and `recentPlaylists` (capped by `RECENT_DEFAULT_MAX = 8`).  
    - Migration helpers (`getPendingMigrationSnapshot`, `stashPendingMigrationSnapshot`, `writeAutoBackupSnapshot`) protect data between schema updates and auto-backups.
 
-6. **Device + recovery context**  
-   - `src/lib/deviceState.js` caches anonymous device IDs, anon IDs, and recovery codes in `localStorage`.  
-   - `src/App.jsx` bootstraps the device via `apiFetch('/api/anon/bootstrap')`, surfaces new recovery codes with `RecoveryModal`, and calls `/api/anon/restore` when the user submits the recovery code in `RestoreDialog`.
+6. **Device + recovery context**
+   - `src/lib/deviceState.js` caches anonymous device IDs, anon IDs, and recovery codes in `localStorage`.
+   - `src/features/account/useDeviceRecovery.js` handles device bootstrap via `apiFetch('/api/anon/bootstrap')`, surfaces new recovery codes with `RecoveryModal`, and manages restore flow when the user submits the recovery code in `RestoreDialog`.
+   - `src/App.jsx` consumes the hook and integrates device/recovery state into the application.
 
 ---
 
@@ -69,9 +70,21 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 | `undoInline / expireInline` | Provided by `useInlineUndo` (10 minute timeout) to restore or finalize deleted notes. |
 | `handleBackupNotes()` | Exports notes JSON via the File System Access API when available, otherwise triggers a download. |
 | `handleRestoreNotesRequest()` | Opens the hidden file input and merges imported notes into the current session. |
-| `handleRestoreSubmit(code)` | Posts the recovery code to `/api/anon/restore`, syncs notes from the backend, and updates device context. |
-| `handleClearAll()` | Clears storage, resets device identifiers, wipes in-memory state, and re-runs `bootstrapDevice`. |
+| `handleClearAll()` | Clears storage, resets device identifiers, wipes in-memory state. Bootstrap is handled automatically by useDeviceRecovery hook. |
 | `handleBackToLanding()` | Returns to the landing screen and focuses the URL field for a fresh import. |
+
+## Device & Recovery Handlers (from `useDeviceRecovery` hook)
+
+| Handler | Purpose |
+|---------|---------|
+| `bootstrapDevice()` | Calls `/api/anon/bootstrap`, handles 404 retries, updates device/anon IDs, manages recovery code display. |
+| `acknowledgeRecoveryModal()` | Marks recovery code as acknowledged, closes modal, updates localStorage. |
+| `openRecoveryModal()` | Opens recovery modal to display recovery code. |
+| `copyRecoveryCode()` | Copies recovery code to clipboard with fallback mechanisms. |
+| `regenerateRecoveryCode()` | Calls `/api/anon/recovery` to generate new recovery code with CSRF protection. |
+| `openRestoreDialog()` | Opens dialog for entering recovery code. |
+| `closeRestoreDialog()` | Closes restore dialog if not busy. |
+| `submitRestore(code)` | Posts recovery code to `/api/anon/restore`, updates device identity, triggers app reset. (From useDeviceRecovery hook) |
 
 ---
 
