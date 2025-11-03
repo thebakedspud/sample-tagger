@@ -4,6 +4,19 @@ import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState } 
 import { getTagSuggestions, normalizeTag } from './tagUtils.js';
 
 /**
+ * @typedef {Object} TagInputProps
+ * @property {string[]} [stockTags]
+ * @property {string[]} [customTags]
+ * @property {string[]} [existingTags]
+ * @property {(tag: string) => boolean | void} [onAdd]
+ * @property {() => void} [onCancel]
+ * @property {string} [placeholder]
+ * @property {boolean} [autoFocus]
+ * @property {string} [className]
+ * @property {Record<string, unknown>} [rest]
+ */
+
+/**
  * @param {{
  *   stockTags?: string[];
  *   customTags?: string[];
@@ -17,7 +30,9 @@ import { getTagSuggestions, normalizeTag } from './tagUtils.js';
  * }} props
  * @param {import('react').Ref<HTMLInputElement>} ref
  */
-const TagInput = forwardRef(function TagInput(props, ref) {
+/** @type {import('react').ForwardRefRenderFunction<HTMLInputElement, TagInputProps>} */
+function TagInputInner(props, ref) {
+  const safeProps = /** @type {TagInputProps} */ (props ?? {})
   const {
     stockTags,
     customTags,
@@ -27,7 +42,7 @@ const TagInput = forwardRef(function TagInput(props, ref) {
     placeholder = 'Add tag',
     autoFocus = false,
     className = '',
-  } = props || {}
+  } = safeProps
   const inputId = useId();
   const listboxId = `${inputId}-listbox`;
   const inputRef = useRef(null);
@@ -199,7 +214,9 @@ const TagInput = forwardRef(function TagInput(props, ref) {
       )}
     </div>
   );
-});
+}
+
+const TagInput = forwardRef(TagInputInner);
 
 TagInput.propTypes = {
   stockTags: PropTypes.arrayOf(PropTypes.string),
