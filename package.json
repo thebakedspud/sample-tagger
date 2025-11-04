@@ -12,7 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
-    "test:ci": "cross-env CI=1 vitest run --reporter=basic --maxWorkers=50%"
+    "test:ci": "cross-env CI=1 vitest run --reporter=default --maxWorkers=50%"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",

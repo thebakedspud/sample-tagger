@@ -288,8 +288,13 @@ describe('useDeviceRecovery', () => {
         writable: true,
         value: undefined,
       })
-      // @ts-ignore - Overriding readonly property for test
-      document.execCommand = vi.fn().mockReturnValue(true)
+      const originalExecCommand = document.execCommand
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        writable: true,
+        // @ts-ignore - Overriding readonly property for test
+        value: vi.fn().mockReturnValue(true),
+      })
 
       const { result } = await renderDeviceRecovery()
 
@@ -299,6 +304,16 @@ describe('useDeviceRecovery', () => {
 
       expect(document.execCommand).toHaveBeenCalledWith('copy')
       expect(announceMock).toHaveBeenCalledWith('Recovery code copied.')
+
+      if (originalExecCommand !== undefined) {
+        Object.defineProperty(document, 'execCommand', {
+          configurable: true,
+          writable: true,
+          value: originalExecCommand,
+        })
+      } else {
+        Reflect.deleteProperty(document, 'execCommand')
+      }
     })
 
     it('announces failure when both clipboard methods fail', async () => {
@@ -306,6 +321,7 @@ describe('useDeviceRecovery', () => {
       deviceStateMocks.getStoredRecoveryCode.mockReturnValue('CCCC-DDDD-EEEE-FFFF')
 
       const originalClipboard = globalThis.navigator.clipboard
+      const originalExecCommand = document.execCommand
 
       // Remove clipboard entirely
       Object.defineProperty(globalThis.navigator, 'clipboard', {
@@ -314,6 +330,11 @@ describe('useDeviceRecovery', () => {
         configurable: true,
       })
 
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        writable: true,
+        value: document.execCommand ?? vi.fn(),
+      })
       // @ts-ignore - execCommand exists on Document
       const execCommandSpy = vi
         .spyOn(document, 'execCommand')
@@ -338,6 +359,15 @@ describe('useDeviceRecovery', () => {
         })
       }
       execCommandSpy.mockRestore()
+      if (originalExecCommand !== undefined) {
+        Object.defineProperty(document, 'execCommand', {
+          configurable: true,
+          writable: true,
+          value: originalExecCommand,
+        })
+      } else {
+        Reflect.deleteProperty(document, 'execCommand')
+      }
     })
   })
 
