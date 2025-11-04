@@ -12,7 +12,17 @@ import { attachNotesToTracks } from '../../utils/trackProcessing.js'
 import { computeHasLocalNotes, computeAllCustomTags } from './helpers.js'
 
 /**
+ * @typedef {Object} PlaylistState
+ * @property {Array<any>} tracks
+ * @property {Record<string, string[]>} notesByTrack
+ * @property {Record<string, string[]>} tagsByTrack
+ * @property {{ trackId: string | null, draft: string, error: string | null }} editingState
+ * @property {{ hasLocalNotes: boolean, allCustomTags: string[] }} _derived
+ */
+
+/**
  * Playlist state shape with derived values co-located
+ * @type {PlaylistState}
  */
 export const initialPlaylistState = {
   tracks: [],

@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useEffect, useState, useRef, useCallback, useMemo, useReducer } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
 import RecoveryModal from './components/RecoveryModal.jsx'
 import RestoreDialog from './components/RestoreDialog.jsx'
@@ -21,7 +21,6 @@ import { createTagSyncScheduler } from './features/tags/tagSyncQueue.js'
 import {
   getNotes,
   normalizeNotesList,
-  hasOwn,
   cloneNotesMap,
   normalizeTagList,
   cloneTagsMap,
@@ -59,31 +58,33 @@ import { extractErrorCode, CODES } from './features/import/adapters/types.js'
 import { ERROR_MAP } from './features/import/errors.js'
 import { apiFetch } from './lib/apiClient.js'
 
-// NEW: Playlist state reducer
-import { playlistReducer, initialPlaylistState } from './features/playlist/playlistReducer.js'
+// NEW: Playlist state reducer + context provider
+import { initialPlaylistState } from './features/playlist/playlistReducer.js'
 import { playlistActions } from './features/playlist/actions.js'
 import { createNoteSnapshot, computeHasLocalNotes, computeAllCustomTags, validateTag } from './features/playlist/helpers.js'
+import { PlaylistStateProvider } from './features/playlist/PlaylistProvider.jsx'
+import {
+  usePlaylistDispatch,
+  usePlaylistTracks,
+  usePlaylistNotesByTrack,
+  usePlaylistTagsByTrack,
+  usePlaylistEditingState,
+  usePlaylistDerived,
+} from './features/playlist/usePlaylistContext.js'
 
 /**
  * @typedef {'idle' | 'pending' | 'loading' | 'cooldown' | 'complete' | 'error'} BackgroundSyncStatus
  * @typedef {{ status: BackgroundSyncStatus, loaded: number, total: number|null, lastError: string|null, snapshotId?: string|null }} BackgroundSyncState
  */
 
-export default function App() {
-  const [bootstrapState] = useState(bootstrapStorageState)
-  const {
-    persisted,
-    pendingMigrationSnapshot,
-    initialRecents,
-    persistedTracks,
-    initialScreen,
-  } = bootstrapState
-
-  const initialNotesMap = useMemo(() => createInitialNotesMap(persisted), [persisted])
-  const initialTagsMap = useMemo(() => createInitialTagsMap(persisted), [persisted])
-
+/**
+ * Inner component that consumes playlist state from context
+ * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: string }} props
+ */
+function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persistedTracks, initialScreen }) {
   const [showMigrationNotice, setShowMigrationNotice] = useState(Boolean(pendingMigrationSnapshot))
   const migrationSnapshotRef = useRef(pendingMigrationSnapshot)
+  
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState(
     /** @type {'landing' | 'playlist' | 'account'} */ (initialScreen)
@@ -96,6 +97,7 @@ export default function App() {
   const providerChip = detectProvider(importUrl || '')
   const [importError, setImportError] = useState(null)
   const importInputRef = useRef(null)
+  
   // PLAYLIST META (local state; persisted via storage v3 importMeta)
   const [importMeta, setImportMeta] = useState(() => {
     const initialMeta = persisted?.importMeta ?? {}
@@ -111,6 +113,7 @@ export default function App() {
   useEffect(() => {
     importMetaRef.current = importMeta
   }, [importMeta])
+  
   const [playlistTitle, setPlaylistTitle] = useState(persisted?.playlistTitle ?? 'My Playlist')
   const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null)
   const [lastImportUrl, setLastImportUrl] = useState(
@@ -121,37 +124,13 @@ export default function App() {
     lastImportUrlRef.current = lastImportUrl
   }, [lastImportUrl])
 
-  // NEW: Playlist state managed by reducer
-  // Memoize initial state to prevent recreation on every render
-  const initialPlaylistStateWithData = useMemo(() => {
-    const notesMap = ensureNotesEntries(initialNotesMap, persistedTracks)
-    const tagsMap = ensureTagsEntries(initialTagsMap, persistedTracks)
-    const tracksWithNotes = attachNotesToTracks(
-      persistedTracks,
-      notesMap,
-      tagsMap,
-      persistedTracks,
-      { importStamp: persisted?.importedAt ?? null }
-    )
-    
-    // Reuse helper functions to compute derived state
-    return {
-      ...initialPlaylistState,
-      tracks: tracksWithNotes,
-      notesByTrack: notesMap,
-      tagsByTrack: tagsMap,
-      _derived: {
-        hasLocalNotes: computeHasLocalNotes(notesMap, tagsMap),
-        allCustomTags: computeAllCustomTags(tagsMap)
-      }
-    }
-  }, [initialNotesMap, initialTagsMap, persistedTracks, persisted?.importedAt])
-
-  const [playlistState, dispatch] = useReducer(playlistReducer, initialPlaylistStateWithData)
-
-  // Destructure for easier access
-  const { tracks, notesByTrack, tagsByTrack, editingState, _derived } = playlistState
-  const { hasLocalNotes, allCustomTags } = _derived
+  // NEW: Consume playlist state from context
+  const dispatch = usePlaylistDispatch()
+  const tracks = usePlaylistTracks()
+  const notesByTrack = usePlaylistNotesByTrack()
+  const tagsByTrack = usePlaylistTagsByTrack()
+  const editingState = usePlaylistEditingState()
+  const { hasLocalNotes, allCustomTags } = usePlaylistDerived()
   const { trackId: editingId, draft, error: editingError } = editingState
   const tracksRef = useRef(tracks)
   const [skipPlaylistFocusManagement, setSkipPlaylistFocusManagement] = useState(false)
@@ -525,7 +504,7 @@ export default function App() {
 
       return { trackCount, title: resolvedTitle }
     },
-    [announce, cancelBackgroundPagination, pushRecentPlaylist, importMeta, markTrackFocusContext, notesByTrack, tagsByTrack]
+    [announce, cancelBackgroundPagination, pushRecentPlaylist, importMeta, markTrackFocusContext, notesByTrack, tagsByTrack, dispatch]
   )
 
   // OLD: These state variables moved to playlistReducer
@@ -678,7 +657,7 @@ export default function App() {
 
         if (announcement) announce(announcement)
       },
-      [announce, resetImportFlow]
+      [announce, resetImportFlow, dispatch]
     ),
   })
 
@@ -882,7 +861,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [anonContext?.anonId])
+  }, [anonContext?.anonId, dispatch])
 
   const reimportBtnRef = useRef(null)
   const loadMoreBtnRef = useRef(null)
@@ -907,7 +886,7 @@ export default function App() {
     if (!tracks.some(t => t.id === editingId)) {
       dispatch(playlistActions.cancelNoteEdit())
     }
-  }, [tracks, editingId])
+  }, [tracks, editingId, dispatch])
 
   // 🔐 Safety: if you somehow land on the playlist screen with zero tracks, bounce to landing
   useEffect(() => {
@@ -1455,6 +1434,7 @@ export default function App() {
       notesByTrack,
       tagsByTrack,
       tracks,
+      dispatch,
     ],
   )
 
@@ -1768,7 +1748,7 @@ export default function App() {
         })
       }
     },
-    [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks],
+    [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks, dispatch],
   )
 
   const onAddNote = (trackId) => {
@@ -2100,5 +2080,59 @@ export default function App() {
         onChange={handleImportNotesFromFile}
       />
     </div>
+  )
+}
+
+/**
+ * Outer App component - bootstraps state and provides playlist context
+ */
+export default function App() {
+  const [bootstrapState] = useState(bootstrapStorageState)
+  const {
+    persisted,
+    pendingMigrationSnapshot,
+    initialRecents,
+    persistedTracks,
+    initialScreen,
+  } = bootstrapState
+
+  const initialNotesMap = useMemo(() => createInitialNotesMap(persisted), [persisted])
+  const initialTagsMap = useMemo(() => createInitialTagsMap(persisted), [persisted])
+
+  // Compute initial playlist state for the provider
+  const initialPlaylistStateWithData = useMemo(() => {
+    const notesMap = ensureNotesEntries(initialNotesMap, persistedTracks)
+    const tagsMap = ensureTagsEntries(initialTagsMap, persistedTracks)
+    const tracksWithNotes = attachNotesToTracks(
+      persistedTracks,
+      notesMap,
+      tagsMap,
+      persistedTracks,
+      { importStamp: persisted?.importedAt ?? null }
+    )
+    
+    // Reuse helper functions to compute derived state
+    return {
+      ...initialPlaylistState,
+      tracks: tracksWithNotes,
+      notesByTrack: notesMap,
+      tagsByTrack: tagsMap,
+      _derived: {
+        hasLocalNotes: computeHasLocalNotes(notesMap, tagsMap),
+        allCustomTags: computeAllCustomTags(tagsMap)
+      }
+    }
+  }, [initialNotesMap, initialTagsMap, persistedTracks, persisted?.importedAt])
+
+  return (
+    <PlaylistStateProvider initialState={initialPlaylistStateWithData}>
+      <AppInner
+        persisted={persisted}
+        pendingMigrationSnapshot={pendingMigrationSnapshot}
+        initialRecents={initialRecents}
+        persistedTracks={persistedTracks}
+        initialScreen={initialScreen}
+      />
+    </PlaylistStateProvider>
   )
 }

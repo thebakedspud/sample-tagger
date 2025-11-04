@@ -52,16 +52,25 @@ npx vitest watch src/components/__tests__/RestoreDialog.test.jsx
 
 ## Architecture Overview
 
-### Monolithic App Component Pattern
+### App Component Structure
 
-The core `src/App.jsx` (~2,160 lines) is intentionally monolithic, managing all application state:
-- Playlist imports (tracks, metadata, pagination cursors)
-- Notes and tags (notesByTrack, tagsByTrack maps)
-- Recent playlists, undo history
-- Device/recovery flows managed via useDeviceRecovery hook
-- Screen routing (landing → playlist) without URL-based routing
+The app is split into two layers:
+1. **Outer `App`**: Bootstraps storage state, computes initial playlist state, provides context
+2. **Inner `AppInner`**: Consumes context, manages UI state (screen, import, etc.)
 
-**Rationale:** Single source of truth makes complex state interactions explicit; easier to trace data flows; avoids prop drilling through deep component trees.
+**Playlist State Management:**
+- Centralized in `PlaylistStateProvider` (React Context + useReducer)
+- Pure reducer (`playlistReducer`) handles all state transitions
+- Narrow selector hooks prevent unnecessary re-renders
+- Refs (notesByTrack, tagsByTrack, tracksRef) retained for async operations (deferred to Commit 7)
+
+**Other State:**
+- Import state (URL, error, metadata) - local state in AppInner
+- Screen routing (landing → playlist) - local state in AppInner
+- Device/recovery flows - managed via useDeviceRecovery hook
+- Recent playlists - local state + persistence
+
+**Rationale:** Context provider centralizes playlist state, enables testing in isolation, and prepares for extracting effects to provider in Commit 7.
 
 ### Feature-Module Organization
 
@@ -286,6 +295,11 @@ focusById('track-note-btn-0')  // Uses requestAnimationFrame
 - **src/main.jsx** → Entry point (ThemeProvider wrapper)
 
 ### Features
+- **src/features/playlist/PlaylistProvider.jsx** → Context provider for playlist state (wraps useReducer)
+- **src/features/playlist/usePlaylistContext.js** → Context hooks (usePlaylistDispatch, narrow selectors)
+- **src/features/playlist/playlistReducer.js** → Pure reducer for playlist state transitions
+- **src/features/playlist/actions.js** → Validated action creators
+- **src/features/playlist/helpers.js** → Pure helper functions (computeHasLocalNotes, validateTag, etc.)
 - **src/features/import/usePlaylistImportFlow.js** → Import orchestration hook
 - **src/features/import/useImportPlaylist.js** → Adapter registry + provider detection
 - **src/features/import/adapters/** → Spotify/YouTube/SoundCloud adapters
