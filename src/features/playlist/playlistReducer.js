@@ -128,6 +128,26 @@ export function playlistReducer(state, action) {
       })
     }
 
+    case 'NOTE_SAVE_ROLLBACK_WITH_ERROR': {
+      const { trackId, previousNotes, error } = action.payload
+      const nextNotesMap = updateNotesMap(state.notesByTrack, trackId, previousNotes)
+      const nextTracks = state.tracks.map(t =>
+        t.id === trackId
+          ? { ...t, notes: previousNotes }
+          : t
+      )
+
+      return recomputeDerived({
+        ...state,
+        notesByTrack: nextNotesMap,
+        tracks: nextTracks,
+        editingState: {
+          ...state.editingState,
+          error
+        }
+      })
+    }
+
     case 'NOTE_DELETE': {
       const { trackId, noteIndex } = action.payload
       const existing = state.notesByTrack[trackId] || []

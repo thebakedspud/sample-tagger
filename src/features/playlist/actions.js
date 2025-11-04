@@ -74,6 +74,17 @@ export const playlistActions = {
   },
 
   /**
+   * Rollback note save with error message (atomic update)
+   * @param {string} trackId
+   * @param {string[]} previousNotes
+   * @param {string} error
+   * @returns {Object}
+   */
+  rollbackNoteSaveWithError(trackId, previousNotes, error) {
+    return { type: 'NOTE_SAVE_ROLLBACK_WITH_ERROR', payload: { trackId, previousNotes, error } }
+  },
+
+  /**
    * Delete a note by index
    * @param {string} trackId
    * @param {number} noteIndex

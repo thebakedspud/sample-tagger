@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo, useReducer } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
 import RecoveryModal from './components/RecoveryModal.jsx'
 import RestoreDialog from './components/RestoreDialog.jsx'
@@ -29,11 +29,7 @@ import {
   createInitialTagsMap,
   ensureNotesEntries,
   ensureTagsEntries,
-  updateNotesMap,
-  updateTagsMap,
   groupRemoteNotes,
-  mergeRemoteNotes,
-  mergeRemoteTags,
 } from './utils/notesTagsData.js'
 import { normalizeTimestamp, attachNotesToTracks } from './utils/trackProcessing.js'
 import { bootstrapStorageState, EMPTY_IMPORT_META } from './utils/storageBootstrap.js'
@@ -62,6 +58,11 @@ import usePlaylistImportFlow, { ImportFlowStatus } from './features/import/usePl
 import { extractErrorCode, CODES } from './features/import/adapters/types.js'
 import { ERROR_MAP } from './features/import/errors.js'
 import { apiFetch } from './lib/apiClient.js'
+
+// NEW: Playlist state reducer
+import { playlistReducer, initialPlaylistState } from './features/playlist/playlistReducer.js'
+import { playlistActions } from './features/playlist/actions.js'
+import { createNoteSnapshot, computeHasLocalNotes, computeAllCustomTags, validateTag } from './features/playlist/helpers.js'
 
 /**
  * @typedef {'idle' | 'pending' | 'loading' | 'cooldown' | 'complete' | 'error'} BackgroundSyncStatus
@@ -120,39 +121,38 @@ export default function App() {
     lastImportUrlRef.current = lastImportUrl
   }, [lastImportUrl])
 
-  const [notesByTrack, setNotesByTrack] = useState(() =>
-    ensureNotesEntries(initialNotesMap, persistedTracks))
-  const [tagsByTrack, setTagsByTrack] = useState(() =>
-    ensureTagsEntries(initialTagsMap, persistedTracks))
-  const hasLocalNotes = useMemo(
-    () =>
-      Object.values(notesByTrack || {}).some(
-        (value) => Array.isArray(value) && value.length > 0
-      ) ||
-      Object.values(tagsByTrack || {}).some(
-        (value) => Array.isArray(value) && value.length > 0
-      ),
-    [notesByTrack, tagsByTrack]
-  )
-  const allCustomTags = useMemo(() => {
-    const bucket = new Set()
-    Object.values(tagsByTrack || {}).forEach((list) => {
-      if (!Array.isArray(list)) return
-      list.forEach((tag) => bucket.add(tag))
-    })
-    return Array.from(bucket).sort()
-  }, [tagsByTrack])
-
-  // DATA - normalize persisted tracks so notes always exist
-  const [tracks, setTracks] = useState(() =>
-    attachNotesToTracks(
+  // NEW: Playlist state managed by reducer
+  // Memoize initial state to prevent recreation on every render
+  const initialPlaylistStateWithData = useMemo(() => {
+    const notesMap = ensureNotesEntries(initialNotesMap, persistedTracks)
+    const tagsMap = ensureTagsEntries(initialTagsMap, persistedTracks)
+    const tracksWithNotes = attachNotesToTracks(
       persistedTracks,
-      notesByTrack,
-      tagsByTrack,
+      notesMap,
+      tagsMap,
       persistedTracks,
       { importStamp: persisted?.importedAt ?? null }
     )
-  )
+    
+    // Reuse helper functions to compute derived state
+    return {
+      ...initialPlaylistState,
+      tracks: tracksWithNotes,
+      notesByTrack: notesMap,
+      tagsByTrack: tagsMap,
+      _derived: {
+        hasLocalNotes: computeHasLocalNotes(notesMap, tagsMap),
+        allCustomTags: computeAllCustomTags(tagsMap)
+      }
+    }
+  }, [initialNotesMap, initialTagsMap, persistedTracks, persisted?.importedAt])
+
+  const [playlistState, dispatch] = useReducer(playlistReducer, initialPlaylistStateWithData)
+
+  // Destructure for easier access
+  const { tracks, notesByTrack, tagsByTrack, editingState, _derived } = playlistState
+  const { hasLocalNotes, allCustomTags } = _derived
+  const { trackId: editingId, draft, error: editingError } = editingState
   const tracksRef = useRef(tracks)
   const [skipPlaylistFocusManagement, setSkipPlaylistFocusManagement] = useState(false)
   const firstVisibleTrackIdRef = useRef(null)
@@ -375,19 +375,17 @@ export default function App() {
           importMeta.provider === meta.provider &&
           importMeta.playlistId === meta.playlistId
 
-        const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, mapped)
-        const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, mapped)
-        setNotesByTrack(nextNotesMap)
-        setTagsByTrack(nextTagsMap)
-        setTracks(
-          attachNotesToTracks(
-            mapped,
-            nextNotesMap,
-            nextTagsMap,
-            samePlaylist ? previousTracks : [],
-            { importStamp: importedTimestamp ?? null }
-          )
-        )
+        const nextNotesMap = ensureNotesEntries(notesByTrack, mapped)
+        const nextTagsMap = ensureTagsEntries(tagsByTrack, mapped)
+        
+        // Update tracks via reducer
+        dispatch(playlistActions.setTracksWithNotes(
+          mapped,
+          nextNotesMap,
+          nextTagsMap,
+          samePlaylist ? previousTracks : [],
+          importedTimestamp ?? null
+        ))
         markTrackFocusContext('initial-import')
         setImportMeta({
           ...EMPTY_IMPORT_META,
@@ -527,12 +525,13 @@ export default function App() {
 
       return { trackCount, title: resolvedTitle }
     },
-    [announce, cancelBackgroundPagination, pushRecentPlaylist, importMeta, markTrackFocusContext]
+    [announce, cancelBackgroundPagination, pushRecentPlaylist, importMeta, markTrackFocusContext, notesByTrack, tagsByTrack]
   )
 
-  const [editingId, setEditingId] = useState(null)
-  const [draft, setDraft] = useState('')
-  const [error, setError] = useState(null)
+  // OLD: These state variables moved to playlistReducer
+  // const [editingId, setEditingId] = useState(null)
+  // const [draft, setDraft] = useState('')
+  // const [error, setError] = useState(null)
 
   // Remember which button opened the editor
   const editorInvokerRef = useRef(null)
@@ -540,6 +539,7 @@ export default function App() {
   const tagsByTrackRef = useRef(tagsByTrack)
   const backupFileInputRef = useRef(null)
 
+  // Sync refs when state changes
   useEffect(() => {
     notesByTrackRef.current = notesByTrack
   }, [notesByTrack])
@@ -603,23 +603,11 @@ export default function App() {
     onUndo: (meta) => {
       if (!meta) return
       const { trackId, note, index, restoreFocusId, fallbackFocusId } = meta
-      const currentMap = notesByTrackRef.current
-      const existing = trackId && currentMap && hasOwn(currentMap, trackId)
-        ? [...currentMap[trackId]]
-        : []
-      const insertAt = Math.min(Math.max(index, 0), existing.length + 1)
-      if (note != null) {
-        existing.splice(insertAt, 0, note)
-      }
-      const updatedMap = updateNotesMap(currentMap, trackId, existing)
-      setNotesByTrack(updatedMap)
-      setTracks(prev =>
-        prev.map(t => {
-          if (t.id !== trackId) return t
-          return { ...t, notes: [...existing] }
-        })
-      )
+      
+      // Restore note using reducer
+      dispatch(playlistActions.restoreNote(trackId, note, index))
       announce('Note restored')
+      
       requestAnimationFrame(() => {
         if (restoreFocusId && document.getElementById(restoreFocusId)) {
           focusById(restoreFocusId)
@@ -676,8 +664,10 @@ export default function App() {
       async ({ announcement, screenTarget }) => {
         // Clear all app state
         clearAppState()
-        setNotesByTrack(Object.create(null))
-        setTracks([])
+        
+        // Reset playlist state via reducer
+        dispatch(playlistActions.resetState())
+        
         setImportMeta({ ...EMPTY_IMPORT_META })
         setPlaylistTitle('My Playlist')
         setImportedAt(null)
@@ -878,28 +868,8 @@ export default function App() {
         if (!hasRemoteNotes && !hasRemoteTags) {
           return
         }
-        setNotesByTrack((prev) =>
-          ensureNotesEntries(mergeRemoteNotes(prev, remoteMap), tracksRef.current)
-        )
-        setTagsByTrack((prev) =>
-          ensureTagsEntries(mergeRemoteTags(prev, remoteTagMap), tracksRef.current)
-        )
-        setTracks((prev) =>
-          prev.map((track) => {
-            let next = track
-            const remoteNotes = remoteMap[track.id]
-            if (Array.isArray(remoteNotes) && remoteNotes.length > 0) {
-              const existingNotes = Array.isArray(track.notes) ? track.notes : []
-              if (existingNotes.length === 0) {
-                next = { ...next, notes: [...remoteNotes] }
-              }
-            }
-            if (track.id && track.id in remoteTagMap) {
-              next = { ...next, tags: [...remoteTagMap[track.id]] }
-            }
-            return next
-          })
-        )
+        // Merge remote data using reducer
+        dispatch(playlistActions.mergeRemoteData(remoteMap, remoteTagMap))
       } catch (err) {
         if (!cancelled) {
           console.error('[notes sync] error', err)
@@ -935,7 +905,7 @@ export default function App() {
   useEffect(() => {
     if (editingId == null) return
     if (!tracks.some(t => t.id === editingId)) {
-      setEditingId(null); setDraft(''); setError(null)
+      dispatch(playlistActions.cancelNoteEdit())
     }
   }, [tracks, editingId])
 
@@ -962,7 +932,7 @@ export default function App() {
 
   // ===== tiny extracted handlers =====
   function handleImportUrlChange(e) { setImportUrl(e.target.value); setImportError(null) }
-  const handleDraftChange = (value) => { setDraft(value) }
+  const handleDraftChange = (value) => { dispatch(playlistActions.changeDraft(value)) }
   function handleBackToLanding() { setScreen('landing') }
 
   const isInitialImportBusy = importStatus === ImportFlowStatus.IMPORTING
@@ -1399,20 +1369,20 @@ export default function App() {
             return { ok: true, done: !hasMore, added: 0, firstNewTrackId: null }
           }
 
-          const nextNotesMap = ensureNotesEntries(notesByTrackRef.current, additions)
-          const nextTagsMap = ensureTagsEntries(tagsByTrackRef.current, additions)
-          setNotesByTrack(nextNotesMap)
-          setTagsByTrack(nextTagsMap)
-          const baseTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
+          const nextNotesMap = ensureNotesEntries(notesByTrack, additions)
+          const nextTagsMap = ensureTagsEntries(tagsByTrack, additions)
+          const baseTracks = Array.isArray(tracks) ? tracks : []
           const loadMoreStamp = new Date().toISOString()
-          const additionsWithNotes = attachNotesToTracks(
-            additions,
+          
+          // Append new tracks to existing tracks
+          const allTracks = [...baseTracks, ...additions]
+          dispatch(playlistActions.setTracksWithNotes(
+            allTracks,
             nextNotesMap,
             nextTagsMap,
             baseTracks,
-            { importStamp: loadMoreStamp },
-          )
-          setTracks((prev) => [...prev, ...additionsWithNotes])
+            loadMoreStamp
+          ))
           markTrackFocusContext(isBackground ? 'background-load-more' : 'manual-load-more')
           setImportMeta((prev) => ({
             ...prev,
@@ -1482,9 +1452,9 @@ export default function App() {
       setImportError,
       setImportMeta,
       setImportedAt,
-      setNotesByTrack,
-      setTagsByTrack,
-      setTracks,
+      notesByTrack,
+      tagsByTrack,
+      tracks,
     ],
   )
 
@@ -1658,9 +1628,15 @@ export default function App() {
       })
       const nextMap = ensureNotesEntries(merged, tracks)
       const nextTagsMap = ensureTagsEntries(mergedTags, tracks)
-      setNotesByTrack(nextMap)
-      setTagsByTrack(nextTagsMap)
-      setTracks(prev => attachNotesToTracks(prev, nextMap, nextTagsMap, prev))
+      
+      // Update via reducer
+      dispatch(playlistActions.setTracksWithNotes(
+        tracks,
+        nextMap,
+        nextTagsMap,
+        tracks,
+        null
+      ))
       announce('Notes restored from backup.')
     } catch (err) {
       console.error('[notes restore error]', err)
@@ -1674,15 +1650,14 @@ export default function App() {
     cancelBackgroundPagination({ resetHistory: true })
     // Reset transient UI and timers
     clearInlineUndo()
-    setEditingId(null); setDraft(''); setError(null)
     setImportError(null)
     // Clear persisted data
     clearAppState()
 
-    // Reset in-memory app state
-    setNotesByTrack(Object.create(null))
-    setTagsByTrack(Object.create(null))
-    setTracks([])
+    // Reset playlist state via reducer
+    dispatch(playlistActions.resetState())
+    
+    // Reset other app state
     setImportMeta({ ...EMPTY_IMPORT_META })
     setPlaylistTitle('My Playlist')
     setImportedAt(null)
@@ -1738,79 +1713,66 @@ export default function App() {
 
   const handleAddTag = useCallback(
     (trackId, tag) => {
-      const normalized = normalizeTag(tag)
-      if (!trackId || !normalized) return false
-      if (normalized.length > MAX_TAG_LENGTH) {
-        announce(`Tags must be ${MAX_TAG_LENGTH} characters or fewer.`)
+      // Get existing tags for validation
+      const existingTags = tagsByTrack[trackId] || []
+      
+      // Validate before dispatching (no try/catch control flow)
+      const validation = validateTag(tag, existingTags, MAX_TAGS_PER_TRACK, MAX_TAG_LENGTH)
+      
+      if (!validation.valid) {
+        announce(validation.error || 'Invalid tag.')
         return false
       }
-      if (!TAG_ALLOWED_RE.test(normalized)) {
-        announce('Tags can only include letters, numbers, spaces, hyphen, or underscore.')
-        return false
-      }
-      const currentMap = tagsByTrackRef.current || {}
-      const existing = hasOwn(currentMap, trackId) ? [...currentMap[trackId]] : []
-      if (existing.length >= MAX_TAGS_PER_TRACK) {
-        announce(`Maximum of ${MAX_TAGS_PER_TRACK} tags reached for this track.`)
-        return false
-      }
-      if (existing.includes(normalized)) {
-        const title = tracksRef.current.find((t) => t.id === trackId)?.title ?? 'this track'
-        announce(`Tag "${normalized}" already applied to "${title}".`)
-        return false
-      }
-      const nextList = [...existing, normalized]
-      const nextMap = updateTagsMap(currentMap, trackId, nextList)
-      setTagsByTrack(nextMap)
-      tagsByTrackRef.current = nextMap
-      setTracks((prev) =>
-        prev.map((t) => {
-          if (t.id !== trackId) return t
-          return { ...t, tags: nextList }
-        })
-      )
-      const title = tracksRef.current.find((t) => t.id === trackId)?.title ?? 'this track'
+      
+      const normalized = validation.normalized
+      
+      // Dispatch action (validation passed)
+      dispatch(playlistActions.addTag(trackId, normalized, existingTags))
+      
+      // Success feedback
+      const title = tracks.find((t) => t.id === trackId)?.title ?? 'this track'
       announce(`Added tag "${normalized}" to "${title}".`)
+      
+      // Sync to remote
       if (anonContext?.deviceId) {
-        syncTrackTags(trackId, nextList).catch(() => {
+        const updatedTags = [...existingTags, normalized]
+        syncTrackTags(trackId, updatedTags).catch(() => {
           announce('Tag sync failed. Changes are saved locally.')
         })
       }
       return true
     },
-    [announce, anonContext?.deviceId, syncTrackTags],
+    [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks, dispatch],
   )
 
   const handleRemoveTag = useCallback(
     (trackId, tag) => {
       const normalized = normalizeTag(tag)
       if (!trackId || !normalized) return
-      const currentMap = tagsByTrackRef.current || {}
-      const existing = hasOwn(currentMap, trackId) ? [...currentMap[trackId]] : []
+      
+      const existing = tagsByTrack[trackId] || []
       if (existing.length === 0) return
-      const filtered = existing.filter((value) => value !== normalized)
-      const nextMap = updateTagsMap(currentMap, trackId, filtered)
-      setTagsByTrack(nextMap)
-      tagsByTrackRef.current = nextMap
-      setTracks((prev) =>
-        prev.map((t) => {
-          if (t.id !== trackId) return t
-          return { ...t, tags: filtered }
-        })
-      )
-      const title = tracksRef.current.find((t) => t.id === trackId)?.title ?? 'this track'
+      
+      // Remove tag
+      dispatch(playlistActions.removeTag(trackId, normalized))
+      
+      // Feedback
+      const title = tracks.find((t) => t.id === trackId)?.title ?? 'this track'
       announce(`Removed tag "${normalized}" from "${title}".`)
+      
+      // Sync to remote
       if (anonContext?.deviceId) {
+        const filtered = existing.filter((value) => value !== normalized)
         syncTrackTags(trackId, filtered).catch(() => {
           announce('Tag sync failed. Changes are saved locally.')
         })
       }
     },
-    [announce, anonContext?.deviceId, syncTrackTags],
+    [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks],
   )
 
   const onAddNote = (trackId) => {
-    setEditingId(trackId); setDraft(''); setError(null)
+    dispatch(playlistActions.startNoteEdit(trackId))
     editorInvokerRef.current = document.getElementById(`add-note-btn-${trackId}`)
     setTimeout(() => { focusById(`note-input-${trackId}`) }, 0)
   }
@@ -1818,24 +1780,15 @@ export default function App() {
   const onSaveNote = async (trackId) => {
     if (!draft.trim()) {
       announce('Note not saved. The note is empty.')
-      setError('Note cannot be empty.')
+      dispatch(playlistActions.setEditingError('Note cannot be empty.'))
       return
     }
     const trimmed = draft.trim()
-    const existing = trackId && hasOwn(notesByTrack, trackId)
-      ? [...notesByTrack[trackId]]
-      : []
-    const rollbackMap = updateNotesMap(notesByTrack, trackId, existing)
-    const optimistic = [...existing, trimmed]
-    const nextMap = updateNotesMap(notesByTrack, trackId, optimistic)
-    setNotesByTrack(nextMap)
-    setTracks(prev =>
-      prev.map(t => {
-        if (t.id !== trackId) return t
-        return { ...t, notes: [...optimistic] }
-      })
-    )
-    setEditingId(null); setDraft(''); setError(null)
+    // Create snapshot before optimistic update
+    const snapshot = createNoteSnapshot(notesByTrack, trackId)
+    
+    // Optimistic update
+    dispatch(playlistActions.saveNoteOptimistic(trackId, trimmed))
     announce('Note added.')
     editorInvokerRef.current?.focus()
 
@@ -1855,20 +1808,18 @@ export default function App() {
       }
     } catch (err) {
       console.error('[note save] error', err)
-      setError('Failed to save note. Restored previous notes.')
-      setNotesByTrack(rollbackMap)
-      setTracks(prev =>
-        prev.map(t => {
-          if (t.id !== trackId) return t
-          return { ...t, notes: [...existing] }
-        })
-      )
+      // Rollback on failure (atomic update)
+      dispatch(playlistActions.rollbackNoteSaveWithError(
+        trackId, 
+        snapshot.previousNotes, 
+        'Failed to save note. Restored previous notes.'
+      ))
       announce('Note save failed. Restored previous note list.')
     }
   }
 
   const onCancelNote = () => {
-    setEditingId(null); setDraft(''); setError(null)
+    dispatch(playlistActions.cancelNoteEdit())
     announce('Note cancelled.')
     editorInvokerRef.current?.focus()
   }
@@ -1883,19 +1834,10 @@ export default function App() {
     const noteToDelete = notes[noteIndex]
     if (noteToDelete == null) return
 
-    const existing = trackId && hasOwn(notesByTrack, trackId)
-      ? [...notesByTrack[trackId]]
-      : [...notes]
-    const updated = existing.filter((_, i) => i !== noteIndex)
-    const nextMap = updateNotesMap(notesByTrack, trackId, updated)
-    setNotesByTrack(nextMap)
-    setTracks(prev =>
-      prev.map(t => {
-        if (t.id !== trackId) return t
-        return { ...t, notes: [...updated] }
-      })
-    )
+    // Delete note
+    dispatch(playlistActions.deleteNote(trackId, noteIndex))
 
+    // Schedule undo
     const id = makePendingId(trackId, noteIndex)
     scheduleInlineUndo(id, {
       trackId,
@@ -2073,7 +2015,7 @@ export default function App() {
                 showLoadMoreSpinner={showLoadMoreSpinner}
                 pending={pending}
                 isPending={isPending}
-                editingState={{ editingId, draft, error }}
+                editingState={{ editingId, draft, error: editingError }}
                 onDraftChange={handleDraftChange}
                 onAddNote={onAddNote}
                 onSaveNote={onSaveNote}

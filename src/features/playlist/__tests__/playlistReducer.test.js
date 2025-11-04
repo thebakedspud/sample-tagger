@@ -212,6 +212,43 @@ describe('playlistReducer', () => {
     })
   })
 
+  describe('NOTE_SAVE_ROLLBACK_WITH_ERROR', () => {
+    it('restores previous notes and sets error (atomic update)', () => {
+      const state = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', notes: ['failed note'] }],
+        notesByTrack: { t1: ['failed note'] },
+        editingState: { trackId: null, draft: '', error: null }
+      }
+
+      const action = playlistActions.rollbackNoteSaveWithError('t1', ['original note'], 'API error')
+      const next = playlistReducer(state, action)
+
+      expect(next.notesByTrack.t1).toEqual(['original note'])
+      expect(next.tracks[0].notes).toEqual(['original note'])
+      expect(next.editingState.error).toBe('API error')
+    })
+
+    it('can rollback to empty notes with error', () => {
+      const state = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', notes: ['bad note'] }],
+        notesByTrack: { t1: ['bad note'] },
+        editingState: { trackId: 't1', draft: 'some draft', error: null }
+      }
+
+      const action = playlistActions.rollbackNoteSaveWithError('t1', [], 'Failed to save')
+      const next = playlistReducer(state, action)
+
+      expect(next.notesByTrack.t1).toBeUndefined()
+      expect(next.tracks[0].notes).toEqual([])
+      expect(next.editingState.error).toBe('Failed to save')
+      // Preserves other editing state
+      expect(next.editingState.trackId).toBe('t1')
+      expect(next.editingState.draft).toBe('some draft')
+    })
+  })
+
   describe('NOTE_DELETE', () => {
     it('removes note by index', () => {
       const state = {
