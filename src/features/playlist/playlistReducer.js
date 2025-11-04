@@ -73,6 +73,15 @@ export function playlistReducer(state, action) {
         }
       }
 
+    case 'NOTE_EDITING_ERROR':
+      return {
+        ...state,
+        editingState: {
+          ...state.editingState,
+          error: action.payload.error
+        }
+      }
+
     case 'NOTE_EDIT_CANCEL':
       return {
         ...state,
