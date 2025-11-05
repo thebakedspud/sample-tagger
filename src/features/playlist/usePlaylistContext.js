@@ -1,7 +1,7 @@
 // src/features/playlist/usePlaylistContext.js
 
 import { useContext } from 'react'
-import { PlaylistStateContext, PlaylistDispatchContext } from './PlaylistProvider.jsx'
+import { PlaylistStateContext, PlaylistDispatchContext, PlaylistSyncContext } from './contexts.js'
 // eslint-disable-next-line no-unused-vars -- used in JSDoc types
 import { initialPlaylistState } from './playlistReducer.js'
 
@@ -96,5 +96,18 @@ export function usePlaylistDerived() {
     throw new Error('usePlaylistDerived must be used within PlaylistStateProvider')
   }
   return state._derived
+}
+
+/**
+ * Hook to access playlist sync operations
+ * @returns {{ syncTrackTags: (trackId: string, tags: string[]) => Promise<void> }}
+ * @throws {Error} If used outside PlaylistStateProvider
+ */
+export function usePlaylistSync() {
+  const sync = useContext(PlaylistSyncContext)
+  if (sync === null) {
+    throw new Error('usePlaylistSync must be used within PlaylistStateProvider')
+  }
+  return sync
 }
 
