@@ -17,7 +17,6 @@ import {
 import { normalizeTag } from './features/tags/tagUtils.js'
 import { STOCK_TAGS } from './features/tags/constants.js'
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from './features/tags/validation.js'
-import { createTagSyncScheduler } from './features/tags/tagSyncQueue.js'
 import {
   getNotes,
   normalizeNotesList,
@@ -57,6 +56,7 @@ import usePlaylistImportFlow, { ImportFlowStatus } from './features/import/usePl
 import { extractErrorCode, CODES } from './features/import/adapters/types.js'
 import { ERROR_MAP } from './features/import/errors.js'
 import { apiFetch } from './lib/apiClient.js'
+import { getDeviceId, getAnonId } from './lib/deviceState.js'
 
 // NEW: Playlist state reducer + context provider
 import { initialPlaylistState } from './features/playlist/playlistReducer.js'
@@ -70,6 +70,7 @@ import {
   usePlaylistTagsByTrack,
   usePlaylistEditingState,
   usePlaylistDerived,
+  usePlaylistSync,
 } from './features/playlist/usePlaylistContext.js'
 
 /**
@@ -79,9 +80,9 @@ import {
 
 /**
  * Inner component that consumes playlist state from context
- * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: string }} props
+ * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: string, onAnonContextChange: Function }} props
  */
-function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persistedTracks, initialScreen }) {
+function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persistedTracks, initialScreen, onAnonContextChange }) {
   const [showMigrationNotice, setShowMigrationNotice] = useState(Boolean(pendingMigrationSnapshot))
   const migrationSnapshotRef = useRef(pendingMigrationSnapshot)
   
@@ -132,6 +133,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   const editingState = usePlaylistEditingState()
   const { hasLocalNotes, allCustomTags } = usePlaylistDerived()
   const { trackId: editingId, draft, error: editingError } = editingState
+  const { syncTrackTags } = usePlaylistSync()
   const tracksRef = useRef(tracks)
   const [skipPlaylistFocusManagement, setSkipPlaylistFocusManagement] = useState(false)
   const firstVisibleTrackIdRef = useRef(null)
@@ -661,7 +663,12 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     ),
   })
 
-  // Reconstruct anonContext for migration/sync effects
+  // Update parent's anonContext when device recovery changes
+  useEffect(() => {
+    onAnonContextChange({ deviceId, anonId })
+  }, [deviceId, anonId, onAnonContextChange])
+
+  // Reconstruct anonContext for local use (backup/restore flows)
   const anonContext = useMemo(
     () => ({ deviceId, anonId }),
     [deviceId, anonId]
@@ -828,44 +835,11 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     console.warn('[bootstrap] client warning', bootstrapError)
   }, [bootstrapError])
 
-  useEffect(() => {
-    if (!anonContext?.anonId) return
-    let cancelled = false
-
-    const syncNotes = async () => {
-      try {
-        const response = await apiFetch('/api/db/notes')
-        const payload = await response.json().catch(() => ({}))
-        if (cancelled) return
-        if (!response.ok) {
-          console.error('[notes sync] failed', payload)
-          return
-        }
-        const { notes: remoteMap, tags: remoteTagMap } = groupRemoteNotes(payload?.notes)
-        const hasRemoteNotes = Object.keys(remoteMap).length > 0
-        const hasRemoteTags = Object.keys(remoteTagMap).length > 0
-        if (!hasRemoteNotes && !hasRemoteTags) {
-          return
-        }
-        // Merge remote data using reducer
-        dispatch(playlistActions.mergeRemoteData(remoteMap, remoteTagMap))
-      } catch (err) {
-        if (!cancelled) {
-          console.error('[notes sync] error', err)
-        }
-      }
-    }
-
-    syncNotes()
-
-    return () => {
-      cancelled = true
-    }
-  }, [anonContext?.anonId, dispatch])
+  // Remote sync effect moved to PlaylistProvider
 
   const reimportBtnRef = useRef(null)
   const loadMoreBtnRef = useRef(null)
-  const tagSyncSchedulerRef = useRef(null)
+  // tagSyncSchedulerRef moved to PlaylistProvider
 
   // -- PERSISTENCE: save whenever core state changes (v3 structured shape)
   useEffect(() => {
@@ -1653,43 +1627,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     setTimeout(() => importInputRef.current?.focus(), 0)
   }
 
-  const sendTagUpdate = useCallback(
-    async (trackId, tags) => {
-      if (!trackId || !anonContext?.deviceId) return
-      const response = await apiFetch('/api/db/notes', {
-        method: 'POST',
-        body: JSON.stringify({ trackId, tags }),
-      })
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}))
-        throw new Error(payload?.error ?? 'Failed to sync tags')
-      }
-    },
-    [anonContext?.deviceId],
-  )
-
-  useEffect(() => {
-    if (!anonContext?.deviceId) {
-      tagSyncSchedulerRef.current?.clear?.()
-      tagSyncSchedulerRef.current = null
-      return
-    }
-    const scheduler = createTagSyncScheduler(sendTagUpdate, 350)
-    tagSyncSchedulerRef.current = scheduler
-    return () => scheduler.clear()
-  }, [anonContext?.deviceId, sendTagUpdate])
-
-  const syncTrackTags = useCallback(
-    (trackId, tags) => {
-      if (!trackId) return Promise.resolve()
-      const scheduler = tagSyncSchedulerRef.current
-      if (scheduler) {
-        return scheduler.schedule(trackId, tags)
-      }
-      return sendTagUpdate(trackId, tags)
-    },
-    [sendTagUpdate],
-  )
+  // sendTagUpdate, tag sync scheduler, and syncTrackTags moved to PlaylistProvider
 
   const handleAddTag = useCallback(
     (trackId, tag) => {
@@ -2084,6 +2022,32 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
 }
 
 /**
+ * Middle layer - provides device context to playlist provider
+ * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: string, initialPlaylistStateWithData: any }} props
+ */
+function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRecents, persistedTracks, initialScreen, initialPlaylistStateWithData }) {
+  // Get initial device context from device state module
+  // This will be updated by useDeviceRecovery inside AppInner
+  const [anonContext, setAnonContext] = useState(() => ({
+    deviceId: getDeviceId(),
+    anonId: getAnonId()
+  }))
+
+  return (
+    <PlaylistStateProvider initialState={initialPlaylistStateWithData} anonContext={anonContext}>
+      <AppInner
+        persisted={persisted}
+        pendingMigrationSnapshot={pendingMigrationSnapshot}
+        initialRecents={initialRecents}
+        persistedTracks={persistedTracks}
+        initialScreen={initialScreen}
+        onAnonContextChange={setAnonContext}
+      />
+    </PlaylistStateProvider>
+  )
+}
+
+/**
  * Outer App component - bootstraps state and provides playlist context
  */
 export default function App() {
@@ -2125,14 +2089,13 @@ export default function App() {
   }, [initialNotesMap, initialTagsMap, persistedTracks, persisted?.importedAt])
 
   return (
-    <PlaylistStateProvider initialState={initialPlaylistStateWithData}>
-      <AppInner
-        persisted={persisted}
-        pendingMigrationSnapshot={pendingMigrationSnapshot}
-        initialRecents={initialRecents}
-        persistedTracks={persistedTracks}
-        initialScreen={initialScreen}
-      />
-    </PlaylistStateProvider>
+    <AppWithDeviceContext
+      persisted={persisted}
+      pendingMigrationSnapshot={pendingMigrationSnapshot}
+      initialRecents={initialRecents}
+      persistedTracks={persistedTracks}
+      initialScreen={initialScreen}
+      initialPlaylistStateWithData={initialPlaylistStateWithData}
+    />
   )
 }
