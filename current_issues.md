@@ -8,12 +8,20 @@
 
 ## High Priority
 
-### Monolithic `App.jsx`
+### ~~Monolithic `App.jsx`~~ ✅ RESOLVED
 
-- **Location**: `src/App.jsx`
-- **Issue**: Core application logic, persistence, device recovery, pagination, and background sync all live inside a 2k+ line component. The concentration of state and orchestration makes onboarding difficult and raises regression risk.
-- **Impact**: High maintainability and testing burden; brittle focus management and background-sync interactions.
-- **Recommendation**: Extract domain-specific controllers/hooks (import flow, storage sync, device recovery, playlist UI). Add targeted unit/integration tests for the extracted logic.
+- **Location**: `src/App.jsx`, `src/features/playlist/`
+- **Status**: **RESOLVED** (Nov 2025) - Completed 8-commit refactor extracting playlist state management to a centralized provider with comprehensive test coverage.
+- **Solution Implemented**:
+  - Extracted pure helper functions (`helpers.js`) for state computations
+  - Created reducer-based state management (`playlistReducer.js`) with co-located derived state
+  - Added validated action creators (`actions.js`) with built-in input validation
+  - Lifted state to `PlaylistStateProvider` with narrow selector hooks for optimized re-renders
+  - Migrated remote sync and tag scheduling effects to the provider
+  - Added comprehensive test suite (38 tests) covering provider, hooks, and integration flows
+  - Split App.jsx into outer (bootstrap) and inner (UI logic) layers
+- **Impact**: Improved maintainability, testability, and developer onboarding. Playlist state is now centralized, well-tested, and easier to reason about.
+- **Files**: `src/features/playlist/{PlaylistProvider.jsx,playlistReducer.js,actions.js,helpers.js,usePlaylistContext.js,contexts.js}` + test suite
 
 ### Non-virtualized Playlist Rendering
 
@@ -101,7 +109,7 @@
 
 ## Next Steps
 
-1. Scope refactor spikes to split `App.jsx` into domain hooks/controllers and add integration coverage.
+1. ~~Scope refactor spikes to split `App.jsx` into domain hooks/controllers and add integration coverage.~~ ✅ **COMPLETED** (Nov 2025)
 2. Prototype virtualized playlist rendering against large mock data sets and monitor focus behavior.
 3. Rework persistence layer to batch writes and update storage key documentation.
 4. Add targeted Vitest suites for background pagination/cooldown logic.

@@ -1,5 +1,5 @@
 # ORIENTATION - Import Flow Overview
-_Last updated: 3 Nov 2025_
+_Last updated: 5 Nov 2025 (Refactored playlist state management)_
 
 A quick map of how the import, notes, and recovery pieces currently fit together. Use this to re-anchor after a break.
 
@@ -23,19 +23,37 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 
 ## Data Flow
 
-1. **App + usePlaylistImportFlow**  
-   - `src/App.jsx` owns high-level state (screen routing, tracks, notes, recents, device context) and wires the import hook:  
-     ```js
-     const {
-       status: importStatus,
-       loading: importLoading,
-       importInitial,
-       reimport: reimportPlaylist,
-       loadMore: loadMoreTracks,
-       resetFlow: resetImportFlow,
-     } = usePlaylistImportFlow()
-     ```
-   - App persists via `saveAppState`, announces status changes, and bridges to storage/device helpers.
+1. **App Architecture (Refactored Nov 2025)**  
+   - **Outer `App`**: Bootstraps storage state, computes initial playlist state, wraps app in `PlaylistStateProvider`
+   - **`AppWithDeviceContext`**: Middle layer managing device context propagation to the provider
+   - **Inner `AppInner`**: Consumes context, manages UI state (screen routing, import flow, recents)
+   - **`PlaylistStateProvider`**: Centralizes playlist state management via `useReducer`, exposes narrow selector hooks, handles remote sync and tag scheduling
+   
+   Playlist state consumed via hooks:
+   ```js
+   const dispatch = usePlaylistDispatch()
+   const tracks = usePlaylistTracks()
+   const notesByTrack = usePlaylistNotesByTrack()
+   const tagsByTrack = usePlaylistTagsByTrack()
+   const editingState = usePlaylistEditingState()
+   const { hasLocalNotes, allCustomTags } = usePlaylistDerived()
+   const { syncTrackTags } = usePlaylistSync()
+   ```
+   
+   Import flow managed via `usePlaylistImportFlow`:
+   ```js
+   const {
+     status: importStatus,
+     loading: importLoading,
+     importInitial,
+     reimport: reimportPlaylist,
+     loadMore: loadMoreTracks,
+     resetFlow: resetImportFlow,
+   } = usePlaylistImportFlow()
+   ```
+   
+   - `AppInner` persists via `saveAppState`, announces status changes, and bridges to storage/device helpers
+   - State updates dispatched via validated action creators (`playlistActions.addNote`, `playlistActions.addTag`, etc.)
 
 2. **Provider detection and import hook**  
    - `src/features/import/useImportPlaylist.js` detects providers with `detectProvider.js`, resolves the adapter from `ADAPTER_REGISTRY`, normalizes `pageInfo`, dedupes IDs, and exposes `importPlaylist`, `importNext`, `tracks`, `pageInfo`, `loading`, `errorCode`, and `progress`.
@@ -59,19 +77,31 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 
 ---
 
-## Core Handlers (`src/App.jsx`)
+## Core Handlers (`src/App.jsx` - `AppInner` component)
 
 | Handler | Purpose |
 |---------|---------|
 | `handleImport(e)` | Form submit handler that calls `importInitial` with URL from state, builds playlist state, persists to storage, updates recents, and focuses the first track. |
 | `handleReimport()` | Reuses the stored URL/meta with `reimportPlaylist`, refreshes tracks and recents, and restores focus to the Re-import button. |
 | `handleLoadMore()` | Invokes `loadMoreTracks`, appends deduped pages, and moves focus to the first newly loaded track. |
-| `onAddNote / onSaveNote / onDeleteNote` | Manage per-track note drafts, persistence (`notesByTrack`), and inline undo metadata. |
+| `onAddNote / onSaveNote / onDeleteNote` | Dispatch actions via `playlistActions` to manage per-track note drafts, update provider state, and schedule inline undo metadata. |
+| `handleAddTag / handleRemoveTag` | Validate and dispatch tag actions (`playlistActions.addTag`, `playlistActions.removeTag`), then sync to remote via `syncTrackTags()`. |
 | `undoInline / expireInline` | Provided by `useInlineUndo` (10 minute timeout) to restore or finalize deleted notes. |
 | `handleBackupNotes()` | Exports notes JSON via the File System Access API when available, otherwise triggers a download. |
 | `handleRestoreNotesRequest()` | Opens the hidden file input and merges imported notes into the current session. |
 | `handleClearAll()` | Clears storage, resets device identifiers, wipes in-memory state. Bootstrap is handled automatically by useDeviceRecovery hook. |
 | `handleBackToLanding()` | Returns to the landing screen and focuses the URL field for a fresh import. |
+
+## Playlist State Management (`src/features/playlist/`)
+
+| Module | Purpose |
+|--------|---------|
+| `PlaylistProvider.jsx` | Context provider wrapping `useReducer`, managing remote sync, tag scheduling, and exposing state/dispatch/sync contexts. |
+| `playlistReducer.js` | Pure reducer handling all playlist state transitions (notes, tags, tracks, editing state) with co-located derived state. |
+| `actions.js` | Validated action creators with built-in input validation (exports `playlistActions` namespace). |
+| `helpers.js` | Pure helper functions for state computations (`computeHasLocalNotes`, `validateTag`, etc.). |
+| `usePlaylistContext.js` | Consumer hooks (`usePlaylistDispatch`, `usePlaylistTracks`, `usePlaylistNotesByTrack`, etc.) with error guards. |
+| `contexts.js` | Context definitions (`PlaylistStateContext`, `PlaylistDispatchContext`, `PlaylistSyncContext`). |
 
 ## Device & Recovery Handlers (from `useDeviceRecovery` hook)
 
@@ -117,9 +147,11 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 
 - Stable: hook -> adapter -> storage architecture, inline undo, accessibility flows.
 - Stable: pagination mocks and recent playlist UX.
+- Stable: playlist state management via `PlaylistStateProvider` with reducer pattern (refactored Nov 2025).
+- Stable: remote sync and tag scheduling centralized in provider.
 - WIP: virtualized list and richer analytics.
 - WIP: recovery API contract; expect adjustments.
 
 ---
 
-> Reminder: App orchestrates the flow, `usePlaylistImportFlow` brokers the hook and adapters, adapters return normalized data, and storage plus device helpers remember it all.
+> Reminder: `App` bootstraps state and wraps the provider, `PlaylistStateProvider` manages playlist state via reducer, `AppInner` orchestrates UI flow, `usePlaylistImportFlow` brokers import adapters, adapters return normalized data, and storage plus device helpers remember it all.

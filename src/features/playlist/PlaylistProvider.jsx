@@ -87,7 +87,7 @@ export function PlaylistStateProvider({ initialState, anonContext, children }) {
     }
     const scheduler = createTagSyncScheduler(sendTagUpdate, 350)
     tagSyncSchedulerRef.current = scheduler
-    return () => scheduler.clear()
+    return () => scheduler?.clear()
   }, [anonContext?.deviceId, sendTagUpdate])
 
   // Expose sync method for components to use

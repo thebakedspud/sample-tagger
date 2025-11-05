@@ -345,7 +345,7 @@ focusById('track-note-btn-0')  // Uses requestAnimationFrame
 
 ## Testing Strategy
 
-### Test Organization (36 test files)
+### Test Organization (38 test files)
 ```
 src/__tests__/              → Integration tests
 src/features/**/__tests__/  → Feature-specific unit tests
@@ -359,6 +359,8 @@ api/**/__tests__/           → API endpoint tests
 - **src/features/import/__tests__/usePlaylistImportFlow.test.js** → Import flow state machine
 - **src/features/account/__tests__/useDeviceRecovery.test.js** → Device recovery hook behavior
 - **src/features/undo/__tests__/useInlineUndo.test.js** → Undo timer behavior
+- **src/features/playlist/__tests__/PlaylistProvider.test.jsx** → Provider context, remote sync, tag scheduler, error propagation
+- **src/features/playlist/__tests__/usePlaylistContext.test.jsx** → Hook error guards and correct value returns
 
 ### Testing Utilities
 - **src/test/testHelpers.js** → Shared test utilities
