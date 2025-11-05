@@ -236,10 +236,15 @@ export function playlistReducer(state, action) {
     case 'TRACKS_UPDATE': {
       const nextNotesMap = ensureNotesEntries(state.notesByTrack, action.payload.tracks)
       const nextTagsMap = ensureTagsEntries(state.tagsByTrack, action.payload.tracks)
+      const nextTracks = action.payload.tracks.map(track => {
+        const notes = nextNotesMap[track.id] || []
+        const tags = nextTagsMap[track.id] || []
+        return { ...track, notes, tags }
+      })
 
       return recomputeDerived({
         ...state,
-        tracks: action.payload.tracks,
+        tracks: nextTracks,
         notesByTrack: nextNotesMap,
         tagsByTrack: nextTagsMap
       })
@@ -287,4 +292,3 @@ export function playlistReducer(state, action) {
       return state
   }
 }
-
