@@ -443,7 +443,10 @@ describe('playlistReducer', () => {
       const action = playlistActions.updateTracks(newTracks)
       const next = playlistReducer(state, action)
 
-      expect(next.tracks).toEqual(newTracks)
+      expect(next.tracks).toEqual([
+        { ...newTracks[0], notes: ['note'], tags: ['tag'] },
+        { ...newTracks[1], notes: [], tags: [] },
+      ])
       // Existing entries preserved
       expect(next.notesByTrack.t1).toEqual(['note'])
       expect(next.tagsByTrack.t1).toEqual(['tag'])
@@ -464,6 +467,7 @@ describe('playlistReducer', () => {
       const action = playlistActions.updateTracks(newTracks)
       const next = playlistReducer(state, action)
 
+      expect(next.tracks).toEqual([{ ...newTracks[0], notes: ['old'], tags: ['old'] }])
       expect(next.notesByTrack.t1).toEqual(['old'])
       expect(next.tagsByTrack.t1).toEqual(['old'])
     })
@@ -653,4 +657,3 @@ describe('playlistReducer', () => {
     })
   })
 })
-

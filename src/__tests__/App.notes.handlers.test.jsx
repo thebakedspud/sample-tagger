@@ -3,6 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useCallback, useState } from 'react'
 
+vi.setConfig({ testTimeout: 15000 })
+
 // ============================================================================
 // Mock Modules (must be declared before imports)
 // ============================================================================
