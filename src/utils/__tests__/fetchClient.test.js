@@ -1,17 +1,17 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { makeFetchClient } from '../fetchClient.js'
 
 describe('makeFetchClient', () => {
-  const originalFetch = global.fetch
+  const originalFetch = globalThis.fetch
   let fetchMock
 
   beforeEach(() => {
     fetchMock = vi.fn()
-    global.fetch = fetchMock
+    globalThis.fetch = fetchMock
   })
 
   afterEach(() => {
-    global.fetch = originalFetch
+    globalThis.fetch = originalFetch
   })
 
   it('throws HTTP_<status> error with metadata when response is not ok', async () => {
@@ -44,4 +44,3 @@ describe('makeFetchClient', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/ok', { method: 'GET' })
   })
 })
-
