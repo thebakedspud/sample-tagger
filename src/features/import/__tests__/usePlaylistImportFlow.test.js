@@ -195,4 +195,142 @@ describe('usePlaylistImportFlow', () => {
     expect(outcome.ok).toBe(false)
     expect(outcome.code).toBe('ERR_NOT_FOUND')
   })
+
+  it('returns unknown error when reimport is called without a url', async () => {
+    const { result } = renderHook(() => usePlaylistImportFlow())
+    const flow = /** @type {TestImportFlowApi} */ (result.current)
+
+    const outcome = await flow.reimport('', {})
+    expect(outcome.ok).toBe(false)
+    expect(outcome.code).toBe('ERR_UNKNOWN')
+  })
+
+  it('handles reimport responses that resolve out of order', async () => {
+    const first = createDeferred()
+    const second = createDeferred()
+
+    importPlaylistMock
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+
+    const { result } = renderHook(() => usePlaylistImportFlow())
+    const flow = /** @type {TestImportFlowApi} */ (result.current)
+
+    let firstPromise
+    act(() => {
+      firstPromise = flow.reimport('https://example.com/a')
+    })
+
+    let secondPromise
+    act(() => {
+      secondPromise = flow.reimport('https://example.com/a')
+    })
+
+    second.resolve({
+      provider: 'spotify',
+      tracks: [],
+      pageInfo: { cursor: null, hasMore: false },
+    })
+
+    if (!secondPromise) throw new Error('expected second promise')
+    await act(async () => {
+      const confirmed = /** @type {Promise<ImportResult>} */ (secondPromise)
+      const response = await confirmed
+      expect(response.ok).toBe(true)
+    })
+
+    first.resolve({
+      provider: 'spotify',
+      tracks: [],
+      pageInfo: { cursor: null, hasMore: false },
+    })
+
+    if (!firstPromise) throw new Error('expected first promise')
+    const staleResponse = await /** @type {Promise<ImportResult>} */ (firstPromise)
+    expect(staleResponse).toEqual({ ok: false, stale: true })
+  })
+
+  it('returns terminal metadata when loadMore signals completion', async () => {
+    importNextMock.mockResolvedValueOnce(undefined)
+    const existingMeta = {
+      provider: 'spotify',
+      playlistId: 'playlist-123',
+      snapshotId: 'snap-1',
+      sourceUrl: 'https://example.com/a',
+      cursor: 'cursor-1',
+      hasMore: true,
+      total: 10,
+    }
+
+    const { result } = renderHook(() => usePlaylistImportFlow())
+    const flow = /** @type {TestImportFlowApi} */ (result.current)
+
+    /** @type {ImportResult | undefined} */
+    let outcome
+    await act(async () => {
+      outcome = await flow.loadMore({ existingMeta })
+    })
+    if (!outcome) throw new Error('expected load more outcome')
+    expect(outcome.ok).toBe(true)
+    expect(outcome.data?.tracks).toEqual([])
+    expect(outcome.data?.meta).toEqual({
+      provider: 'spotify',
+      playlistId: 'playlist-123',
+      snapshotId: 'snap-1',
+      cursor: null,
+      hasMore: false,
+      sourceUrl: 'https://example.com/a',
+      debug: null,
+      total: 10,
+    })
+  })
+
+  it('rethrows abort errors from loadMore and sets error codes on other failures', async () => {
+    const abortError = new DOMException('aborted', 'AbortError')
+    importNextMock.mockRejectedValueOnce(abortError)
+
+    const { result } = renderHook(() => usePlaylistImportFlow())
+    const flow = /** @type {TestImportFlowApi} */ (result.current)
+
+    await act(async () => {
+      await expect(
+        flow.loadMore({ signal: AbortSignal.abort('cancel') }),
+      ).rejects.toThrow('aborted')
+    })
+
+    const failure = Object.assign(new Error('boom'), { code: 'ERR_RATE_LIMITED' })
+    importNextMock.mockRejectedValueOnce(failure)
+
+    /** @type {ImportResult | undefined} */
+    let outcome
+    await act(async () => {
+      outcome = await flow.loadMore()
+    })
+    if (!outcome) throw new Error('expected load more failure outcome')
+    expect(outcome.ok).toBe(false)
+    expect(outcome.code).toBe('ERR_RATE_LIMITED')
+    expect(result.current.errorCode).toBe('ERR_RATE_LIMITED')
+  })
+
+  it('resets status and errorCode when resetFlow is invoked', async () => {
+    importPlaylistMock.mockRejectedValueOnce(new Error('fail'))
+    const { result } = renderHook(() => usePlaylistImportFlow())
+    const flow = /** @type {TestImportFlowApi} */ (result.current)
+
+    await act(async () => {
+      await flow.importInitial('https://example.com/a')
+    })
+    expect(result.current.errorCode).toBe('ERR_UNKNOWN')
+    act(() => {
+      flow.resetFlow()
+    })
+    expect(result.current.status).toBe(ImportFlowStatus.IDLE)
+    expect(result.current.errorCode).toBeNull()
+  })
+
+  it('exposes loading state passthrough from adapter hook', () => {
+    loadingState.value = true
+    const { result } = renderHook(() => usePlaylistImportFlow())
+    expect(result.current.loading).toBe(true)
+  })
 })

@@ -42,4 +42,28 @@ describe('TagInput', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(handleAdd).toHaveBeenCalledWith('drone')
   })
+
+  it('invokes onAdd with highlighted suggestion when pressing Enter', () => {
+    const { input, handleAdd } = setup()
+    fireEvent.change(input, { target: { value: 'dr' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(handleAdd).toHaveBeenCalledWith('drums')
+  })
+
+  it('retains query when onAdd returns false (duplicate)', () => {
+    const duplicateAdd = vi.fn().mockReturnValue(false)
+    const { input } = setup({ onAdd: duplicateAdd })
+    fireEvent.change(input, { target: { value: 'drone' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(duplicateAdd).toHaveBeenCalledWith('drone')
+    expect(input.value).toBe('drone')
+  })
+
+  it('clears query and calls onCancel when Escape pressed', () => {
+    const { input, handleCancel } = setup()
+    fireEvent.change(input, { target: { value: 'ambient' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(handleCancel).toHaveBeenCalled()
+    expect(input.value).toBe('')
+  })
 })

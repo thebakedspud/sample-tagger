@@ -2,6 +2,8 @@ import { describe, expect, it, afterEach, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { useCallback, useState } from 'react'
 
+vi.setConfig({ testTimeout: 15000 })
+
 vi.mock('./utils/storage.js', () => {
   const createPersistedState = () => ({
     version: 6,

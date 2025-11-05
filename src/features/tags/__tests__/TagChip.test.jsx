@@ -17,5 +17,24 @@ describe('TagChip', () => {
     expect(onFilter).toHaveBeenCalledWith('drill')
     expect(onRemove).toHaveBeenCalledWith('drill')
   })
-})
 
+  it('respects onClick handlers that prevent default behavior', () => {
+    const onFilter = vi.fn()
+    const onRemove = vi.fn()
+    const onClick = vi.fn((event) => event.preventDefault())
+
+    render(<TagChip tag="ambient" onFilter={onFilter} onRemove={onRemove} onClick={onClick} />)
+    fireEvent.click(screen.getByRole('button', { name: /remove tag ambient/i }))
+
+    expect(onClick).toHaveBeenCalled()
+    expect(onFilter).not.toHaveBeenCalled()
+    expect(onRemove).not.toHaveBeenCalled()
+  })
+
+  it('handles remove-only chips', () => {
+    const onRemove = vi.fn()
+    render(<TagChip tag="solo" onRemove={onRemove} />)
+    fireEvent.click(screen.getByRole('button', { name: /remove tag solo/i }))
+    expect(onRemove).toHaveBeenCalledWith('solo')
+  })
+})
