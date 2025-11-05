@@ -50,6 +50,7 @@ describe('playlist helpers', () => {
     })
 
     it('extracts unique tags from multiple tracks', () => {
+      /** @type {any} */
       const tags = {
         t1: ['rock', 'indie'],
         t2: ['rock', 'pop'],
@@ -87,6 +88,7 @@ describe('playlist helpers', () => {
         t3: 'invalid',
         t4: ['also-valid']
       }
+      // @ts-expect-error intentionally passing non-array values to verify guard rails
       expect(computeAllCustomTags(tags)).toEqual(['also-valid', 'valid'])
     })
   })
@@ -199,6 +201,7 @@ describe('playlist helpers', () => {
       const notesByTrack = {
         t1: 'invalid'
       }
+      // @ts-expect-error intentionally passing a non-array to validate guard rails
       const snapshot = createNoteSnapshot(notesByTrack, 't1')
       
       expect(snapshot.previousNotes).toEqual([])
@@ -301,4 +304,3 @@ describe('playlist helpers', () => {
     })
   })
 })
-

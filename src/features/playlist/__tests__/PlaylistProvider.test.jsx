@@ -12,6 +12,7 @@ vi.mock('../../../lib/apiClient.js', () => ({
 }))
 
 vi.mock('../../../utils/notesTagsData.js', async (importOriginal) => {
+  /** @type {any} */
   const actual = await importOriginal()
   return {
     ...actual,
@@ -28,18 +29,25 @@ import { apiFetch } from '../../../lib/apiClient.js'
 import { groupRemoteNotes } from '../../../utils/notesTagsData.js'
 import { createTagSyncScheduler } from '../../tags/tagSyncQueue.js'
 
+const mockedApiFetch = vi.mocked(apiFetch)
+const mockedGroupRemoteNotes = vi.mocked(groupRemoteNotes)
+const mockedCreateTagSyncScheduler = vi.mocked(createTagSyncScheduler)
+
 describe('PlaylistProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     
     // Set up default mock implementations
-    const mockResponse = { ok: false, json: vi.fn().mockResolvedValue({ error: 'Server error' }) }
-    apiFetch.mockResolvedValue(mockResponse)
+    const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
+      ok: false,
+      json: vi.fn().mockResolvedValue({ error: 'Server error' })
+    }))
+    mockedApiFetch.mockResolvedValue(mockResponse)
     
-    groupRemoteNotes.mockReturnValue({ notes: {}, tags: {} })
+    mockedGroupRemoteNotes.mockReturnValue({ notes: {}, tags: {} })
     
     const mockScheduler = { schedule: vi.fn().mockResolvedValue(undefined), clear: vi.fn() }
-    createTagSyncScheduler.mockReturnValue(mockScheduler)
+    mockedCreateTagSyncScheduler.mockReturnValue(mockScheduler)
   })
 
   afterEach(() => {
@@ -116,9 +124,12 @@ describe('PlaylistProvider', () => {
   describe('Remote Sync Effect', () => {
     it('fetches notes/tags when anonId is available', async () => {
       const mockNotes = [{ trackId: 't1', body: 'note1', tags: ['tag1'] }]
-      const mockResponse = { ok: true, json: vi.fn().mockResolvedValue({ notes: mockNotes }) }
-      apiFetch.mockResolvedValue(mockResponse)
-      groupRemoteNotes.mockReturnValue({ notes: { t1: ['note1'] }, tags: { t1: ['tag1'] } })
+      const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ notes: mockNotes })
+      }))
+      mockedApiFetch.mockResolvedValue(mockResponse)
+      mockedGroupRemoteNotes.mockReturnValue({ notes: { t1: ['note1'] }, tags: { t1: ['tag1'] } })
 
       function TestChild() {
         return <div>Test</div>
@@ -134,7 +145,7 @@ describe('PlaylistProvider', () => {
       )
 
       await waitFor(() => {
-        expect(apiFetch).toHaveBeenCalledWith('/api/db/notes')
+        expect(mockedApiFetch).toHaveBeenCalledWith('/api/db/notes')
       })
     })
 
@@ -155,16 +166,19 @@ describe('PlaylistProvider', () => {
       // Wait a bit to ensure no fetch happens
       await new Promise(resolve => setTimeout(resolve, 50))
       
-      expect(apiFetch).not.toHaveBeenCalled()
+      expect(mockedApiFetch).not.toHaveBeenCalled()
     })
 
     it('merges remote data into state', async () => {
       const mockNotes = [
         { trackId: 't1', body: 'remote note', tags: ['remote-tag'] }
       ]
-      const mockResponse = { ok: true, json: vi.fn().mockResolvedValue({ notes: mockNotes }) }
-      apiFetch.mockResolvedValue(mockResponse)
-      groupRemoteNotes.mockReturnValue({ 
+      const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ notes: mockNotes })
+      }))
+      mockedApiFetch.mockResolvedValue(mockResponse)
+      mockedGroupRemoteNotes.mockReturnValue({ 
         notes: { t1: ['remote note'] }, 
         tags: { t1: ['remote-tag'] } 
       })
@@ -197,7 +211,7 @@ describe('PlaylistProvider', () => {
 
     it('handles fetch errors gracefully', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-      apiFetch.mockRejectedValue(new Error('Network error'))
+      mockedApiFetch.mockRejectedValue(new Error('Network error'))
 
       function TestChild() {
         return <div>Test</div>
@@ -221,8 +235,11 @@ describe('PlaylistProvider', () => {
 
     it('handles non-OK response gracefully', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-      const mockResponse = { ok: false, json: vi.fn().mockResolvedValue({ error: 'Server error' }) }
-      apiFetch.mockResolvedValue(mockResponse)
+      const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
+        ok: false,
+        json: vi.fn().mockResolvedValue({ error: 'Server error' })
+      }))
+      mockedApiFetch.mockResolvedValue(mockResponse)
 
       function TestChild() {
         return <div>Test</div>
@@ -248,7 +265,7 @@ describe('PlaylistProvider', () => {
   describe('Tag Sync Scheduler', () => {
     it('creates scheduler when deviceId is available', () => {
       const mockScheduler = { schedule: vi.fn(), clear: vi.fn() }
-      createTagSyncScheduler.mockReturnValue(mockScheduler)
+      mockedCreateTagSyncScheduler.mockReturnValue(mockScheduler)
 
       function TestChild() {
         return <div>Test</div>
@@ -263,7 +280,7 @@ describe('PlaylistProvider', () => {
         </PlaylistStateProvider>
       )
 
-      expect(createTagSyncScheduler).toHaveBeenCalledWith(expect.any(Function), 350)
+      expect(mockedCreateTagSyncScheduler).toHaveBeenCalledWith(expect.any(Function), 350)
     })
 
     it('does not create scheduler when deviceId is null', () => {
@@ -280,7 +297,7 @@ describe('PlaylistProvider', () => {
         </PlaylistStateProvider>
       )
 
-      expect(createTagSyncScheduler).not.toHaveBeenCalled()
+      expect(mockedCreateTagSyncScheduler).not.toHaveBeenCalled()
     })
 
     it('syncTrackTags calls scheduler.schedule when scheduler exists', async () => {
@@ -288,7 +305,7 @@ describe('PlaylistProvider', () => {
         schedule: vi.fn().mockResolvedValue(undefined), 
         clear: vi.fn() 
       }
-      createTagSyncScheduler.mockReturnValue(mockScheduler)
+      mockedCreateTagSyncScheduler.mockReturnValue(mockScheduler)
 
       function TestChild() {
         const { syncTrackTags } = usePlaylistSync()
@@ -317,11 +334,13 @@ describe('PlaylistProvider', () => {
     })
 
     it('syncTrackTags falls back to sendTagUpdate when no scheduler', async () => {
-      const mockResponse = { ok: true }
-      apiFetch.mockResolvedValue(mockResponse)
+      const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
+        ok: true
+      }))
+      mockedApiFetch.mockResolvedValue(mockResponse)
       
       // No scheduler when deviceId is null
-      createTagSyncScheduler.mockReturnValue(null)
+      mockedCreateTagSyncScheduler.mockReturnValue(null)
 
       function TestChild() {
         const { syncTrackTags } = usePlaylistSync()
@@ -355,7 +374,7 @@ describe('PlaylistProvider', () => {
       button.click()
 
       await waitFor(() => {
-        expect(apiFetch).toHaveBeenCalledWith('/api/db/notes', {
+        expect(mockedApiFetch).toHaveBeenCalledWith('/api/db/notes', {
           method: 'POST',
           body: JSON.stringify({ trackId: 't1', tags: ['tag1'] })
         })
@@ -364,7 +383,7 @@ describe('PlaylistProvider', () => {
 
     it('clears scheduler on unmount', () => {
       const mockScheduler = { schedule: vi.fn(), clear: vi.fn() }
-      createTagSyncScheduler.mockReturnValue(mockScheduler)
+      mockedCreateTagSyncScheduler.mockReturnValue(mockScheduler)
 
       function TestChild() {
         return <div>Test</div>
@@ -388,11 +407,13 @@ describe('PlaylistProvider', () => {
   describe('Error Propagation', () => {
     it('sendTagUpdate throws on non-OK response', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-      const mockResponse = { ok: false }
-      apiFetch.mockResolvedValue(mockResponse)
+      const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
+        ok: false
+      }))
+      mockedApiFetch.mockResolvedValue(mockResponse)
       
       // No scheduler, so syncTrackTags will call sendTagUpdate directly
-      createTagSyncScheduler.mockReturnValue(null)
+      mockedCreateTagSyncScheduler.mockReturnValue(null)
 
       let thrownError = null
 
@@ -431,10 +452,10 @@ describe('PlaylistProvider', () => {
     it('sendTagUpdate rethrows caught errors', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       const networkError = new Error('Network failure')
-      apiFetch.mockRejectedValue(networkError)
+      mockedApiFetch.mockRejectedValue(networkError)
       
       // No scheduler, so syncTrackTags will call sendTagUpdate directly
-      createTagSyncScheduler.mockReturnValue(null)
+      mockedCreateTagSyncScheduler.mockReturnValue(null)
 
       let thrownError = null
 
@@ -472,11 +493,13 @@ describe('PlaylistProvider', () => {
 
     it('errors propagate to caller catch handlers', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-      const mockResponse = { ok: false }
-      apiFetch.mockResolvedValue(mockResponse)
+      const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
+        ok: false
+      }))
+      mockedApiFetch.mockResolvedValue(mockResponse)
       
       // No scheduler, so syncTrackTags will call sendTagUpdate directly
-      createTagSyncScheduler.mockReturnValue(null)
+      mockedCreateTagSyncScheduler.mockReturnValue(null)
 
       let caughtError = null
 
@@ -548,4 +571,3 @@ describe('PlaylistProvider', () => {
     })
   })
 })
-

@@ -8,8 +8,8 @@
     "moduleResolution": "bundler",
     "target": "esnext",
     "skipLibCheck": true,
-    "types": ["vite/client"],
-    "typeRoots": ["./types", "./node_modules/@types"],
+    "types": ["vite/client", "node"],
+    "typeRoots": ["./types", "./node_modules/@types", "./node_modules/vitest"],
     "paths": {
       "prop-types": ["types/prop-types/index.d.ts"],
       "prop-types/*": ["types/prop-types/index.d.ts"],
@@ -20,5 +20,9 @@
   "include": [
     "src/**/*",
     "api/**/*"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules"
   ]
 }

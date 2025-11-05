@@ -155,3 +155,12 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 ---
 
 > Reminder: `App` bootstraps state and wraps the provider, `PlaylistStateProvider` manages playlist state via reducer, `AppInner` orchestrates UI flow, `usePlaylistImportFlow` brokers import adapters, adapters return normalized data, and storage plus device helpers remember it all.
+
+---
+
+## TypeScript & Testing Notes
+
+- Run `npm run check:types` (tsc `--noEmit`) alongside tests; CI should fail fast if type drift is introduced.
+- Keep `jsconfig.json` types aligned: browser code relies on `vite/client` while server utilities lean on Node types. Add new frameworks explicitly so globals stay discoverable.
+- When a test needs to feed invalid data deliberately, annotate it with `// @ts-expect-error` or a targeted `/** @type {any} */` cast to make the intent obvious.
+- Wrap mocked imports with `vi.mocked(...)` before calling helpers like `mockResolvedValue` so TS sees the Vitest `Mock` shape the same way the runtime does.
