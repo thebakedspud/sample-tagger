@@ -1,5 +1,4 @@
 import '@testing-library/jest-dom/vitest'
-import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PlaylistView from '../PlaylistView.jsx'
