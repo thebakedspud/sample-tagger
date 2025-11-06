@@ -79,18 +79,37 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 
 ## Core Handlers (`src/App.jsx` - `AppInner` component)
 
-| Handler | Purpose |
-|---------|---------|
-| `handleImport(e)` | Form submit handler that calls `importInitial` with URL from state, builds playlist state, persists to storage, updates recents, and focuses the first track. |
-| `handleReimport()` | Reuses the stored URL/meta with `reimportPlaylist`, refreshes tracks and recents, and restores focus to the Re-import button. |
-| `handleLoadMore()` | Invokes `loadMoreTracks`, appends deduped pages, and moves focus to the first newly loaded track. |
-| `onAddNote / onSaveNote / onDeleteNote` | Dispatch actions via `playlistActions` to manage per-track note drafts, update provider state, and schedule inline undo metadata. |
-| `handleAddTag / handleRemoveTag` | Validate and dispatch tag actions (`playlistActions.addTag`, `playlistActions.removeTag`), then sync to remote via `syncTrackTags()`. |
-| `undoInline / expireInline` | Provided by `useInlineUndo` (10 minute timeout) to restore or finalize deleted notes. |
-| `handleBackupNotes()` | Exports notes JSON via the File System Access API when available, otherwise triggers a download. |
-| `handleRestoreNotesRequest()` | Opens the hidden file input and merges imported notes into the current session. |
-| `handleClearAll()` | Clears storage, resets device identifiers, wipes in-memory state. Bootstrap is handled automatically by useDeviceRecovery hook. |
-| `handleBackToLanding()` | Returns to the landing screen and focuses the URL field for a fresh import. |
+> **Refactor (Nov 2025)**: Import orchestration (`handleImport`, `handleSelectRecent`, `handleReimport`, `handleLoadMore`) now lives in `usePlaylistImportController`. AppInner only wires the hook and keeps UI-facing handlers.
+
+| Handler | Purpose | Location |
+|---------|---------|----------|
+| `handleImport(e)` | Submits the import form, normalises the payload, persists state, updates recents, and restores focus. | `usePlaylistImportController.js` |
+| `handleSelectRecent(recent)` | Loads a playlist from the recents carousel with the same orchestration pipeline as the initial import. | `usePlaylistImportController.js` |
+| `handleReimport()` | Reuses the stored URL/meta with `reimportPlaylist`, refreshes tracks/recents, and preserves button focus on completion. | `usePlaylistImportController.js` |
+| `handleLoadMore()` | Invokes `loadMore`, dedupes new pages, updates derived state, and manages manual/background focus flows. | `usePlaylistImportController.js` |
+| `onAddNote / onSaveNote / onDeleteNote` | Dispatch actions via `playlistActions` to manage per-track note drafts, update provider state, and schedule inline undo metadata. | `App.jsx` |
+| `handleAddTag / handleRemoveTag` | Validate and dispatch tag actions (`playlistActions.addTag`, `playlistActions.removeTag`), then sync to remote via `syncTrackTags()`. | `App.jsx` |
+| `undoInline / expireInline` | Provided by `useInlineUndo` (10 minute timeout) to restore or finalize deleted notes. | `useInlineUndo.js` |
+| `handleBackupNotes()` | Exports notes JSON via the File System Access API when available, otherwise triggers a download. | `App.jsx` |
+| `handleRestoreNotesRequest()` | Opens the hidden file input and merges imported notes into the current session. | `App.jsx` |
+| `handleClearAll()` | Clears storage, resets device identifiers, wipes in-memory state. Bootstrap is handled automatically by useDeviceRecovery hook. | `App.jsx` |
+| `handleBackToLanding()` | Returns to the landing screen and focuses the URL field for a fresh import. | `App.jsx` |
+
+## Import Controller Hook (`src/features/import/usePlaylistImportController.js`)
+
+**Purpose**: Encapsulates the playlist import lifecycle (initial import, selecting recents, re-import, manual/background pagination) while delegating adapter work to `usePlaylistImportFlow`.
+
+**Dependencies (passed as a parameter object)**:
+- Playlist context hooks: `dispatch`, `tracks`, `notesByTrack`, `tagsByTrack`, `tracksRef`
+- UI integration: `announce`, `setScreen`, `setPlaylistTitle`, `setImportedAt`, `setLastImportUrl`, `setSkipPlaylistFocusManagement`, `markTrackFocusContext`, focus refs
+- Persistence helpers: `pushRecentPlaylist`, `updateRecentCardState`
+- Bootstrap inputs: `initialImportMeta`, `initialPersistedTrackCount`, `screen`, `lastImportUrl`
+
+**Returns**:
+- Import state: `importUrl`, `importError`, provider chip, `importMeta`, derived busy/spinner flags, `backgroundSync`
+- Handlers: `handleImport`, `handleSelectRecent`, `handleReimport`, `handleLoadMore`, `cancelBackgroundPagination`, `resetImportFlow`
+
+Hook consumers (currently `AppInner`) simply destructure the API and wire it into forms/components, keeping the component surface lean.
 
 ## Playlist State Management (`src/features/playlist/`)
 

@@ -27,7 +27,6 @@ import {
   ensureTagsEntries,
   groupRemoteNotes,
 } from './utils/notesTagsData.js'
-import { normalizeTimestamp } from './utils/trackProcessing.js'
 import { bootstrapStorageState, EMPTY_IMPORT_META } from './utils/storageBootstrap.js'
 import { createRecentCandidate } from './features/recent/recentUtils.js'
 
@@ -47,12 +46,7 @@ import AccountView from './features/account/AccountView.jsx'
 import useDeviceRecovery from './features/account/useDeviceRecovery.js'
 
 // Extracted helpers
-import detectProvider from './features/import/detectProvider'
-import usePlaylistImportFlow, { ImportFlowStatus } from './features/import/usePlaylistImportFlow.js'
-
-// NEW: centralised error helpers/messages
-import { extractErrorCode, CODES } from './features/import/adapters/types.js'
-import { ERROR_MAP } from './features/import/errors.js'
+import usePlaylistImportController from './features/import/usePlaylistImportController.js'
 import { apiFetch } from './lib/apiClient.js'
 import { getDeviceId, getAnonId } from './lib/deviceState.js'
 
@@ -92,13 +86,8 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   const { message: announceMsg, announce } = useAnnounce({ debounceMs: 60 })
 
   // IMPORT state
-  const [importUrl, setImportUrl] = useState('')
-  const providerChip = detectProvider(importUrl || '')
-  const [importError, setImportError] = useState(null)
   const importInputRef = useRef(null)
-  
-  // PLAYLIST META (local state; persisted via storage v3 importMeta)
-  const [importMeta, setImportMeta] = useState(() => {
+  const initialImportMeta = useMemo(() => {
     const initialMeta = persisted?.importMeta ?? {}
     const sourceUrl = initialMeta.sourceUrl ?? (persisted?.lastImportUrl ?? '')
     return /** @type {ImportMeta} */ ({
@@ -107,11 +96,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
       sourceUrl,
       hasMore: Boolean(initialMeta.cursor || initialMeta.hasMore),
     })
-  })
-  const importMetaRef = useRef(/** @type {ImportMeta} */ (importMeta))
-  useEffect(() => {
-    importMetaRef.current = importMeta
-  }, [importMeta])
+  }, [persisted])
   
   const [playlistTitle, setPlaylistTitle] = useState(persisted?.playlistTitle ?? 'My Playlist')
   const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null)
@@ -137,77 +122,8 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   const firstVisibleTrackIdRef = useRef(null)
   const [trackFocusContext, setTrackFocusContext] = useState({ reason: null, ts: 0 })
   const initialFocusAppliedRef = useRef(false)
-  /** @type {import('react').MutableRefObject<{ key: string | null, requestId: number | null } | null>} */
-  const backgroundPagerRef = useRef(null)
-  /** @type {import('react').MutableRefObject<Map<string, { promise: Promise<any>, controller: AbortController, mode: 'manual' | 'background', requestId: number }>>} */
-  const pagerFlightsRef = useRef(new Map())
-  /** @type {import('react').MutableRefObject<Map<string, true>>} */
-  const pagerLastSuccessRef = useRef(new Map())
-  const pagerCooldownRef = useRef({ until: 0 })
-  const pagerResumeTimerRef = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null))
-  const pagerRequestIdRef = useRef(0)
-  const startBackgroundPaginationRef = useRef(() => {})
-  /** @type {[BackgroundSyncState, import('react').Dispatch<import('react').SetStateAction<BackgroundSyncState>>]} */
-  const [backgroundSync, setBackgroundSync] = useState(() => ({
-    status: importMeta?.hasMore ? 'pending' : 'complete',
-    loaded: persistedTracks.length,
-    total:
-      typeof importMeta?.total === 'number'
-        ? importMeta.total
-        : importMeta?.hasMore
-          ? null
-          : persistedTracks.length,
-    lastError: null,
-    snapshotId: importMeta?.snapshotId ?? null,
-  }))
-
-  const getPagerKey = useCallback((meta) => {
-    if (!meta || typeof meta !== 'object') return null
-    const provider = typeof meta.provider === 'string' && meta.provider.trim()
-      ? meta.provider.trim()
-      : 'no-provider'
-    const playlistId = typeof meta.playlistId === 'string' && meta.playlistId.trim()
-      ? meta.playlistId.trim()
-      : 'no-playlist'
-    const snapshotId = typeof meta.snapshotId === 'string' && meta.snapshotId.trim()
-      ? meta.snapshotId.trim()
-      : 'no-snap'
-    const cursor =
-      typeof meta.cursor === 'string' && meta.cursor.trim()
-        ? meta.cursor.trim()
-        : '∅'
-    return `${provider}::${playlistId}::${snapshotId}::${cursor}`
-  }, [])
-
-  const cancelBackgroundPagination = useCallback((options = {}) => {
-    if (pagerResumeTimerRef.current) {
-      clearTimeout(pagerResumeTimerRef.current)
-      pagerResumeTimerRef.current = null
-    }
-    pagerFlightsRef.current.forEach((flight) => {
-      try {
-        flight.controller.abort()
-      } catch {
-        // ignore cancellation errors
-      }
-    })
-    pagerFlightsRef.current.clear()
-    backgroundPagerRef.current = null
-    if (options && options.resetHistory) {
-      pagerLastSuccessRef.current.clear()
-      pagerCooldownRef.current.until = 0
-    }
-    setBackgroundSync((prev) => {
-      const hasMore = Boolean(importMetaRef.current?.hasMore)
-      return {
-        ...prev,
-        status: hasMore ? 'pending' : 'complete',
-        lastError: null,
-      }
-    })
-  }, [setBackgroundSync])
-
   const [recentPlaylists, setRecentPlaylists] = useState(() => initialRecents)
+  /** @type {import('react').MutableRefObject<typeof initialRecents>} */
   const recentRef = useRef(recentPlaylists)
   useEffect(() => {
     recentRef.current = recentPlaylists
@@ -244,15 +160,6 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   }, [])
 
   useEffect(() => {
-    return () => {
-      if (pagerResumeTimerRef.current) {
-        clearTimeout(pagerResumeTimerRef.current)
-        pagerResumeTimerRef.current = null
-      }
-    }
-  }, [])
-
-  useEffect(() => {
     setRecentCardState((prev) => {
       const activeIds = new Set(recentPlaylists.map((item) => item.id))
       const next = {}
@@ -264,22 +171,6 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
       return next
     })
   }, [recentPlaylists])
-
-/**
- * @typedef {Object} ApplyImportResultOptions
- * @property {string} [sourceUrl]
- * @property {string} [announceMessage]
- * @property {string} [fallbackTitle]
- * @property {'first-track' | 'heading'} [focusBehavior]
- * @property {boolean} [updateLastImportUrl]
- * @property {{
- *   importedAt?: string | number | Date | null,
- *   total?: number | null,
- *   coverUrl?: string | null,
- *   lastUsedAt?: string | number | Date | null,
- *   pinned?: boolean
- * }} [recents]
- */
 
   const handleFirstVisibleTrackChange = useCallback((trackId) => {
     const prevTrackId = firstVisibleTrackIdRef.current
@@ -315,197 +206,55 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     setTrackFocusContext({ reason, ts: Date.now() })
   }, [])
 
-  const applyImportResult = useCallback(
-    (
-      payload,
-      options = {}
-    ) => {
-      /** @type {ApplyImportResultOptions} */
-      const {
-        sourceUrl,
-        announceMessage,
-        fallbackTitle,
-        focusBehavior = 'first-track',
-        recents,
-        updateLastImportUrl = true,
-      } = options || {}
+  const reimportBtnRef = useRef(null)
+  const loadMoreBtnRef = useRef(null)
 
-      cancelBackgroundPagination({ resetHistory: true })
-
-      initialFocusAppliedRef.current = false
-
-      // Declare variables outside try block so they're accessible in the recents block below
-      const mapped = Array.isArray(payload?.tracks) ? payload.tracks : []
-      const meta = payload?.meta ?? {}
-      const importedTimestamp = payload?.importedAt ?? null
-      const resolvedTitle = payload?.title || fallbackTitle || 'Imported Playlist'
-      const trackCount = mapped.length
-
-      try {
-        setSkipPlaylistFocusManagement(true) // Gate PlaylistView's focus effect
-
-        const previousTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
-        const samePlaylist =
-          previousTracks.length > 0 &&
-          importMeta?.provider &&
-          meta?.provider &&
-          importMeta?.playlistId &&
-          meta?.playlistId &&
-          importMeta.provider === meta.provider &&
-          importMeta.playlistId === meta.playlistId
-
-        const nextNotesMap = ensureNotesEntries(notesByTrack, mapped)
-        const nextTagsMap = ensureTagsEntries(tagsByTrack, mapped)
-        
-        // Update tracks via reducer
-        dispatch(playlistActions.setTracksWithNotes(
-          mapped,
-          nextNotesMap,
-          nextTagsMap,
-          samePlaylist ? previousTracks : [],
-          importedTimestamp ?? null
-        ))
-        markTrackFocusContext('initial-import')
-        setImportMeta({
-          ...EMPTY_IMPORT_META,
-          ...meta,
-        })
-        setPlaylistTitle(resolvedTitle)
-        setImportedAt(importedTimestamp)
-        if (updateLastImportUrl && typeof sourceUrl === 'string') {
-          setLastImportUrl(sourceUrl)
-        }
-        setScreen('playlist')
-
-        const message =
-          typeof announceMessage === 'string'
-            ? announceMessage
-            : `Playlist imported. ${trackCount} tracks.`
-        announce(message)
-
-        const releaseFocusGate = () => {
-          debugFocus('app:init-import:gate-release', {})
-          setSkipPlaylistFocusManagement(false)
-        }
-
-        const focusButtonForTrack = (trackId, meta = {}) => {
-          if (!trackId) return false
-          const node = document.getElementById('add-note-btn-' + trackId)
-          if (node && typeof node.focus === 'function') {
-            debugFocus('app:init-import:focus-track', {
-              requestedTrackId: trackId,
-              resolvedTargetId: node.id,
-              ...meta,
-            })
-            node.focus()
-            return true
-          }
-          debugFocus('app:init-import:target-missing', {
-            requestedTrackId: trackId,
-            ...meta,
-          })
-          return false
-        }
-
-        const focusFirstVisibleWithRetry = (attempt = 0) => {
-          const MAX_RETRIES = 5
-          const targetId = firstVisibleTrackIdRef.current
-          debugFocus('app:init-import:retry', {
-            attempt,
-            reportedTrackId: targetId,
-          })
-
-          if (focusButtonForTrack(targetId, { attempt, source: 'first-visible' })) {
-            initialFocusAppliedRef.current = true
-            releaseFocusGate()
-            return
-          }
-
-          if (attempt < MAX_RETRIES) {
-            requestAnimationFrame(() => focusFirstVisibleWithRetry(attempt + 1))
-            return
-          }
-
-          const firstAddNoteBtn = /** @type {HTMLButtonElement | null} */ (
-            document.querySelector('button[id^="add-note-btn-"]')
-          )
-          if (firstAddNoteBtn && typeof firstAddNoteBtn.focus === 'function') {
-            debugFocus('app:init-import:fallback-first-rendered', {
-              reportedTrackId: targetId,
-              resolvedTargetId: firstAddNoteBtn.id,
-            })
-            firstAddNoteBtn.focus()
-            initialFocusAppliedRef.current = true
-          } else {
-            debugFocus('app:init-import:fallback-heading', {
-              reportedTrackId: targetId,
-            })
-            focusById('playlist-title')
-          }
-          releaseFocusGate()
-        }
-
-        requestAnimationFrame(() => {
-          try {
-            if (focusBehavior === 'heading') {
-              debugFocus('app:init-import:heading-request', {})
-              focusById('playlist-title')
-              releaseFocusGate()
-              return
-            }
-            if (focusBehavior === 'first-track' && !initialFocusAppliedRef.current && trackCount > 0) {
-              focusFirstVisibleWithRetry(0)
-              return
-            }
-            debugFocus('app:init-import:default-heading', {})
-            focusById('playlist-title')
-            releaseFocusGate()
-          } catch (err) {
-            releaseFocusGate()
-            throw err
-          }
-        })
-      } catch (err) {
-        // Ensure gate is reset on errors
-        setSkipPlaylistFocusManagement(false)
-        throw err
-      }
-
-      if (recents) {
-        const importedAtMs =
-          recents.importedAt != null
-            ? normalizeTimestamp(recents.importedAt)
-            : normalizeTimestamp(importedTimestamp)
-        pushRecentPlaylist(meta, {
-          title: resolvedTitle,
-          sourceUrl: sourceUrl ?? meta?.sourceUrl ?? '',
-          total: typeof recents.total === 'number' ? recents.total : trackCount,
-          coverUrl: recents.coverUrl,
-          importedAt: importedAtMs ?? undefined,
-          lastUsedAt: recents.lastUsedAt,
-          pinned: recents.pinned,
-        })
-      }
-
-      setBackgroundSync({
-        status: meta?.hasMore ? 'pending' : 'complete',
-        loaded: mapped.length,
-        total:
-          typeof meta?.total === 'number'
-            ? meta.total
-            : typeof payload?.total === 'number'
-              ? payload.total
-              : meta?.hasMore
-                ? null
-                : mapped.length,
-        lastError: null,
-        snapshotId: meta?.snapshotId ?? null,
-      })
-
-      return { trackCount, title: resolvedTitle }
-    },
-    [announce, cancelBackgroundPagination, pushRecentPlaylist, importMeta, markTrackFocusContext, notesByTrack, tagsByTrack, dispatch]
-  )
+  const {
+    importUrl,
+    setImportUrl,
+    importError,
+    setImportError,
+    providerChip,
+    importMeta,
+    setImportMeta,
+    isAnyImportBusy,
+    showInitialSpinner,
+    showReimportSpinner,
+    showLoadMoreSpinner,
+    handleImport,
+    handleSelectRecent,
+    handleReimport,
+    handleLoadMore,
+    cancelBackgroundPagination,
+    backgroundSync,
+    resetImportFlow,
+  } = usePlaylistImportController({
+    dispatch,
+    announce,
+    tracks,
+    tracksRef,
+    notesByTrack,
+    tagsByTrack,
+    setScreen,
+    pushRecentPlaylist,
+    updateRecentCardState,
+    setSkipPlaylistFocusManagement,
+    markTrackFocusContext,
+    firstVisibleTrackIdRef,
+    initialFocusAppliedRef,
+    importInputRef,
+    reimportBtnRef,
+    loadMoreBtnRef,
+    lastImportUrlRef,
+    setPlaylistTitle,
+    setImportedAt,
+    setLastImportUrl,
+    playlistTitle,
+    screen,
+    lastImportUrl,
+    initialImportMeta,
+    initialPersistedTrackCount: Array.isArray(persistedTracks) ? persistedTracks.length : 0,
+  })
 
   // OLD: These state variables moved to playlistReducer
   // const [editingId, setEditingId] = useState(null)
@@ -530,45 +279,6 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   useEffect(() => {
     tracksRef.current = tracks
   }, [tracks])
-
-  useEffect(() => {
-    setBackgroundSync((prev) => {
-      const loadedCount = Array.isArray(tracks) ? tracks.length : 0
-      const inferredTotal =
-        typeof importMeta.total === 'number'
-          ? importMeta.total
-          : importMeta.hasMore
-            ? prev.total
-            : tracks.length
-
-      const nextStatus =
-        !importMeta.hasMore && prev.status !== 'error'
-          ? 'complete'
-          : importMeta.hasMore && prev.status === 'complete'
-            ? 'pending'
-            : prev.status
-
-      const nextLastError =
-        !importMeta.hasMore && prev.status !== 'error' ? null : prev.lastError
-
-      if (
-        prev.loaded === loadedCount &&
-        prev.total === inferredTotal &&
-        prev.status === nextStatus &&
-        prev.lastError === nextLastError
-      ) {
-        return prev
-      }
-
-      return {
-        ...prev,
-        loaded: loadedCount,
-        total: inferredTotal ?? null,
-        status: nextStatus,
-        lastError: nextLastError,
-      }
-    })
-  }, [tracks, importMeta.total, importMeta.hasMore])
 
   const {
     pending,
@@ -604,17 +314,6 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
       }
     },
   })
-
-
-  const {
-    status: importStatus,
-    loading: importLoading,
-    importInitial,
-    reimport: reimportPlaylist,
-    loadMore: loadMoreTracks,
-    resetFlow: resetImportFlow,
-  } = usePlaylistImportFlow()
-
   // Device & Recovery Management
   const {
     deviceId,
@@ -657,7 +356,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
 
         if (announcement) announce(announcement)
       },
-      [announce, resetImportFlow, dispatch]
+      [announce, resetImportFlow, dispatch, setImportMeta, setPlaylistTitle, setImportedAt, setLastImportUrl, setImportUrl, setScreen]
     ),
   })
 
@@ -835,8 +534,6 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
 
   // Remote sync effect moved to PlaylistProvider
 
-  const reimportBtnRef = useRef(null)
-  const loadMoreBtnRef = useRef(null)
   // tagSyncSchedulerRef moved to PlaylistProvider
 
   // -- PERSISTENCE: save whenever core state changes (v3 structured shape)
@@ -885,606 +582,6 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   function handleImportUrlChange(e) { setImportUrl(e.target.value); setImportError(null) }
   const handleDraftChange = (value) => { dispatch(playlistActions.changeDraft(value)) }
   function handleBackToLanding() { setScreen('landing') }
-
-  const isInitialImportBusy = importStatus === ImportFlowStatus.IMPORTING
-  const isReimportBusy = importStatus === ImportFlowStatus.REIMPORTING
-  const isLoadMoreBusy = importStatus === ImportFlowStatus.LOADING_MORE
-  const isAnyImportBusy = importStatus !== ImportFlowStatus.IDLE
-  const showInitialSpinner = isInitialImportBusy && importLoading
-  const showReimportSpinner = isReimportBusy && importLoading
-  const showLoadMoreSpinner = isLoadMoreBusy && importLoading
-
-  // Small helper to resolve a friendly message from a code
-  const msgFromCode = useCallback(
-    (code) =>
-      ERROR_MAP[code] ?? ERROR_MAP[CODES.ERR_UNKNOWN] ?? 'Something went wrong. Please try again.',
-    [],
-  )
-
-  // IMPORT handlers
-  const handleImport = async (e) => {
-    e?.preventDefault?.()
-    setImportError(null)
-    cancelBackgroundPagination({ resetHistory: true })
-    const trimmedUrl = importUrl.trim()
-
-    if (!trimmedUrl) {
-      const msg = 'Paste a playlist URL to import.'
-      setImportError(msg)
-      announce('Import failed. URL missing.')
-      importInputRef.current?.focus(); importInputRef.current?.select()
-      console.log('[import error]', { code: 'URL_MISSING', raw: null })
-      return
-    }
-
-    if (!providerChip) {
-      const msg = msgFromCode(CODES.ERR_UNSUPPORTED_URL)
-      setImportError(msg)
-      announce('Import failed. Unsupported URL.')
-      importInputRef.current?.focus(); importInputRef.current?.select()
-      console.log('[import error]', { code: CODES.ERR_UNSUPPORTED_URL, raw: null })
-      return
-    }
-
-    announce('Import started.')
-    try {
-      const result = await importInitial(trimmedUrl, {
-        providerHint: providerChip,
-        sourceUrl: trimmedUrl,
-      })
-
-      if (result?.stale) return
-
-      if (!result.ok) {
-        const code = result.code ?? CODES.ERR_UNKNOWN
-        const msg = msgFromCode(code)
-        console.log('[import error]', { code, raw: result.error })
-        setImportError(msg)
-        announce('Import failed. ' + msg)
-        importInputRef.current?.focus(); importInputRef.current?.select()
-        return
-      }
-
-      applyImportResult(result.data, {
-        sourceUrl: trimmedUrl,
-        recents: {
-          importedAt: result.data?.importedAt ?? null,
-          total:
-            typeof result.data?.total === 'number'
-              ? result.data.total
-              : Array.isArray(result.data?.tracks)
-                ? result.data.tracks.length
-                : null,
-          coverUrl: result.data?.coverUrl ?? null,
-        },
-      })
-    } catch (err) {
-      if (err?.name === 'AbortError') return
-      const code = extractErrorCode(err)
-      const msg = msgFromCode(code)
-      console.log('[import error]', { code, raw: err })
-      setImportError(msg)
-      announce('Import failed. ' + msg)
-      importInputRef.current?.focus(); importInputRef.current?.select()
-    }
-  }
-
-  const handleSelectRecent = async (recent) => {
-    if (!recent || !recent.id) {
-      return { ok: false, error: 'Unknown playlist' }
-    }
-    if (isAnyImportBusy) {
-      const msg = 'Finish the current import before loading another playlist.'
-      updateRecentCardState(recent.id, { error: msg, loading: false })
-      announce(msg)
-      return { ok: false, error: msg }
-    }
-
-    const trimmedUrl = typeof recent.sourceUrl === 'string' ? recent.sourceUrl.trim() : ''
-    if (!trimmedUrl) {
-      const msg = "Can't load - link changed."
-      updateRecentCardState(recent.id, { error: msg, loading: false })
-      announce(msg)
-      return { ok: false, error: msg }
-    }
-
-    cancelBackgroundPagination({ resetHistory: true })
-    setImportUrl(trimmedUrl)
-    setImportError(null)
-    updateRecentCardState(recent.id, { loading: true, error: null })
-    announce(`Loading playlist ${recent.title ? `"${recent.title}"` : ''}.`)
-
-    try {
-      const result = await importInitial(trimmedUrl, {
-        providerHint: recent.provider,
-        sourceUrl: trimmedUrl,
-      })
-
-      if (result?.stale) {
-        updateRecentCardState(recent.id, {})
-        return { ok: false, stale: true }
-      }
-
-      if (!result.ok) {
-        const code = result.code ?? CODES.ERR_UNKNOWN
-        const msg = msgFromCode(code)
-        console.log('[recent import error]', { code, raw: result.error })
-        updateRecentCardState(recent.id, { loading: false, error: msg })
-        setImportError(msg)
-        announce(msg)
-        return { ok: false, error: msg }
-      }
-
-      applyImportResult(result.data, {
-        sourceUrl: trimmedUrl,
-        focusBehavior: 'heading',
-        announceMessage: `Playlist loaded: ${recent.title || result.data?.title || 'Imported playlist'}.`,
-        recents: {
-          importedAt: result.data?.importedAt ?? null,
-          total:
-            typeof result.data?.total === 'number'
-              ? result.data.total
-              : Array.isArray(result.data?.tracks)
-                ? result.data.tracks.length
-                : null,
-          coverUrl: result.data?.coverUrl ?? recent.coverUrl,
-          lastUsedAt: Date.now(),
-        },
-      })
-      updateRecentCardState(recent.id, null)
-      return { ok: true }
-    } catch (err) {
-      if (err?.name === 'AbortError') {
-        updateRecentCardState(recent.id, {})
-        throw err
-      }
-      const code = extractErrorCode(err)
-      const msg = msgFromCode(code)
-      console.log('[recent import error]', { code, raw: err })
-      updateRecentCardState(recent.id, { loading: false, error: msg })
-      setImportError(msg)
-      announce(msg)
-      return { ok: false, error: msg }
-    }
-  }
-
-  const handleReimport = async () => {
-    if (!lastImportUrl) return
-    cancelBackgroundPagination({ resetHistory: true })
-    const wasActive = document.activeElement === reimportBtnRef.current
-    setImportError(null)
-    announce('Re-importing playlist.')
-    try {
-      const result = await reimportPlaylist(lastImportUrl, {
-        providerHint: importMeta.provider ?? null,
-        existingMeta: importMeta,
-        fallbackTitle: playlistTitle,
-      })
-
-      if (result?.stale) return
-
-      if (!result.ok) {
-        const code = result.code ?? CODES.ERR_UNKNOWN
-        const msg = msgFromCode(code)
-        console.log('[reimport error]', { code, raw: result.error })
-        setImportError(msg)
-        announce(msg)
-        if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
-        return
-      }
-
-      const resolvedTotal =
-        typeof result.data?.total === 'number'
-          ? result.data.total
-          : Array.isArray(result.data?.tracks)
-            ? result.data.tracks.length
-            : null
-
-      applyImportResult(result.data, {
-        sourceUrl: lastImportUrl,
-        fallbackTitle: playlistTitle,
-        announceMessage: `Playlist re-imported. ${resolvedTotal ?? 0} tracks available.`,
-        recents: {
-          importedAt: result.data?.importedAt ?? null,
-          total: resolvedTotal,
-          coverUrl: result.data?.coverUrl ?? null,
-          lastUsedAt: Date.now(),
-        },
-        updateLastImportUrl: false,
-      })
-      if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
-    } catch (err) {
-      if (err?.name === 'AbortError') {
-        return
-      }
-      const code = extractErrorCode(err)
-      const msg = msgFromCode(code)
-      console.log('[reimport error]', { code, raw: err })
-      setImportError(msg)
-      announce(msg)
-      if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus())
-    }
-  }
-
-  const handleLoadMore = useCallback(
-    async (options = {}) => {
-      const mode = options?.mode === 'background' ? 'background' : 'manual'
-      const isBackground = mode === 'background'
-      const currentMeta = importMetaRef.current
-      const metaSnapshot =
-        /** @type {ImportMeta | undefined} */ (options?.metaOverride ?? currentMeta)
-      const sourceUrl = lastImportUrlRef.current
-
-      if (!metaSnapshot?.cursor || !metaSnapshot?.provider || !sourceUrl) {
-        return { ok: false, reason: 'unavailable' }
-      }
-
-      const key = getPagerKey(metaSnapshot)
-      if (!key) {
-        return { ok: false, reason: 'unavailable' }
-      }
-
-      if (!isBackground) {
-        setImportError(null)
-      }
-
-      const finalizeManualResult = (result) => {
-        if (!result || result.stale || result.aborted) {
-          return result
-        }
-        if (result.ok) {
-          if (result.added > 0) {
-            const targetId = result.firstNewTrackId ?? null
-            if (targetId) {
-              debugFocus('app:load-more:manual', {
-                firstNewTrackId: targetId,
-                added: result.added,
-              })
-              focusById(`track-${targetId}`)
-            } else {
-              requestAnimationFrame(() => {
-                debugFocus('app:load-more:manual-fallback', {
-                  added: result.added,
-                })
-                loadMoreBtnRef.current?.focus()
-              })
-            }
-            announce(`${result.added} more tracks loaded.`)
-          } else {
-            announce('No additional tracks available.')
-          }
-          setImportError(null)
-        } else if (result.code === CODES.ERR_RATE_LIMITED && result.retryAt) {
-          const base = msgFromCode(CODES.ERR_RATE_LIMITED)
-          const resumeLabel =
-            typeof result.retryAt === 'number'
-              ? new Date(result.retryAt).toLocaleTimeString()
-              : null
-          const message = resumeLabel ? `${base} Resume after ${resumeLabel}.` : base
-          setImportError(message)
-          announce(message)
-        } else if (result.code) {
-          const message = msgFromCode(result.code)
-          setImportError(message)
-          announce(message)
-        } else {
-          const fallback = msgFromCode(CODES.ERR_UNKNOWN)
-          setImportError(fallback)
-          announce(fallback)
-        }
-        return result
-      }
-
-      const resolveRetryAfterMs = (error) => {
-        if (!error || typeof error !== 'object') return null
-        const directMs = Number(error.retryAfterMs)
-        if (Number.isFinite(directMs) && directMs > 0) return directMs
-        const retrySeconds = Number(error.retryAfterSeconds ?? error.retryAfter)
-        if (Number.isFinite(retrySeconds) && retrySeconds > 0) return retrySeconds * 1000
-        return null
-      }
-
-      const scheduleResume = (resumeAtMs) => {
-        if (!resumeAtMs) return
-        const normalized = Math.max(resumeAtMs, Date.now() + 1000)
-        pagerCooldownRef.current.until = normalized
-        if (pagerResumeTimerRef.current) {
-          clearTimeout(pagerResumeTimerRef.current)
-        }
-        const delay = Math.max(0, normalized - Date.now())
-        pagerResumeTimerRef.current = setTimeout(() => {
-          pagerResumeTimerRef.current = null
-          pagerCooldownRef.current.until = 0
-          startBackgroundPaginationRef.current()
-        }, delay)
-      }
-
-      const now = Date.now()
-      const cooldownUntil = pagerCooldownRef.current.until ?? 0
-      if (cooldownUntil > now) {
-        const resumeTime = new Date(cooldownUntil).toLocaleTimeString()
-        const cooldownMessage = `${msgFromCode(CODES.ERR_RATE_LIMITED)} Resume after ${resumeTime}.`
-        setBackgroundSync((prev) => ({
-          ...prev,
-          status: 'cooldown',
-          lastError: cooldownMessage,
-        }))
-        if (!isBackground) {
-          setImportError(cooldownMessage)
-          announce(cooldownMessage)
-        }
-        return { ok: false, code: CODES.ERR_RATE_LIMITED, retryAt: cooldownUntil }
-      }
-
-      if (pagerLastSuccessRef.current.has(key)) {
-        return { ok: true, done: !metaSnapshot?.hasMore, added: 0, skipped: true }
-      }
-
-      const existingFlight = pagerFlightsRef.current.get(key)
-      if (existingFlight) {
-        if (isBackground) {
-          backgroundPagerRef.current = { key, requestId: existingFlight.requestId }
-          return existingFlight.promise
-        }
-        announce('Loading more tracks.')
-        return existingFlight.promise.then((res) => finalizeManualResult(res))
-      }
-
-      const controller = new AbortController()
-      const requestId = ++pagerRequestIdRef.current
-
-      if (isBackground) {
-        backgroundPagerRef.current = { key, requestId }
-      }
-
-      const flightPromise = (async () => {
-        try {
-          if (isBackground) {
-            setBackgroundSync((prev) => ({
-              ...prev,
-              status: 'loading',
-              lastError: null,
-            }))
-          } else {
-            announce('Loading more tracks.')
-          }
-
-          const currentTracks = Array.isArray(tracksRef.current) ? tracksRef.current : []
-          const existingIds = currentTracks.map((t) => t.id)
-          const result = /** @type {ImportResult} */ (
-            await loadMoreTracks({
-              providerHint: metaSnapshot.provider ?? null,
-              existingMeta: metaSnapshot,
-              startIndex: currentTracks.length,
-              existingIds,
-              sourceUrl,
-              signal: controller.signal,
-            })
-          )
-
-          if (result?.stale) {
-            return { ok: false, stale: true }
-          }
-
-          if (!result.ok) {
-            const code = result.code ?? CODES.ERR_UNKNOWN
-            const msg = msgFromCode(code)
-            console.log('[load-more error]', { code, raw: result.error })
-            if (code === CODES.ERR_RATE_LIMITED) {
-              const retryMs = resolveRetryAfterMs(result.error) ?? 60000
-              const resumeAt = Date.now() + retryMs
-              scheduleResume(resumeAt)
-              const resumeTime = new Date(resumeAt).toLocaleTimeString()
-              const cooldownMessage = `${msg} Resume after ${resumeTime}.`
-              setBackgroundSync((prev) => ({
-                ...prev,
-                status: 'cooldown',
-                lastError: cooldownMessage,
-              }))
-              return { ok: false, code, retryAt: resumeAt }
-            }
-            if (isBackground) {
-              setBackgroundSync((prev) => ({
-                ...prev,
-                status: 'error',
-                lastError: msg,
-              }))
-            } else {
-              setImportError(msg)
-              announce(msg)
-            }
-            return { ok: false, code }
-          }
-
-          const additions = Array.isArray(result.data?.tracks) ? result.data.tracks : []
-          const meta = /** @type {ImportMeta} */ ({
-            ...EMPTY_IMPORT_META,
-            ...(result.data?.meta ?? {}),
-          })
-          const hasMore = Boolean(meta.hasMore)
-
-          if (!additions.length) {
-            setImportMeta((prev) => ({
-              ...prev,
-              ...meta,
-            }))
-            pagerLastSuccessRef.current.set(key, true)
-            if (isBackground) {
-              setBackgroundSync((prev) => ({
-                ...prev,
-                status: hasMore ? 'pending' : 'complete',
-                lastError: null,
-                snapshotId: meta?.snapshotId ?? prev.snapshotId ?? null,
-              }))
-            }
-            return { ok: true, done: !hasMore, added: 0, firstNewTrackId: null }
-          }
-
-          const nextNotesMap = ensureNotesEntries(notesByTrack, additions)
-          const nextTagsMap = ensureTagsEntries(tagsByTrack, additions)
-          const baseTracks = Array.isArray(tracks) ? tracks : []
-          const loadMoreStamp = new Date().toISOString()
-          
-          // Append new tracks to existing tracks
-          const allTracks = [...baseTracks, ...additions]
-          dispatch(playlistActions.setTracksWithNotes(
-            allTracks,
-            nextNotesMap,
-            nextTagsMap,
-            baseTracks,
-            loadMoreStamp
-          ))
-          markTrackFocusContext(isBackground ? 'background-load-more' : 'manual-load-more')
-          setImportMeta((prev) => ({
-            ...prev,
-            ...meta,
-          }))
-          setImportedAt(loadMoreStamp)
-          pagerLastSuccessRef.current.set(key, true)
-
-          const firstNewId = additions[0]?.id ?? null
-
-          if (isBackground) {
-            setBackgroundSync((prev) => ({
-              ...prev,
-              status: hasMore ? 'pending' : 'complete',
-              lastError: null,
-              snapshotId: meta?.snapshotId ?? prev.snapshotId ?? null,
-            }))
-            debugFocus('app:load-more:auto', {
-              added: additions.length,
-              activeAfter: document.activeElement?.id ?? null,
-            })
-            if (!hasMore) {
-              announce('All tracks loaded; order complete.')
-            }
-          }
-
-          return { ok: true, done: !hasMore, added: additions.length, firstNewTrackId: firstNewId }
-        } catch (err) {
-          if (err?.name === 'AbortError') {
-            if (isBackground) {
-              setBackgroundSync((prev) => ({
-                ...prev,
-                status: 'pending',
-              }))
-            }
-            return { ok: false, aborted: true }
-          }
-          const code = extractErrorCode(err)
-          const msg = msgFromCode(code)
-          console.log('[load-more error]', { code, raw: err })
-          if (isBackground) {
-            setBackgroundSync((prev) => ({
-              ...prev,
-              status: 'error',
-              lastError: msg,
-            }))
-          }
-          return { ok: false, code }
-        } finally {
-          pagerFlightsRef.current.delete(key)
-          if (backgroundPagerRef.current && backgroundPagerRef.current.key === key && backgroundPagerRef.current.requestId === requestId) {
-            backgroundPagerRef.current = null
-          }
-        }
-      })()
-
-      pagerFlightsRef.current.set(key, { promise: flightPromise, controller, mode, requestId })
-      return isBackground ? flightPromise : flightPromise.then((res) => finalizeManualResult(res))
-    },
-    [
-      announce,
-      getPagerKey,
-      loadMoreTracks,
-      markTrackFocusContext,
-      msgFromCode,
-      setBackgroundSync,
-      setImportError,
-      setImportMeta,
-      setImportedAt,
-      notesByTrack,
-      tagsByTrack,
-      tracks,
-      dispatch,
-    ],
-  )
-
-  const startBackgroundPagination = useCallback(
-    (metaOverride) => {
-      if (importStatus !== ImportFlowStatus.IDLE) return
-
-      const meta = metaOverride ?? importMetaRef.current
-      if (!meta) return
-
-      const hasMore = Boolean(meta?.hasMore && meta?.cursor)
-      const sourceUrl = lastImportUrlRef.current
-      if (!hasMore || !sourceUrl) {
-        setBackgroundSync((prev) => ({
-          ...prev,
-          status: 'complete',
-          lastError: null,
-        }))
-        return
-      }
-
-      const key = getPagerKey(meta)
-      if (!key) return
-
-      if (pagerLastSuccessRef.current.has(key)) {
-        return
-      }
-
-      const now = Date.now()
-      const cooldownUntil = pagerCooldownRef.current.until ?? 0
-      if (cooldownUntil > now) {
-        setBackgroundSync((prev) => ({
-          ...prev,
-          status: 'cooldown',
-        }))
-        if (!pagerResumeTimerRef.current) {
-          const delay = Math.max(0, cooldownUntil - now)
-          pagerResumeTimerRef.current = setTimeout(() => {
-            pagerResumeTimerRef.current = null
-            pagerCooldownRef.current.until = 0
-            startBackgroundPaginationRef.current()
-          }, delay)
-        }
-        return
-      }
-
-      const existingFlight = pagerFlightsRef.current.get(key)
-      if (existingFlight) {
-        backgroundPagerRef.current = { key, requestId: existingFlight.requestId }
-        return
-      }
-
-      handleLoadMore({ mode: 'background', metaOverride: meta })
-    },
-    [getPagerKey, handleLoadMore, importStatus, lastImportUrlRef, setBackgroundSync],
-  )
-
-  useEffect(() => {
-    startBackgroundPaginationRef.current = startBackgroundPagination
-    return () => {
-      startBackgroundPaginationRef.current = () => {}
-    }
-  }, [startBackgroundPagination])
-
-  useEffect(() => {
-    if (screen !== 'playlist') return
-    if (!importMeta?.hasMore || !importMeta?.cursor) return
-    if (!lastImportUrl) return
-    if (importStatus !== ImportFlowStatus.IDLE) return
-    startBackgroundPagination()
-  }, [
-    screen,
-    importMeta.hasMore,
-    importMeta.cursor,
-    importStatus,
-    lastImportUrl,
-    startBackgroundPagination,
-  ])
 
   const handleBackupNotes = async () => {
     try {
@@ -1870,7 +967,12 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
                   Paste a Spotify / YouTube / SoundCloud <strong>playlist</strong> URL to import a snapshot and start adding notes.
                 </p>
 
-                <form onSubmit={handleImport} aria-describedby={importError ? 'import-error' : undefined}>
+                <form
+                  onSubmit={(event) => {
+                    void handleImport(event)
+                  }}
+                  aria-describedby={importError ? 'import-error' : undefined}
+                >
                   <div style={{ display: 'grid', gap: 8, alignItems: 'start', gridTemplateColumns: '1fr auto' }}>
                     <div style={{ gridColumn: '1 / -1' }}>
                       <label htmlFor="playlist-url" style={{ display: 'block', marginBottom: 6 }}>Playlist URL</label>
@@ -1943,13 +1045,17 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
                 customTags={allCustomTags}
                 onUndo={undoInline}
                 onDismissUndo={expireInline}
-                onReimport={handleReimport}
+                onReimport={() => {
+                  void handleReimport()
+                }}
                 onClear={handleClearAll}
                 onBack={handleBackToLanding}
                 canReimport={Boolean(lastImportUrl)}
                 reimportBtnRef={reimportBtnRef}
                 loadMoreBtnRef={loadMoreBtnRef}
-                onLoadMore={handleLoadMore}
+                onLoadMore={() => {
+                  void handleLoadMore()
+                }}
                 announce={announce}
                 backgroundSync={backgroundSync}
                 skipFocusManagement={skipPlaylistFocusManagement}

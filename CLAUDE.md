@@ -300,7 +300,8 @@ focusById('track-note-btn-0')  // Uses requestAnimationFrame
 - **src/features/playlist/playlistReducer.js** → Pure reducer for playlist state transitions
 - **src/features/playlist/actions.js** → Validated action creators
 - **src/features/playlist/helpers.js** → Pure helper functions (computeHasLocalNotes, validateTag, etc.)
-- **src/features/import/usePlaylistImportFlow.js** → Import orchestration hook
+- **src/features/import/usePlaylistImportController.js** → High-level import controller (initial import, recents, reimport, load-more)
+- **src/features/import/usePlaylistImportFlow.js** → Lower-level adapter flow (guards, request lifecycles)
 - **src/features/import/useImportPlaylist.js** → Adapter registry + provider detection
 - **src/features/import/adapters/** → Spotify/YouTube/SoundCloud adapters
 - **src/features/import/normalizeTrack.js** → Track normalization
