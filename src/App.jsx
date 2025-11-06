@@ -23,13 +23,11 @@ import {
   cloneNotesMap,
   normalizeTagList,
   cloneTagsMap,
-  createInitialNotesMap,
-  createInitialTagsMap,
   ensureNotesEntries,
   ensureTagsEntries,
   groupRemoteNotes,
 } from './utils/notesTagsData.js'
-import { normalizeTimestamp, attachNotesToTracks } from './utils/trackProcessing.js'
+import { normalizeTimestamp } from './utils/trackProcessing.js'
 import { bootstrapStorageState, EMPTY_IMPORT_META } from './utils/storageBootstrap.js'
 import { createRecentCandidate } from './features/recent/recentUtils.js'
 
@@ -59,9 +57,8 @@ import { apiFetch } from './lib/apiClient.js'
 import { getDeviceId, getAnonId } from './lib/deviceState.js'
 
 // NEW: Playlist state reducer + context provider
-import { initialPlaylistState } from './features/playlist/playlistReducer.js'
 import { playlistActions } from './features/playlist/actions.js'
-import { createNoteSnapshot, computeHasLocalNotes, computeAllCustomTags, validateTag } from './features/playlist/helpers.js'
+import { createNoteSnapshot, validateTag } from './features/playlist/helpers.js'
 import { PlaylistStateProvider } from './features/playlist/PlaylistProvider.jsx'
 import {
   usePlaylistDispatch,
@@ -72,6 +69,7 @@ import {
   usePlaylistDerived,
   usePlaylistSync,
 } from './features/playlist/usePlaylistContext.js'
+import buildInitialPlaylistState from './features/playlist/buildInitialPlaylistState.js'
 
 /**
  * @typedef {'idle' | 'pending' | 'loading' | 'cooldown' | 'complete' | 'error'} BackgroundSyncStatus
@@ -2051,7 +2049,13 @@ function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRece
  * Outer App component - bootstraps state and provides playlist context
  */
 export default function App() {
-  const [bootstrapState] = useState(bootstrapStorageState)
+  const bootstrapState = useMemo(bootstrapStorageState, [])
+  // Centralised builder keeps playlist bootstrap logic in sync with reducer helpers
+  const { initialPlaylistStateWithData } = useMemo(
+    () => buildInitialPlaylistState(bootstrapState),
+    [bootstrapState],
+  )
+
   const {
     persisted,
     pendingMigrationSnapshot,
@@ -2059,34 +2063,6 @@ export default function App() {
     persistedTracks,
     initialScreen,
   } = bootstrapState
-
-  const initialNotesMap = useMemo(() => createInitialNotesMap(persisted), [persisted])
-  const initialTagsMap = useMemo(() => createInitialTagsMap(persisted), [persisted])
-
-  // Compute initial playlist state for the provider
-  const initialPlaylistStateWithData = useMemo(() => {
-    const notesMap = ensureNotesEntries(initialNotesMap, persistedTracks)
-    const tagsMap = ensureTagsEntries(initialTagsMap, persistedTracks)
-    const tracksWithNotes = attachNotesToTracks(
-      persistedTracks,
-      notesMap,
-      tagsMap,
-      persistedTracks,
-      { importStamp: persisted?.importedAt ?? null }
-    )
-    
-    // Reuse helper functions to compute derived state
-    return {
-      ...initialPlaylistState,
-      tracks: tracksWithNotes,
-      notesByTrack: notesMap,
-      tagsByTrack: tagsMap,
-      _derived: {
-        hasLocalNotes: computeHasLocalNotes(notesMap, tagsMap),
-        allCustomTags: computeAllCustomTags(tagsMap)
-      }
-    }
-  }, [initialNotesMap, initialTagsMap, persistedTracks, persisted?.importedAt])
 
   return (
     <AppWithDeviceContext
