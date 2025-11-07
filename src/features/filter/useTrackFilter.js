@@ -187,10 +187,10 @@ export default function useTrackFilter({
     const next = loadStoredState(storageKey);
     if (!next) {
       let candidate = null;
-      // Extract the base prefix without the snapshotId part to prevent substring collisions
-      // baseStorageKey format: "sta:filters:spotify:123:null"
-      // We want: "sta:filters:spotify:123:" (exact boundary)
-      const basePrefix = baseStorageKey ? baseStorageKey.slice(0, -4) : null; // Remove "null"
+      // Extract the base prefix to match any snapshot for this playlist
+      // baseStorageKey format: "sta:v5:filters:provider:playlistId"
+      // We want: "sta:v5:filters:provider:playlistId:" (exact boundary)
+      const basePrefix = baseStorageKey ? `${baseStorageKey}:` : null;
       if (prevKey && basePrefix && prevKey !== storageKey && prevKey.startsWith(basePrefix)) {
         candidate = loadStoredState(prevKey);
       }
