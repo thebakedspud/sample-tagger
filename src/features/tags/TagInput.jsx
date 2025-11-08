@@ -42,6 +42,7 @@ function TagInputInner(props, ref) {
     placeholder = 'Add tag',
     autoFocus = false,
     className = '',
+    ...restProps
   } = safeProps
   const inputId = useId();
   const listboxId = `${inputId}-listbox`;
@@ -101,8 +102,12 @@ function TagInputInner(props, ref) {
   const handleAdd = (rawTag) => {
     const normalized = normalizeTag(rawTag);
     if (!normalized) return;
-    const added = onAdd ? onAdd(normalized) : true;
-    if (added !== false) {
+    const result = onAdd ? onAdd(normalized) : true;
+    const succeeded =
+      typeof result === 'object' && result !== null
+        ? result.success !== false
+        : result !== false;
+    if (succeeded) {
       setQuery('');
       setHighlightIndex(-1);
     }
@@ -155,6 +160,7 @@ function TagInputInner(props, ref) {
   return (
     <div className={`tag-input ${className}`.trim()}>
       <input
+        {...restProps}
         ref={mergedRef}
         id={inputId}
         type="text"

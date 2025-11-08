@@ -708,8 +708,9 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
       const validation = validateTag(tag, existingTags, MAX_TAGS_PER_TRACK, MAX_TAG_LENGTH)
       
       if (!validation.valid) {
-        announce(validation.error || 'Invalid tag.')
-        return false
+        const errorMessage = validation.error || 'Invalid tag.'
+        announce(errorMessage)
+        return { success: false, error: errorMessage }
       }
       
       const normalized = validation.normalized
@@ -728,7 +729,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
           announce('Tag sync failed. Changes are saved locally.')
         })
       }
-      return true
+      return { success: true, tag: normalized }
     },
     [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks, dispatch],
   )

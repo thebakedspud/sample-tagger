@@ -125,4 +125,18 @@ describe('TrackCard', () => {
 
     expect(screen.queryByText(/Added/i)).not.toBeInTheDocument()
   })
+
+  it('shows inline error feedback when adding a tag fails', async () => {
+    const errorMessage = 'Tags must be 24 characters or fewer.'
+    const onAddTag = vi.fn().mockReturnValue({ success: false, error: errorMessage })
+    const { user } = renderTrackCard({ onAddTag })
+
+    await user.click(screen.getByRole('button', { name: /\+ add tag/i }))
+    const input = screen.getByPlaceholderText(/add tag/i)
+    await user.type(input, 'a brand new tag{Enter}')
+
+    expect(onAddTag).toHaveBeenCalledWith('track-1', 'a brand new tag')
+    expect(screen.getByText(errorMessage)).toBeInTheDocument()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+  })
 })

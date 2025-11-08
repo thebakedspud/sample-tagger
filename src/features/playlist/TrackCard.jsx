@@ -28,7 +28,7 @@ import ErrorMessage from '../../components/ErrorMessage.jsx'
  * @param {(trackId: string|number) => void} props.onSaveNote
  * @param {() => void} props.onCancelNote
  * @param {(trackId: string|number, noteIndex: number) => void} props.onDeleteNote
- * @param {(trackId: string|number, tag: string) => boolean} props.onAddTag
+ * @param {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string }} props.onAddTag
  * @param {(trackId: string|number, tag: string) => void} props.onRemoveTag
  * @param {string[]} props.stockTags
  * @param {string[]} props.customTags
@@ -107,6 +107,7 @@ export default function TrackCard({
 
   const [addingTag, setAddingTag] = useState(false)
   const [pendingFocus, setPendingFocus] = useState(null)
+  const [tagError, setTagError] = useState(null)
   const addTagBtnRef = useRef(null)
   const tagInputRef = useRef(null)
   const chipRefs = useRef(new Map())
@@ -173,23 +174,37 @@ export default function TrackCard({
   const startAddTag = () => {
     setAddingTag(true)
     setPendingFocus(null)
+    setTagError(null)
     requestAnimationFrame(() => tagInputRef.current?.focus())
   }
 
   const cancelAddTag = () => {
     setAddingTag(false)
     setPendingFocus(null)
+    setTagError(null)
     requestAnimationFrame(() => addTagBtnRef.current?.focus())
   }
 
   const submitTag = (value) => {
     if (!onAddTag) return false
-    const added = onAddTag(track.id, value)
-    if (added) {
+    const addResult = onAddTag(track.id, value)
+    const success =
+      typeof addResult === 'object' && addResult !== null
+        ? addResult.success !== false
+        : Boolean(addResult)
+    if (success) {
+      const focusTag =
+        typeof addResult === 'object' && addResult?.tag ? addResult.tag : value
       setAddingTag(false)
-      setPendingFocus(value)
+      setPendingFocus(focusTag)
+      setTagError(null)
+      return true
     }
-    return added
+    const message =
+      (typeof addResult === 'object' && addResult !== null && addResult.error) ||
+      'Unable to add tag.'
+    setTagError(message)
+    return false
   }
 
   const removeTag = (value, index) => {
@@ -197,6 +212,8 @@ export default function TrackCard({
     onRemoveTag(track.id, value)
     setPendingFocus({ index })
   }
+
+  const tagErrorId = `tag-error-${track.id}`
 
   const handleChipKeyDown = (event, chipIndex) => {
     if (event.key === 'ArrowRight') {
@@ -339,6 +356,8 @@ export default function TrackCard({
             onAdd={submitTag}
             onCancel={cancelAddTag}
             autoFocus
+            aria-invalid={tagError ? 'true' : undefined}
+            aria-describedby={tagError ? tagErrorId : undefined}
           />
         ) : (
           <button
@@ -352,6 +371,9 @@ export default function TrackCard({
           </button>
         )}
       </div>
+      <ErrorMessage id={tagErrorId} className="tag-row__error">
+        {tagError}
+      </ErrorMessage>
 
       <NoteList
         trackId={track.id}
