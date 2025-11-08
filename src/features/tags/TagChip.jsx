@@ -2,7 +2,30 @@
 import PropTypes from 'prop-types'
 import { forwardRef } from 'react'
 
-const TagChip = forwardRef(function TagChip(props, ref) {
+/**
+ * @typedef {Object} TagChipProps
+ * @property {string} tag
+ * @property {(tag: string) => void} [onRemove]
+ * @property {(tag: string) => void} [onFilter]
+ * @property {(event: import('react').MouseEvent<HTMLButtonElement>) => void} [onClick]
+ * @property {string} [className]
+ * @property {Record<string, unknown>} [rest]
+ */
+
+/**
+ * @param {{
+ *   tag: string;
+ *   onRemove?: (tag: string) => void;
+ *   onFilter?: (tag: string) => void;
+ *   onClick?: (event: import('react').MouseEvent<HTMLButtonElement>) => void;
+ *   className?: string;
+ *   [key: string]: unknown;
+ * }} props
+ * @param {import('react').Ref<HTMLButtonElement>} ref
+ */
+/** @type {import('react').ForwardRefRenderFunction<HTMLButtonElement, TagChipProps>} */
+function TagChipInner(props, ref) {
+  const safeProps = /** @type {TagChipProps} */ (props ?? {})
   const {
     tag,
     onRemove,
@@ -10,7 +33,7 @@ const TagChip = forwardRef(function TagChip(props, ref) {
     onClick,
     className = '',
     ...rest
-  } = props || {}
+  } = safeProps
 
   const handleClick = (event) => {
     if (onClick) {
@@ -42,7 +65,9 @@ const TagChip = forwardRef(function TagChip(props, ref) {
       <span aria-hidden="true" className="tag-chip__remove">{'\u00d7'}</span>
     </button>
   )
-})
+}
+
+const TagChip = forwardRef(TagChipInner)
 
 TagChip.propTypes = {
   tag: PropTypes.string.isRequired,

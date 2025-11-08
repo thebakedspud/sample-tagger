@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { getAllowedOrigins } from '../originConfig.js';
 
+/**
+ * @typedef {import('../token.js').VercelRequest} VercelRequest
+ * @typedef {import('../token.js').VercelResponse} VercelResponse
+ * @typedef {VercelResponse & { ended: boolean, json(): any }} TestResponse
+ */
+
 const ORIGINAL_FETCH = global.fetch;
 const ORIGINAL_ENV = { ...process.env };
 
@@ -9,6 +15,11 @@ function createResponse(body, init) {
   return new Response(body ?? '', init);
 }
 
+/**
+ * Build a minimal Vercel-style request for the handler.
+ * @param {object} [options]
+ * @returns {VercelRequest}
+ */
 function createReq(options = {}) {
   const allowedOrigins = getAllowedOrigins();
   const defaultOrigin = allowedOrigins[0] ?? 'http://localhost:5173';
@@ -37,24 +48,30 @@ function createReq(options = {}) {
 
   const socket = options.socket ?? { remoteAddress: clientIp };
 
-  return {
-    method: options.method ?? 'GET',
-    headers,
-    socket,
-  };
+  return /** @type {VercelRequest} */ (
+    /** @type {unknown} */ ({
+      method: options.method ?? 'GET',
+      headers,
+      socket,
+    })
+  );
 }
 
+/**
+ * Build a minimal Vercel-style response for the handler.
+ * @returns {TestResponse}
+ */
 function createRes() {
   let body = '';
   const headers = new Map();
-  return {
+  const response = {
     statusCode: 0,
     ended: false,
     setHeader(name, value) {
       headers.set(name.toLowerCase(), value);
     },
     end(chunk = '') {
-      this.ended = true;
+      response.ended = true;
       body += chunk;
     },
     getHeader(name) {
@@ -64,6 +81,7 @@ function createRes() {
       return body ? JSON.parse(body) : null;
     },
   };
+  return /** @type {TestResponse} */ (/** @type {unknown} */ (response));
 }
 
 async function loadHandler() {
@@ -210,7 +228,8 @@ describe('api/spotify/token', () => {
       expires_in: 3600,
     };
 
-    let resolveFetch;
+    /** @type {() => void} */
+    let resolveFetch = () => {};
     const fetchMock = vi.fn(
       () =>
         new Promise((resolve) => {

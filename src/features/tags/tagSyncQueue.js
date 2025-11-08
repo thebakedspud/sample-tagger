@@ -6,9 +6,12 @@
  * @param {number} [delayMs=350]
  */
 export function createTagSyncScheduler(sendFn, delayMs = 350) {
-  /** @type {Map<string, { tags: string[], timer: any, resolvers: Array<() => void>, rejecters: Array<(err: any) => void> }>} */
+  /** @type {Map<string, { tags: string[], timer: ReturnType<typeof setTimeout>, resolvers: Array<(value: void | PromiseLike<void>) => void>, rejecters: Array<(err: any) => void> }>} */
   const pending = new Map();
 
+  /**
+   * @param {string} trackId
+   */
   const flush = async (trackId) => {
     const entry = pending.get(trackId);
     if (!entry) return;
@@ -21,6 +24,11 @@ export function createTagSyncScheduler(sendFn, delayMs = 350) {
     }
   };
 
+  /**
+   * @param {string} trackId
+   * @param {string[]} tags
+   * @returns {Promise<void>}
+   */
   const schedule = (trackId, tags) => {
     if (!trackId) return Promise.resolve();
     return new Promise((resolve, reject) => {
@@ -50,4 +58,3 @@ export function createTagSyncScheduler(sendFn, delayMs = 350) {
 
   return { schedule, clear };
 }
-

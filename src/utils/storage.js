@@ -4,6 +4,8 @@
 /* eslint-env browser */
 // @ts-check
 
+import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from '../features/tags/validation.js'
+
 /**
  * @typedef {'dark' | 'light'} Theme
  *
@@ -18,6 +20,7 @@
  * @property {string | null} [cursor]
  * @property {boolean} [hasMore]
  * @property {string | null} [sourceUrl]
+ * @property {number | null} [total]
  * @property {{ isMock?: boolean, lastErrorCode?: string | null } | null} [debug]
  *
  * @typedef {Object} PersistedTrack
@@ -29,6 +32,11 @@
  * @property {string=} sourceUrl
  * @property {number=} durationMs
  * @property {string[]=} tags
+ * @property {string=} album
+ * @property {string=} dateAdded
+ * @property {string=} importedAt
+ * @property {number=} originalIndex
+ * @property {'spotify' | 'youtube' | 'soundcloud'=} provider
  *
  * @typedef {Record<string, string[]>} NotesByTrack
  *
@@ -68,9 +76,6 @@ const AUTO_BACKUP_KEY = 'sta:v6:auto-backup';
 const VALID_PROVIDERS = new Set(['spotify', 'youtube', 'soundcloud']);
 const RECENT_FALLBACK_TITLE = 'Untitled playlist';
 const RECENT_DEFAULT_MAX = 8;
-const TAG_ALLOWED_RE = /^[a-z0-9][a-z0-9\s\-_]*$/;
-const TAG_MAX_LENGTH = 24;
-const TAG_MAX_PER_TRACK = 32;
 const FONT_PREF_DEFAULT = 'default';
 const FONT_PREF_VALUES = new Set(['default', 'system', 'dyslexic']);
 
@@ -82,6 +87,7 @@ const EMPTY_META = Object.freeze({
   hasMore: false,
   sourceUrl: null,
   debug: null,
+  total: null,
 });
 
 /** @returns {PersistedState | null} */
@@ -497,6 +503,26 @@ function sanitizeTracks(list) {
     if (Number.isFinite(duration) && duration > 0) {
       record.durationMs = Math.round(duration);
     }
+    const album = safeString(/** @type {any} */(t).album);
+    if (album) {
+      record.album = album;
+    }
+    const dateAddedTs = coerceTimestamp(/** @type {any} */(t).dateAdded ?? /** @type {any} */(t).addedAt);
+    if (dateAddedTs != null) {
+      record.dateAdded = new Date(dateAddedTs).toISOString();
+    }
+    const importedAtTs = coerceTimestamp(/** @type {any} */(t).importedAt);
+    if (importedAtTs != null) {
+      record.importedAt = new Date(importedAtTs).toISOString();
+    }
+    const originalIndex = Number(/** @type {any} */(t).originalIndex);
+    if (Number.isFinite(originalIndex) && originalIndex >= 0) {
+      record.originalIndex = Math.round(originalIndex);
+    }
+    const provider = canonicalProvider(/** @type {any} */(t).provider);
+    if (provider) {
+      record.provider = provider;
+    }
     const cleanedTags = normalizeTagsArray(/** @type {any} */(t).tags);
     if (cleanedTags.length > 0) {
       record.tags = cleanedTags;
@@ -771,6 +797,10 @@ function sanitizeImportMeta(meta) {
     hasMore: Boolean(m.hasMore) || Boolean(cursor),
     sourceUrl: safeString(m.sourceUrl),
     debug: sanitizeDebug(m.debug),
+    total:
+      typeof m.total === 'number' && Number.isFinite(m.total)
+        ? Math.max(0, Math.trunc(m.total))
+        : null,
   };
 }
 
@@ -836,10 +866,10 @@ function normalizeTagsArray(maybeTags) {
   const seen = new Set();
   maybeTags.forEach((tag) => {
     const normalized = normalizeTagValue(tag);
-    if (!normalized || normalized.length > TAG_MAX_LENGTH) return;
+    if (!normalized || normalized.length > MAX_TAG_LENGTH) return;
     if (!TAG_ALLOWED_RE.test(normalized)) return;
     if (seen.has(normalized)) return;
-    if (out.length >= TAG_MAX_PER_TRACK) return;
+    if (out.length >= MAX_TAGS_PER_TRACK) return;
     seen.add(normalized);
     out.push(normalized);
   });

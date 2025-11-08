@@ -5,7 +5,9 @@ import detectProvider from './detectProvider';
 export async function importPlaylist(url) {
   const provider = detectProvider(url);
   if (!provider) {
-    const err = new Error('UNSUPPORTED_OR_INVALID_URL');
+    const err = /** @type {Error & { code?: string }} */ (
+      new Error('UNSUPPORTED_OR_INVALID_URL')
+    );
     err.code = 'UNSUPPORTED_OR_INVALID_URL';
     throw err;
   }

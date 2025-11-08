@@ -8,17 +8,22 @@ const originalClipboard = globalThis.navigator?.clipboard;
 describe('RecoveryModal', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    Object.assign(globalThis.navigator, {
-      clipboard: {
-        writeText: vi.fn().mockResolvedValue(undefined),
-      },
+    const clipboardMock = {
+      writeText: vi.fn().mockResolvedValue(undefined),
+    };
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      writable: true,
+      value: clipboardMock,
     });
   });
 
   afterEach(() => {
-    if (originalClipboard) {
-      globalThis.navigator.clipboard = originalClipboard;
-    }
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      writable: true,
+      value: originalClipboard,
+    });
   });
 
   it('renders code and handles acknowledge flow', async () => {
@@ -30,6 +35,7 @@ describe('RecoveryModal', () => {
         code="AAAAA-BBBBB-CCCCC-DDDDD"
         onAcknowledge={onAck}
         onCopy={onCopy}
+        onDownload={vi.fn()}
       />,
     );
 

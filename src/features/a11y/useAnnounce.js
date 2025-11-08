@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 export default function useAnnounce(options) {
   const { debounceMs = 60 } = options || {}
   const [message, setMessage] = useState('')
-  const timerRef = useRef()
+  const timerRef = useRef(/** @type {number | undefined} */ (undefined))
 
   const clearTimer = useCallback(() => {
     if (timerRef.current != null) {

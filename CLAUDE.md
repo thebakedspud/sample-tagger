@@ -13,7 +13,7 @@ Key capabilities:
 - Per-track notes with inline undo (10-minute window)
 - Tag management with debounced sync (350ms)
 - Multi-device sync via anonymous device IDs and recovery codes
-- localStorage persistence (versioned schema v5) with auto-migration
+- localStorage persistence (versioned schema v6) with auto-migration
 - Accessibility-first: ARIA live regions, keyboard shortcuts, focus management
 
 ---
@@ -52,15 +52,25 @@ npx vitest watch src/components/__tests__/RestoreDialog.test.jsx
 
 ## Architecture Overview
 
-### Monolithic App Component Pattern
+### App Component Structure
 
-The core `src/App.jsx` (~1,850 lines) is intentionally monolithic, managing all application state:
-- Playlist imports (tracks, metadata, pagination cursors)
-- Notes and tags (notesByTrack, tagsByTrack maps)
-- Recent playlists, undo history, device context
-- Screen routing (landing → playlist) without URL-based routing
+The app is split into two layers:
+1. **Outer `App`**: Bootstraps storage state, computes initial playlist state, provides context
+2. **Inner `AppInner`**: Consumes context, manages UI state (screen, import, etc.)
 
-**Rationale:** Single source of truth makes complex state interactions explicit; easier to trace data flows; avoids prop drilling through deep component trees.
+**Playlist State Management:**
+- Centralized in `PlaylistStateProvider` (React Context + useReducer)
+- Pure reducer (`playlistReducer`) handles all state transitions
+- Narrow selector hooks prevent unnecessary re-renders
+- Refs (notesByTrack, tagsByTrack, tracksRef) retained for async operations (deferred to Commit 7)
+
+**Other State:**
+- Import state (URL, error, metadata) - local state in AppInner
+- Screen routing (landing → playlist) - local state in AppInner
+- Device/recovery flows - managed via useDeviceRecovery hook
+- Recent playlists - local state + persistence
+
+**Rationale:** Context provider centralizes playlist state, enables testing in isolation, and prepares for extracting effects to provider in Commit 7.
 
 ### Feature-Module Organization
 
@@ -69,6 +79,8 @@ Code is organized by domain, not by file type:
 ```
 src/features/
 ├── a11y/          # Accessibility (useAnnounce hook, LiveRegion)
+├── account/       # Device recovery & identity management (useDeviceRecovery hook)
+├── filter/        # Filtering utilities
 ├── import/        # Import orchestration + adapters
 ├── playlist/      # Playlist UI (PlaylistView, TrackCard)
 ├── recent/        # Recent playlists management
@@ -93,18 +105,18 @@ useImportPlaylist() → adapter registry lookup (ADAPTER_REGISTRY)
   ↓
 AdapterA.importPlaylist() → { provider, tracks[], meta, pageInfo }
   ↓
-buildTracks() → normalizes to { id, title, artist, notes[], tags[] }
+usePlaylistImportFlow (internal: buildTracks/buildMeta) → normalizes to { id, title, artist, notes[], tags[] }
   ↓
-applyImportResult() → attaches notesByTrack, tagsByTrack, routes to playlist screen
+App.jsx applyImportResult() → attaches notesByTrack, tagsByTrack, routes to playlist screen
   ↓
-saveAppState() → localStorage (LS_KEY: 'sta:v5')
+saveAppState() → localStorage (LS_KEY: 'sta:v6')
   ↓
 Tracks display with note/tag UI
 ```
 
 ### Adapter Pattern (Import Providers)
 
-**Contract Definition:** `src/features/import/types.js`
+**Contract Definition:** `src/features/import/adapters/types.js`
 
 ```javascript
 PlaylistAdapter(options) → Promise<PlaylistAdapterResult>
@@ -166,14 +178,14 @@ All API routes are serverless functions deployed to Vercel:
 
 ## localStorage & Persistence
 
-### Versioned Storage Schema (v5)
+### Versioned Storage Schema (v6)
 
-**Key:** `sta:v5`
+**Key:** `sta:v6`
 
 **Shape:**
 ```javascript
 {
-  version: 5
+  version: 6
   theme: 'dark' | 'light'
   playlistTitle: string
   importedAt: ISO timestamp | null
@@ -186,7 +198,7 @@ All API routes are serverless functions deployed to Vercel:
 }
 ```
 
-**Migration System (v4 → v5):**
+**Migration System (v5 → v6):**
 1. On load, if old version detected, creates pending snapshot
 2. Bootstraps device, then runs async migration
 3. Fetches existing remote notes/tags from Supabase
@@ -283,11 +295,18 @@ focusById('track-note-btn-0')  // Uses requestAnimationFrame
 - **src/main.jsx** → Entry point (ThemeProvider wrapper)
 
 ### Features
-- **src/features/import/usePlaylistImportFlow.js** → Import orchestration hook
+- **src/features/playlist/PlaylistProvider.jsx** → Context provider for playlist state (wraps useReducer)
+- **src/features/playlist/usePlaylistContext.js** → Context hooks (usePlaylistDispatch, narrow selectors)
+- **src/features/playlist/playlistReducer.js** → Pure reducer for playlist state transitions
+- **src/features/playlist/actions.js** → Validated action creators
+- **src/features/playlist/helpers.js** → Pure helper functions (computeHasLocalNotes, validateTag, etc.)
+- **src/features/import/usePlaylistImportController.js** → High-level import controller (initial import, recents, reimport, load-more)
+- **src/features/import/usePlaylistImportFlow.js** → Lower-level adapter flow (guards, request lifecycles)
 - **src/features/import/useImportPlaylist.js** → Adapter registry + provider detection
 - **src/features/import/adapters/** → Spotify/YouTube/SoundCloud adapters
 - **src/features/import/normalizeTrack.js** → Track normalization
-- **src/features/tags/tagSyncScheduler.js** → Debounced tag sync queue
+- **src/features/account/useDeviceRecovery.js** → Device identity & recovery management hook
+- **src/features/tags/tagSyncQueue.js** → Debounced tag sync queue (exports createTagSyncScheduler)
 - **src/features/undo/useInlineUndo.js** → Inline undo hook
 - **src/features/a11y/useAnnounce.js** → Accessibility announcements
 
@@ -327,7 +346,7 @@ focusById('track-note-btn-0')  // Uses requestAnimationFrame
 
 ## Testing Strategy
 
-### Test Organization (21 test files)
+### Test Organization (38 test files)
 ```
 src/__tests__/              → Integration tests
 src/features/**/__tests__/  → Feature-specific unit tests
@@ -339,7 +358,10 @@ api/**/__tests__/           → API endpoint tests
 - **src/App.tagging.test.jsx** → End-to-end tagging integration test
 - **src/features/import/__tests__/adapterContracts.test.js** → Validates all adapters follow contract
 - **src/features/import/__tests__/usePlaylistImportFlow.test.js** → Import flow state machine
+- **src/features/account/__tests__/useDeviceRecovery.test.js** → Device recovery hook behavior
 - **src/features/undo/__tests__/useInlineUndo.test.js** → Undo timer behavior
+- **src/features/playlist/__tests__/PlaylistProvider.test.jsx** → Provider context, remote sync, tag scheduler, error propagation
+- **src/features/playlist/__tests__/usePlaylistContext.test.jsx** → Hook error guards and correct value returns
 
 ### Testing Utilities
 - **src/test/testHelpers.js** → Shared test utilities
@@ -352,7 +374,7 @@ api/**/__tests__/           → API endpoint tests
 ### Adding a New Playlist Adapter
 
 1. Create adapter in `src/features/import/adapters/newAdapter.js`
-2. Follow the adapter contract in `src/features/import/types.js`
+2. Follow the adapter contract in `src/features/import/adapters/types.js`
 3. Return `createAdapterError(code, details)` for known errors
 4. Add to `ADAPTER_REGISTRY` in `src/features/import/useImportPlaylist.js`
 5. Update `detectProvider` in `src/features/import/detectProvider.js`

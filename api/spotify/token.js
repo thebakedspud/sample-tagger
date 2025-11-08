@@ -47,7 +47,8 @@ let inFlightToken = null;
 
 /**
  * Attach shared CORS headers.
- * @param {VercelResponse} res
+ * @param {string} origin - Origin header value. May be an empty string when the
+ *   request did not include an Origin header.
  */
 function buildCorsHeaders(origin) {
   const allowed = isOriginAllowed(origin);

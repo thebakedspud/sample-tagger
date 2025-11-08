@@ -15,6 +15,18 @@ import { extractErrorCode, CODES } from './adapters/types.js'
  */
 
 /**
+ * Public API returned by usePlaylistImportFlow.
+ * @typedef {Object} ImportFlowApi
+ * @property {ImportStatus} status
+ * @property {AdapterErrorCode | null} errorCode
+ * @property {boolean} loading
+ * @property {(url: string, options?: ImportInitialOptions) => Promise<ImportResult>} importInitial
+ * @property {(url: string, options?: ReimportOptions) => Promise<ImportResult>} reimport
+ * @property {(options?: LoadMoreOptions) => Promise<ImportResult>} loadMore
+ * @property {() => void} resetFlow
+ */
+
+/**
  * usePlaylistImportFlow
  *
  * Orchestrates the end-to-end import lifecycle:
@@ -119,6 +131,14 @@ function buildTracks(res, providerHint, startIndex = 0, existingIds) {
     if (track?.provider || provider) {
       normalizedTrack.provider = track?.provider ?? provider ?? undefined
     }
+    const album = ensureString(track?.album ?? '')
+    if (album) {
+      normalizedTrack.album = album
+    }
+    const dateAdded = ensureString(track?.dateAdded ?? '')
+    if (dateAdded) {
+      normalizedTrack.dateAdded = dateAdded
+    }
 
     mapped.push(normalizedTrack)
   })
@@ -160,9 +180,18 @@ function buildMeta(res, fallback = {}) {
     hasMore,
     sourceUrl: res?.sourceUrl ?? fallback.sourceUrl ?? '',
     debug: res?.debug ?? fallback.debug ?? null,
+    total:
+      typeof res?.total === 'number' && Number.isFinite(res.total)
+        ? res.total
+        : typeof fallback.total === 'number' && Number.isFinite(fallback.total)
+          ? fallback.total
+          : null,
   }
 }
 
+/**
+ * @returns {ImportFlowApi}
+ */
 export default function usePlaylistImportFlow() {
   const { importPlaylist, importNext, loading, reset: resetImportSession } = useImportPlaylist()
   const [status, setStatus] = useState(/** @type {ImportStatus} */ (ImportFlowStatus.IDLE))
@@ -197,7 +226,16 @@ export default function usePlaylistImportFlow() {
    * @param {ImportInitialOptions=} options
    * @returns {Promise<ImportResult>}
    */
-  const importInitial = useCallback(async (url, options = {}) => {
+  const importInitial = useCallback(
+    /**
+     * @param {string} url
+     * @param {ImportInitialOptions} [options]
+     * @returns {Promise<ImportResult>}
+     */
+    async (
+      url,
+      options = /** @type {ImportInitialOptions} */ ({}),
+    ) => {
     const trimmedUrl = typeof url === 'string' ? url.trim() : ''
     const requestId = beginRequest(ImportFlowStatus.IMPORTING)
     setErrorCode(null)
@@ -244,7 +282,9 @@ export default function usePlaylistImportFlow() {
       }
       return { ok: false, code, error: err }
     }
-  }, [beginRequest, finishRequest, importPlaylist])
+    },
+    [beginRequest, finishRequest, importPlaylist],
+  )
 
   /**
    * Re-imports the same playlist (refresh metadata/tracks).
@@ -252,7 +292,16 @@ export default function usePlaylistImportFlow() {
    * @param {ReimportOptions=} options
    * @returns {Promise<ImportResult>}
    */
-  const reimport = useCallback(async (url, options = {}) => {
+  const reimport = useCallback(
+    /**
+     * @param {string} url
+     * @param {ReimportOptions} [options]
+     * @returns {Promise<ImportResult>}
+     */
+    async (
+      url,
+      options = /** @type {ReimportOptions} */ ({}),
+    ) => {
     if (!url) return { ok: false, code: CODES.ERR_UNKNOWN }
     const trimmedUrl = String(url).trim()
     const requestId = beginRequest(ImportFlowStatus.REIMPORTING)
@@ -302,7 +351,9 @@ export default function usePlaylistImportFlow() {
       }
       return { ok: false, code, error: err }
     }
-  }, [beginRequest, finishRequest, importPlaylist])
+    },
+    [beginRequest, finishRequest, importPlaylist],
+  )
 
   /**
    * Loads the next page for the current import session.
@@ -310,12 +361,32 @@ export default function usePlaylistImportFlow() {
    * @param {LoadMoreOptions=} options
    * @returns {Promise<ImportResult>}
    */
-  const loadMore = useCallback(async (options = {}) => {
+  const loadMore = useCallback(
+    /**
+     * @param {LoadMoreOptions} [options]
+     * @returns {Promise<ImportResult>}
+     */
+    async (
+      options = /** @type {LoadMoreOptions} */ ({}),
+    ) => {
     const requestId = beginRequest(ImportFlowStatus.LOADING_MORE)
     setErrorCode(null)
 
     try {
-      const res = await importNext({ context: { importBusyKind: 'load-more' } })
+      const optsWithSource =
+        /** @type {LoadMoreOptions & { sourceUrl?: string }} */ (options)
+      const existingMetaInput =
+        /** @type {(import('./adapters/types.js').ImportMeta & { total?: number | null }) | undefined} */ (
+          optsWithSource.existingMeta
+        )
+      const existingMeta =
+        /** @type {import('./adapters/types.js').ImportMeta & { total?: number | null }} */ (
+          existingMetaInput ?? {}
+        )
+      const res = await importNext({
+        context: { importBusyKind: 'load-more' },
+        signal: optsWithSource.signal,
+      })
 
       if (requestId !== requestIdRef.current) {
         // Another request started after this one; mark as stale so callers can ignore without side effects.
@@ -327,30 +398,45 @@ export default function usePlaylistImportFlow() {
 
       if (!res) {
         // Terminal page: no more data. Preserve existing meta but clear cursor/hasMore.
+        const terminalMeta = {
+          provider:
+            /** @type {import('./adapters/types.js').PlaylistProvider | null} */ (
+              existingMeta.provider ?? optsWithSource.providerHint ?? null
+            ),
+          playlistId: existingMeta.playlistId ?? null,
+          snapshotId: existingMeta.snapshotId ?? null,
+          cursor: null,
+          hasMore: false,
+          sourceUrl: existingMeta.sourceUrl ?? optsWithSource.sourceUrl ?? '',
+          debug: existingMeta.debug ?? null,
+          total:
+            typeof existingMeta.total === 'number' && Number.isFinite(existingMeta.total)
+              ? existingMeta.total
+              : null,
+        }
         return {
           ok: true,
           data: {
             tracks: [],
-            meta: {
-              ...options.existingMeta,
-              cursor: null,
-              hasMore: false,
-              sourceUrl: options.existingMeta?.sourceUrl ?? options.sourceUrl ?? '',
-            },
+            meta: terminalMeta,
           },
         }
       }
 
-      const providerHint = options.providerHint ?? options.existingMeta?.provider ?? null
-      const startIndex = options.startIndex ?? 0
-      const existingIds = options.existingIds ? new Set(options.existingIds) : undefined
+      const providerHint = optsWithSource.providerHint ?? existingMeta.provider ?? null
+      const startIndex = optsWithSource.startIndex ?? 0
+      const existingIds = optsWithSource.existingIds ? new Set(optsWithSource.existingIds) : undefined
       const tracks = buildTracks(res, providerHint, startIndex, existingIds)
       const meta = buildMeta(res, {
         providerHint,
-        playlistId: options.existingMeta?.playlistId ?? null,
-        snapshotId: options.existingMeta?.snapshotId ?? null,
-        sourceUrl: options.existingMeta?.sourceUrl ?? options.sourceUrl ?? '',
-        debug: options.existingMeta?.debug ?? null,
+        playlistId: existingMeta.playlistId ?? null,
+        snapshotId: existingMeta.snapshotId ?? null,
+        sourceUrl: existingMeta.sourceUrl ?? optsWithSource.sourceUrl ?? '',
+        debug: existingMeta.debug ?? null,
+        total:
+          typeof existingMeta.total === 'number' && Number.isFinite(existingMeta.total)
+            ? existingMeta.total
+            : null,
       })
 
       return {
@@ -372,7 +458,9 @@ export default function usePlaylistImportFlow() {
       }
       return { ok: false, code, error: err }
     }
-  }, [beginRequest, finishRequest, importNext])
+    },
+    [beginRequest, finishRequest, importNext],
+  )
 
   const resetFlow = useCallback(() => {
     // Cancels in-flight work by bumping the requestId and resets local state.

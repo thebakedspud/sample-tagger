@@ -21,6 +21,10 @@
  * @property {number} [durationMs]
  * @property {string} [thumbnailUrl]
  * @property {any[]} [notes]
+ * @property {string} [album]
+ * @property {string} [dateAdded]
+ * @property {string} [importedAt]
+ * @property {number} [originalIndex]
  */
 
 /**
@@ -170,6 +174,7 @@ export function isKnownAdapterErrorObject(e) {
  * @property {boolean} hasMore
  * @property {string} sourceUrl
  * @property {any | null} [debug]
+ * @property {number | null} total
  */
 
 /**
@@ -183,7 +188,7 @@ export function isKnownAdapterErrorObject(e) {
  * Options for re-importing an existing playlist (refresh metadata/tracks).
  * @typedef {Object} ReimportOptions
  * @property {string=} providerHint
- * @property {{provider?: string, playlistId?: string|null, snapshotId?: string|null, sourceUrl?: string, debug?: any}=} existingMeta
+ * @property {{provider?: string, playlistId?: string|null, snapshotId?: string|null, sourceUrl?: string, cursor?: string|null, hasMore?: boolean, debug?: any, total?: number|null}=} existingMeta
  * @property {string=} fallbackTitle
  */
 
@@ -191,9 +196,11 @@ export function isKnownAdapterErrorObject(e) {
  * Options for loading more tracks (pagination).
  * @typedef {Object} LoadMoreOptions
  * @property {string=} providerHint
- * @property {{provider?: string, playlistId?: string|null, snapshotId?: string|null, sourceUrl?: string, debug?: any}=} existingMeta
+ * @property {{provider?: string, playlistId?: string|null, snapshotId?: string|null, sourceUrl?: string, cursor?: string|null, hasMore?: boolean, debug?: any, total?: number|null}=} existingMeta
  * @property {number=} startIndex           Starting index for fallback IDs of the next page (1-based internally).
  * @property {Iterable<string>=} existingIds Set/array of IDs to skip when appending (client-side dedupe).
+ * @property {string=} sourceUrl            Canonical URL for the currently imported playlist.
+ * @property {AbortSignal=} signal           Optional abort signal for cancelling the request.
  */
 
 /**

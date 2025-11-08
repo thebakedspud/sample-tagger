@@ -2,15 +2,27 @@
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,
+    "baseUrl": ".",
     "jsx": "react-jsx",
     "module": "esnext",
     "moduleResolution": "bundler",
     "target": "esnext",
-    "types": ["vite/client"]
+    "skipLibCheck": true,
+    "types": ["vite/client", "node"],
+    "typeRoots": ["./types", "./node_modules/@types", "./node_modules/vitest"],
+    "paths": {
+      "prop-types": ["types/prop-types/index.d.ts"],
+      "prop-types/*": ["types/prop-types/index.d.ts"],
+      "prop-types/factoryWithTypeCheckers": ["types/prop-types/factoryWithTypeCheckers.d.ts"],
+      "prop-types/factoryWithTypeCheckers.js": ["types/prop-types/factoryWithTypeCheckers.d.ts"]
+    }
   },
   "include": [
     "src/**/*",
     "api/**/*"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules"
   ]
 }
-

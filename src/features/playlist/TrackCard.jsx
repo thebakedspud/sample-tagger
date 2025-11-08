@@ -2,10 +2,23 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import NoteList from './NoteList.jsx'
 import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
+import ErrorMessage from '../../components/ErrorMessage.jsx'
 
 /**
  * @param {object} props
- * @param {{ id: string|number, title: string, artist: string, notes: string[], tags?: string[] }} props.track
+ * @param {{
+ *   id: string|number,
+ *   title: string,
+ *   artist: string,
+ *   notes: string[],
+ *   tags?: string[],
+ *   dateAdded?: string,
+ *   thumbnailUrl?: string,
+ *   sourceUrl?: string,
+ *   durationMs?: number,
+ *   album?: string,
+ *   provider?: string
+ * }} props.track
  * @param {number} props.index
  * @param {Map<string, any>} props.pending
  * @param {(id: string) => boolean} props.isPending
@@ -21,6 +34,7 @@ import TagInput from '../tags/TagInput.jsx'
  * @param {string[]} props.customTags
  * @param {(pendingId: string) => void} props.onUndo
  * @param {(pendingId: string) => void} props.onDismissUndo
+ * @param {(tag: string) => void} [props.onFilterTag]
  */
 export default function TrackCard({
   track,
@@ -39,6 +53,7 @@ export default function TrackCard({
   customTags = [],
   onUndo,
   onDismissUndo,
+  onFilterTag,
 }) {
   const noteArr = Array.isArray(track.notes) ? track.notes : []
   const tags = useMemo(
@@ -67,6 +82,23 @@ export default function TrackCard({
         - {noteArr.length} note{noteArr.length > 1 ? 's' : ''}
       </span>
     ) : null
+
+  const dateAdded = useMemo(() => {
+    const raw = typeof track?.dateAdded === 'string' ? track.dateAdded.trim() : ''
+    if (!raw) return null
+    const parsed = Date.parse(raw)
+    if (Number.isNaN(parsed)) return null
+    const asDate = new Date(parsed)
+    const formatter = new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    })
+    return {
+      iso: asDate.toISOString(),
+      label: formatter.format(asDate),
+    }
+  }, [track?.dateAdded])
 
   const fallbackInitial =
     typeof track.title === 'string' && track.title.trim()
@@ -194,12 +226,15 @@ export default function TrackCard({
   }
 
   const handleFilterTag = (value) => {
-    console.log('filter', value)
+    if (typeof onFilterTag === 'function' && typeof value === 'string') {
+      onFilterTag(value)
+    }
   }
 
   return (
     <li
       id={`track-${track.id}`}
+      data-track-id={track.id}
       tabIndex={-1}
       style={{
         border: '1px solid var(--border)',
@@ -272,6 +307,13 @@ export default function TrackCard({
         </div>
       </div>
 
+      {dateAdded && (
+        <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: '0.85rem' }}>
+          <span className="sr-only">Date added:</span>
+          <time dateTime={dateAdded.iso}>Added {dateAdded.label}</time>
+        </p>
+      )}
+
       <div
         className="tag-row"
         role="group"
@@ -342,11 +384,9 @@ export default function TrackCard({
               color: 'var(--fg)',
             }}
           />
-          {error && (
-            <div id={`note-error-${track.id}`} className="error-text">
-              {error}
-            </div>
-          )}
+          <ErrorMessage id={`note-error-${track.id}`}>
+            {error}
+          </ErrorMessage>
           <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
             <button type="button" className="btn primary" onClick={() => onSaveNote(track.id)}>
               Save note

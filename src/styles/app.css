@@ -4,6 +4,12 @@
   margin-top: 4px;
 }
 
+.error-message {
+  margin-top: 6px;
+  color: #d9534f;
+  font-size: 0.9em;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -156,7 +162,9 @@
 .recent-card__button:focus-visible {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06));
   transform: translateY(-1px);
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px rgba(90, 180, 255, 0.15);
 }
 
 .recent-card__media {
@@ -412,8 +420,14 @@
 
 .app-title {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+#landing-title {
+  font-size: 1.25rem;
   font-weight: 600;
+  color: var(--fg);
 }
 
 .app .btn.destructive {

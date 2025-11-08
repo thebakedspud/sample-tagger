@@ -25,4 +25,24 @@ describe('normalizeTrack', () => {
     expect(track.durationMs).toBe(1234);
     expect(track.thumbnailUrl).toBe('thumb.jpg');
   });
+
+  it('sanitizes album and drops empty values', () => {
+    const trackWithAlbum = normalizeTrack({ title: 'Song', artist: 'Artist', album: '  Album  ' }, 3, 'spotify');
+    expect(trackWithAlbum.album).toBe('Album');
+
+    const trackWithoutAlbum = normalizeTrack({ title: 'Song', artist: 'Artist', album: '   ' }, 4, 'spotify');
+    expect(trackWithoutAlbum.album).toBeUndefined();
+  });
+
+  it('normalizes dateAdded and removes invalid timestamps', () => {
+    const fromNumber = normalizeTrack({ title: 'Song', artist: 'Artist', dateAdded: Date.UTC(2024, 0, 1) }, 0, 'spotify');
+    expect(fromNumber.dateAdded).toBe(new Date(Date.UTC(2024, 0, 1)).toISOString());
+
+    const fromString = normalizeTrack({ title: 'Song', artist: 'Artist', addedAt: '2024-02-02T05:06:07Z' }, 1, 'spotify');
+    expect(fromString.dateAdded).toBe('2024-02-02T05:06:07.000Z');
+    expect(fromString.addedAt).toBeUndefined();
+
+    const invalidDate = normalizeTrack({ title: 'Song', artist: 'Artist', dateAdded: 'not-a-date' }, 2, 'spotify');
+    expect(invalidDate.dateAdded).toBeUndefined();
+  });
 });

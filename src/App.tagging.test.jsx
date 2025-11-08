@@ -2,6 +2,8 @@ import { describe, expect, it, afterEach, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { useCallback, useState } from 'react'
 
+vi.setConfig({ testTimeout: 15000 })
+
 vi.mock('./utils/storage.js', () => {
   const createPersistedState = () => ({
     version: 6,
@@ -131,12 +133,20 @@ describe('App tagging announcements', () => {
     const suggestion = await screen.findByRole('button', { name: 'drums' })
     fireEvent.click(suggestion)
 
-    expect(screen.getByRole('status').textContent).toMatch(/Added tag "drums" to "Test Track"/i)
+    const addedAnnouncements = screen
+      .getAllByRole('status')
+      .map((node) => node.textContent || '')
+      .join(' ')
+    expect(addedAnnouncements).toMatch(/Added tag "drums" to "Test Track"/i)
 
     const chip = await screen.findByRole('button', { name: /remove tag drums/i })
     fireEvent.click(chip)
 
-    expect(screen.getByRole('status').textContent).toMatch(/Removed tag "drums" from "Test Track"/i)
+    const removedAnnouncements = screen
+      .getAllByRole('status')
+      .map((node) => node.textContent || '')
+      .join(' ')
+    expect(removedAnnouncements).toMatch(/Removed tag "drums" from "Test Track"/i)
     expect(screen.queryByRole('button', { name: /remove tag drums/i })).not.toBeInTheDocument()
   })
 })

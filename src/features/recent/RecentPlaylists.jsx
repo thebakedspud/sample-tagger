@@ -1,4 +1,5 @@
 import { useMemo, useRef } from 'react'
+import ErrorMessage from '../../components/ErrorMessage.jsx'
 
 const PROVIDER_LABELS = {
   spotify: 'Spotify',
@@ -170,11 +171,9 @@ export default function RecentPlaylists({
                   ) : null}
                 </div>
               </button>
-              {error ? (
-                <p id={`recent-error-${item.id}`} className="recent-card__error">
-                  {error}
-                </p>
-              ) : null}
+              <ErrorMessage id={`recent-error-${item.id}`} className="recent-card__error">
+                {error}
+              </ErrorMessage>
             </li>
           )
         })}

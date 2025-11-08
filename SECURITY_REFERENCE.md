@@ -1,6 +1,6 @@
 # Security Policy Reference
 
-Playlist Notes is a React + Vite prototype deployed on Vercel. It imports public playlists, stores notes locally, and exposes two anonymous endpoints: `/api/anon/bootstrap` issues device/recovery codes, and `/api/anon/restore` redeems them. There is still no full user account system or database, but we now handle short-lived secrets for these flows. This document captures the guardrails we follow today and the improvements we plan as the app grows. Review it before shipping changes to authentication, data access, or infrastructure.
+Playlist Notes is a React + Vite prototype deployed on Vercel. It imports public playlists, stores notes locally and syncs them via Supabase, and exposes anonymous endpoints: `/api/anon/bootstrap` issues device/recovery codes, `/api/anon/restore` redeems them, and `/api/db/notes` syncs notes/tags to Supabase (see `api/db/notes.js` and `supabase/sql/phase1_anon_schema.sql` for schema). There is still no full user account system, but we now handle short-lived secrets for device identity and recovery flows. This document captures the guardrails we follow today and the improvements we plan as the app grows. Review it before shipping changes to authentication, data access, or infrastructure.
 
 ---
 

@@ -2,21 +2,35 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import FontSettings from '../FontSettings.jsx'
 
+/** @implements {Storage} */
 class MemoryStorage {
   constructor() {
+    /** @type {Map<string, string>} */
     this.map = new Map()
   }
 
+  get length() {
+    return this.map.size
+  }
+
+  key(index) {
+    if (typeof index !== 'number' || index < 0 || index >= this.map.size) {
+      return null
+    }
+    return Array.from(this.map.keys())[index] ?? null
+  }
+
   getItem(key) {
-    return this.map.has(key) ? this.map.get(key) : null
+    const normalizedKey = String(key)
+    return this.map.has(normalizedKey) ? this.map.get(normalizedKey) ?? null : null
   }
 
   setItem(key, value) {
-    this.map.set(key, String(value))
+    this.map.set(String(key), String(value))
   }
 
   removeItem(key) {
-    this.map.delete(key)
+    this.map.delete(String(key))
   }
 
   clear() {
@@ -26,7 +40,7 @@ class MemoryStorage {
 
 describe('FontSettings', () => {
   beforeEach(() => {
-    globalThis.localStorage = new MemoryStorage()
+    globalThis.localStorage = /** @type {Storage} */ (new MemoryStorage())
     document.documentElement.removeAttribute('data-font')
   })
 
