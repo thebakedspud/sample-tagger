@@ -11,6 +11,10 @@ vi.mock('../../../lib/apiClient.js', () => ({
   apiFetch: vi.fn()
 }))
 
+vi.mock('../../../lib/deviceState.js', () => ({
+  notifyDeviceContextStale: vi.fn()
+}))
+
 vi.mock('../../../utils/notesTagsData.js', async (importOriginal) => {
   /** @type {any} */
   const actual = await importOriginal()
@@ -28,10 +32,12 @@ vi.mock('../../tags/tagSyncQueue.js', () => ({
 import { apiFetch } from '../../../lib/apiClient.js'
 import { groupRemoteNotes } from '../../../utils/notesTagsData.js'
 import { createTagSyncScheduler } from '../../tags/tagSyncQueue.js'
+import { notifyDeviceContextStale } from '../../../lib/deviceState.js'
 
 const mockedApiFetch = vi.mocked(apiFetch)
 const mockedGroupRemoteNotes = vi.mocked(groupRemoteNotes)
 const mockedCreateTagSyncScheduler = vi.mocked(createTagSyncScheduler)
+const mockedNotifyDeviceContextStale = vi.mocked(notifyDeviceContextStale)
 
 describe('PlaylistProvider', () => {
   beforeEach(() => {
@@ -259,6 +265,31 @@ describe('PlaylistProvider', () => {
       })
 
       consoleError.mockRestore()
+    })
+
+    it('notifies device context stale errors for auth failures', async () => {
+      const authResponse = /** @type {Response} */ (/** @type {unknown} */ ({
+        ok: false,
+        status: 401,
+        json: vi.fn().mockResolvedValue({ error: 'unauthorized' })
+      }))
+      mockedApiFetch.mockResolvedValue(authResponse)
+
+      render(
+        <PlaylistStateProvider 
+          initialState={initialPlaylistState} 
+          anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
+        >
+          <div>Test</div>
+        </PlaylistStateProvider>
+      )
+
+      await waitFor(() => {
+        expect(mockedNotifyDeviceContextStale).toHaveBeenCalledWith({
+          source: 'notes-sync',
+          status: 401
+        })
+      })
     })
   })
 

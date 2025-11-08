@@ -14,6 +14,8 @@ import {
   clearRecoveryAcknowledgement,
   clearDeviceContext,
   ensureRecoveryCsrfToken,
+  hasDeviceContext,
+  subscribeDeviceContextStale,
 } from '../../lib/deviceState.js'
 
 /**
@@ -360,7 +362,16 @@ export default function useDeviceRecovery({ announce, onAppReset }) {
   // Bootstrap device on mount
   useEffect(() => {
     if (typeof window === 'undefined') return
+    if (hasDeviceContext()) return
     bootstrapDevice()
+  }, [bootstrapDevice])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const unsubscribe = subscribeDeviceContextStale(() => {
+      bootstrapDevice()
+    })
+    return unsubscribe
   }, [bootstrapDevice])
 
   // Initialize CSRF token on mount

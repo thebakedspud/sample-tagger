@@ -22,6 +22,8 @@ vi.mock('../../../lib/deviceState.js', () => ({
   ensureRecoveryCsrfToken: vi.fn(() => 'csrf-token-123'),
   clearRecoveryState: vi.fn(),
   clearDeviceContext: vi.fn(),
+  hasDeviceContext: vi.fn(() => false),
+  subscribeDeviceContextStale: vi.fn(() => () => {}),
 }))
 
 // Import mocked modules
@@ -65,6 +67,8 @@ describe('useDeviceRecovery', () => {
     deviceStateMocks.hasAcknowledgedRecovery.mockReturnValue(false)
     // @ts-ignore - Mock function type
     deviceStateMocks.ensureRecoveryCsrfToken.mockReturnValue('csrf-token-123')
+    deviceStateMocks.hasDeviceContext.mockReturnValue(false)
+    deviceStateMocks.subscribeDeviceContextStale.mockReturnValue(() => {})
 
     // Default apiFetch mock (suppresses bootstrap calls)
     // @ts-ignore - Mock function type
@@ -80,11 +84,13 @@ describe('useDeviceRecovery', () => {
     resetMocks()
   })
 
-  async function renderDeviceRecovery(options = {}) {
+  async function renderDeviceRecovery(options = {}, { waitForBootstrap = true } = {}) {
     const rendered = renderHook(() =>
       useDeviceRecovery({ announce: announceMock, onAppReset: onAppResetMock, ...options })
     )
-    await waitFor(() => expect(apiFetchMock).toHaveBeenCalled())
+    if (waitForBootstrap) {
+      await waitFor(() => expect(apiFetchMock).toHaveBeenCalled())
+    }
     return rendered
   }
 
@@ -117,6 +123,37 @@ describe('useDeviceRecovery', () => {
       expect(result.current.recoveryCode).toBe('AAAA-BBBB-CCCC-DDDD')
       expect(result.current.showRecoveryModal).toBe(true)
       expect(result.current.bootstrapError).toBe(null)
+    })
+
+    it('skips automatic bootstrap when device context already exists', async () => {
+      deviceStateMocks.getDeviceId.mockReturnValue('device-existing')
+      deviceStateMocks.getAnonId.mockReturnValue('anon-existing')
+      deviceStateMocks.hasDeviceContext.mockReturnValue(true)
+
+      await renderDeviceRecovery({}, { waitForBootstrap: false })
+
+      expect(apiFetchMock).not.toHaveBeenCalled()
+    })
+
+    it('re-runs bootstrap when a stale-device event fires', async () => {
+      const listeners = []
+      deviceStateMocks.getDeviceId.mockReturnValue('device-existing')
+      deviceStateMocks.getAnonId.mockReturnValue('anon-existing')
+      deviceStateMocks.hasDeviceContext.mockReturnValue(true)
+      deviceStateMocks.subscribeDeviceContextStale.mockImplementation((cb) => {
+        listeners.push(cb)
+        return () => {}
+      })
+
+      await renderDeviceRecovery({}, { waitForBootstrap: false })
+      expect(listeners).toHaveLength(1)
+
+      // Dispatch synthetic stale event
+      await act(async () => {
+        await listeners[0]?.()
+      })
+
+      await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
     })
 
     it('handles 404 error and retries once after clearing context', async () => {

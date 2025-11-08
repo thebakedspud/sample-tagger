@@ -8,6 +8,7 @@ import { apiFetch } from '../../lib/apiClient.js'
 import { groupRemoteNotes } from '../../utils/notesTagsData.js'
 import { createTagSyncScheduler } from '../tags/tagSyncQueue.js'
 import { PlaylistStateContext, PlaylistDispatchContext, PlaylistSyncContext } from './contexts.js'
+import { notifyDeviceContextStale } from '../../lib/deviceState.js'
 
 /**
  * Provider component that manages playlist state via reducer
@@ -32,6 +33,9 @@ export function PlaylistStateProvider({ initialState, anonContext, children }) {
         const payload = await response.json().catch(() => ({}))
         if (cancelled) return
         if (!response.ok) {
+          if (response.status === 401 || response.status === 403 || response.status === 404) {
+            notifyDeviceContextStale({ source: 'notes-sync', status: response.status })
+          }
           console.error('[notes sync] failed', payload)
           return
         }
@@ -116,4 +120,3 @@ export function PlaylistStateProvider({ initialState, anonContext, children }) {
     </PlaylistStateContext.Provider>
   )
 }
-
