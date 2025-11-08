@@ -17,6 +17,16 @@
   padding: 10px 14px;          /* slightly larger than 8x12 */
 }
 
+.app input,
+.app textarea,
+.app select {
+  font: inherit;
+  font-family: inherit;
+  font-size: max(1rem, 16px);  /* avoid iOS focus zoom on small fields */
+  line-height: 1.4;
+  color: var(--fg);
+}
+
 
 
 .app .card {
