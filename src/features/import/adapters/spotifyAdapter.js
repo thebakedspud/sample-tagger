@@ -17,6 +17,7 @@ const TRACK_FIELDS =
 const PAGE_SIZE = 100;
 const TOKEN_REFRESH_BUFFER_MS = 30_000;
 const CANONICAL_BASE_URL = 'https://open.spotify.com/playlist/';
+const IDEAL_TRACK_THUMB_WIDTH = 80; // ~2x the 40px display size for HiDPI clarity
 
 /**
  * @typedef {{ value: string, tokenType: string, expiresAt: number }} TokenMemo
@@ -170,6 +171,48 @@ function mapSpotifyError(stage, err) {
 function invalidResponse(stage, details = {}) {
   throw createAdapterError(CODES.ERR_INVALID_RESPONSE, { stage, ...details });
 }
+
+/**
+ * Spotify returns album images ordered from largest to smallest. We prefer the smallest thumbnail
+ * that still exceeds our desired display width to avoid downloading unnecessary bytes.
+ * @param {Array<{ url?: string, width?: number, height?: number }>} albumImages
+ * @param {string | null} fallbackUrl
+ * @returns {string | null}
+ */
+function selectAlbumThumb(albumImages, fallbackUrl) {
+  if (!Array.isArray(albumImages) || !albumImages.length) return fallbackUrl ?? null;
+
+  const normalized = albumImages
+    .map((img) => {
+      if (!img || typeof img.url !== 'string') return null;
+      const width =
+        typeof img.width === 'number'
+          ? img.width
+          : typeof img.height === 'number'
+            ? img.height
+            : null;
+      return { url: img.url, width };
+    })
+    .filter(Boolean);
+
+  if (!normalized.length) return fallbackUrl ?? null;
+
+  const withWidth = normalized.filter((img) => typeof img.width === 'number');
+  if (withWidth.length) {
+    const sorted = withWidth.slice().sort((a, b) => a.width - b.width);
+    const candidate =
+      sorted.find((img) => (img.width ?? Infinity) >= IDEAL_TRACK_THUMB_WIDTH) ??
+      sorted[sorted.length - 1];
+    return candidate.url;
+  }
+
+  // Width metadata missing: Spotify orders images largest -> smallest, so last is smallest.
+  return normalized[normalized.length - 1].url;
+}
+
+export const __private = {
+  selectAlbumThumb,
+};
 
 /**
  * @param {TokenMemo | null} memo
@@ -386,9 +429,7 @@ function toNormalizedTracks(rawItems, meta) {
       .map((artist) => (artist && typeof artist.name === 'string' ? artist.name.trim() : ''))
       .filter(Boolean)
       .join(', ');
-    const albumImages = track.album?.images;
-    const albumThumb =
-      Array.isArray(albumImages) && albumImages[0]?.url ? albumImages[0].url : fallbackThumb;
+    const albumThumb = selectAlbumThumb(track.album?.images, fallbackThumb);
     const albumName =
       track?.album && typeof track.album.name === 'string' ? track.album.name : undefined;
     const addedAt = typeof item?.added_at === 'string' ? item.added_at : undefined;
