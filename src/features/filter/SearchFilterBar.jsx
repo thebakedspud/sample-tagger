@@ -1,7 +1,7 @@
 // src/features/filter/SearchFilterBar.jsx
 // UI for search, scope selection, sort menu, tag filters, and clear action.
 
-import { useMemo, useCallback, useRef } from 'react';
+import { memo, useMemo, useCallback, useRef } from 'react';
 import { focusElement } from '../../utils/focusById.js';
 import {
   SEARCH_SCOPE,
@@ -55,7 +55,7 @@ const SORT_OPTIONS = [
  * @param {number} props.totalCount
  * @param {import('react').RefObject<HTMLInputElement>} props.searchInputRef
  */
-export default function SearchFilterBar({
+function SearchFilterBar({
   query,
   onQueryChange,
   scope,
@@ -380,3 +380,5 @@ export default function SearchFilterBar({
     </section>
   );
 }
+
+export default memo(SearchFilterBar);

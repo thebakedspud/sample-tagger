@@ -16,6 +16,8 @@ const DEFAULT_BACKGROUND_SYNC = Object.freeze({
   snapshotId: null,
 })
 
+const EMPTY_PLACEHOLDERS = Object.freeze([])
+
 /**
  * @param {object} props
  * @param {string} props.playlistTitle
@@ -116,6 +118,30 @@ export default function PlaylistView({
     }
     return Array.from(bucket).sort((a, b) => a.localeCompare(b))
   }, [stockTags, customTags])
+
+  const pendingByTrack = useMemo(() => {
+    if (!(pending instanceof Map)) return new Map()
+    const map = new Map()
+    for (const [pid, meta] of pending.entries()) {
+      if (!meta || meta.trackId == null) continue
+      const entry = {
+        pid,
+        index: typeof meta.index === 'number' ? meta.index : 0,
+        restoreFocusId: meta.restoreFocusId,
+        fallbackFocusId: meta.fallbackFocusId,
+      }
+      const existing = map.get(meta.trackId)
+      if (existing) {
+        existing.push(entry)
+      } else {
+        map.set(meta.trackId, [entry])
+      }
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => a.index - b.index)
+    }
+    return map
+  }, [pending])
 
   const {
     query,
@@ -413,14 +439,22 @@ export default function PlaylistView({
         </div>
       ) : (
         <ul style={{ padding: 0, listStyle: 'none' }}>
-          {filteredTracks.map((track, index) => (
+          {filteredTracks.map((track, index) => {
+            const placeholders = pendingByTrack.get(track.id) ?? EMPTY_PLACEHOLDERS
+            const isEditingTrack = editingState?.editingId === track.id
+            const editingDraft = isEditingTrack ? editingState?.draft ?? '' : ''
+            const editingError = isEditingTrack ? editingState?.error ?? null : null
+
+            return (
             <TrackCard
               key={track.id}
               track={track}
               index={index}
-              pending={pending}
+              placeholders={placeholders}
               isPending={isPending}
-              editingState={editingState}
+              isEditing={isEditingTrack}
+              editingDraft={editingDraft}
+              editingError={editingError}
               onDraftChange={onDraftChange}
               onAddNote={onAddNote}
               onSaveNote={onSaveNote}
@@ -434,7 +468,7 @@ export default function PlaylistView({
               onDismissUndo={onDismissUndo}
               onFilterTag={handleFilterTag}
             />
-          ))}
+          )})}
         </ul>
       )}
 

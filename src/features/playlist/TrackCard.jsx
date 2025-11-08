@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import NoteList from './NoteList.jsx'
 import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
@@ -21,9 +21,11 @@ import { focusElement } from '../../utils/focusById.js'
  *   provider?: string
  * }} props.track
  * @param {number} props.index
- * @param {Map<string, any>} props.pending
+ * @param {Array<{ pid: string, index: number, restoreFocusId?: string, fallbackFocusId?: string }>} [props.placeholders]
  * @param {(id: string) => boolean} props.isPending
- * @param {{ editingId: string|number|null, draft: string, error: string|null }} props.editingState
+ * @param {boolean} props.isEditing
+ * @param {string} props.editingDraft
+ * @param {string|null} props.editingError
  * @param {(value: string) => void} props.onDraftChange
  * @param {(trackId: string|number) => void} props.onAddNote
  * @param {(trackId: string|number) => void} props.onSaveNote
@@ -37,12 +39,14 @@ import { focusElement } from '../../utils/focusById.js'
  * @param {(pendingId: string) => void} props.onDismissUndo
  * @param {(tag: string) => void} [props.onFilterTag]
  */
-export default function TrackCard({
+function TrackCard({
   track,
   index,
-  pending,
+  placeholders = [],
   isPending,
-  editingState,
+  isEditing,
+  editingDraft,
+  editingError,
   onDraftChange,
   onAddNote,
   onSaveNote,
@@ -61,21 +65,8 @@ export default function TrackCard({
     () => (Array.isArray(track.tags) ? track.tags : []),
     [track.tags],
   )
-  const { editingId, draft, error } = editingState
-  const isEditing = editingId === track.id
-
-  const placeholders = []
-  for (const [pid, meta] of pending.entries()) {
-    if (meta.trackId === track.id) {
-      placeholders.push({
-        pid,
-        index: meta.index,
-        restoreFocusId: meta.restoreFocusId,
-        fallbackFocusId: meta.fallbackFocusId,
-      })
-    }
-  }
-  placeholders.sort((a, b) => a.index - b.index)
+  const draft = isEditing ? editingDraft : ''
+  const error = isEditing ? editingError : null
 
   const noteBadge =
     noteArr.length > 0 ? (
@@ -423,3 +414,5 @@ export default function TrackCard({
     </li>
   )
 }
+
+export default memo(TrackCard)
