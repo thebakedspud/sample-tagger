@@ -17,11 +17,7 @@ const baseProps = {
   onConfirmRegenerate: vi.fn(),
   onCopyRecoveryCode: vi.fn(),
   onOpenRestoreDialog: vi.fn(),
-  onOpenSpotifyLink: vi.fn(),
   onRequestRecoveryModal: vi.fn(),
-  spotifyLinked: false,
-  spotifyAccountLabel: '',
-  emailLinkingEnabled: true,
   showBackupPrompt: false,
 }
 

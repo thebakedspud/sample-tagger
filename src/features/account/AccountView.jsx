@@ -44,10 +44,6 @@ export default function AccountView({
   regeneratingRecoveryCode = false,
   regenerationError = null,
   onOpenRestoreDialog,
-  onOpenSpotifyLink,
-  spotifyLinked = false,
-  spotifyAccountLabel = '',
-  emailLinkingEnabled = false,
   onRequestRecoveryModal,
   showBackupPrompt = false,
 }) {
@@ -60,10 +56,6 @@ export default function AccountView({
     () => formatTimestamp(recoveryAcknowledgedAt),
     [recoveryAcknowledgedAt]
   );
-
-  const spotifyStatus = spotifyLinked
-    ? spotifyAccountLabel || 'Linked'
-    : 'Not linked';
 
   useEffect(() => {
     if (!masked) {
