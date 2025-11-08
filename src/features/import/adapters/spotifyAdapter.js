@@ -13,7 +13,7 @@ const TOKEN_ENDPOINT = '/api/spotify/token';
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 const PLAYLIST_FIELDS = 'name,external_urls,images,owner(display_name),snapshot_id';
 const TRACK_FIELDS =
-  'items(added_at,track(id,uri,name,duration_ms,external_urls,album(images),artists(name),is_local,type)),next,total';
+  'items(added_at,track(id,uri,name,duration_ms,external_urls,album(name,images),artists(name),is_local,type)),next,total';
 const PAGE_SIZE = 100;
 const TOKEN_REFRESH_BUFFER_MS = 30_000;
 const CANONICAL_BASE_URL = 'https://open.spotify.com/playlist/';
