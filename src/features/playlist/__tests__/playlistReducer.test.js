@@ -571,6 +571,22 @@ describe('playlistReducer', () => {
       expect(next.tracks[0].tags).toEqual(['tag'])
     })
 
+    it('preserves optimistic local notes when remote payload is empty', () => {
+      const state = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', notes: ['local note'] }],
+        notesByTrack: { t1: ['local note'] },
+      }
+
+      const remoteNotes = {}
+
+      const action = playlistActions.mergeRemoteData(remoteNotes, {})
+      const next = playlistReducer(state, action)
+
+      expect(next.notesByTrack.t1).toEqual(['local note'])
+      expect(next.tracks[0].notes).toEqual(['local note'])
+    })
+
     it('updates derived state after merge', () => {
       const state = {
         ...initialPlaylistState,

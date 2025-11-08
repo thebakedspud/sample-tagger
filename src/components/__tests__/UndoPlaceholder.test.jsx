@@ -5,6 +5,7 @@ import { focusById } from '../../utils/focusById.js'
 
 vi.mock('../../utils/focusById.js', () => ({
   focusById: vi.fn(),
+  focusElement: vi.fn((node, options) => node?.focus?.(options)),
 }))
 
 describe('UndoPlaceholder', () => {

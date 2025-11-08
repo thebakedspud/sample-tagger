@@ -128,7 +128,7 @@ describe('PlaylistProvider', () => {
   })
 
   describe('Remote Sync Effect', () => {
-    it('fetches notes/tags when anonId is available', async () => {
+    it('fetches notes/tags when deviceId is available and local data exists', async () => {
       const mockNotes = [{ trackId: 't1', body: 'note1', tags: ['tag1'] }]
       const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
         ok: true,
@@ -136,6 +136,12 @@ describe('PlaylistProvider', () => {
       }))
       mockedApiFetch.mockResolvedValue(mockResponse)
       mockedGroupRemoteNotes.mockReturnValue({ notes: { t1: ['note1'] }, tags: { t1: ['tag1'] } })
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
 
       function TestChild() {
         return <div>Test</div>
@@ -143,7 +149,7 @@ describe('PlaylistProvider', () => {
 
       render(
         <PlaylistStateProvider 
-          initialState={initialPlaylistState} 
+          initialState={stateWithLocalData} 
           anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
         >
           <TestChild />
@@ -155,7 +161,34 @@ describe('PlaylistProvider', () => {
       })
     })
 
-    it('does not fetch when anonId is null', async () => {
+    it('does not fetch when deviceId is null', async () => {
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
+
+      function TestChild() {
+        return <div>Test</div>
+      }
+
+      render(
+        <PlaylistStateProvider 
+          initialState={stateWithLocalData} 
+          anonContext={{ deviceId: null, anonId: null }}
+        >
+          <TestChild />
+        </PlaylistStateProvider>
+      )
+
+      // Wait a bit to ensure no fetch happens
+      await new Promise(resolve => setTimeout(resolve, 50))
+      
+      expect(mockedApiFetch).not.toHaveBeenCalled()
+    })
+
+    it('skips fetch when there are no local tracks', async () => {
       function TestChild() {
         return <div>Test</div>
       }
@@ -163,7 +196,7 @@ describe('PlaylistProvider', () => {
       render(
         <PlaylistStateProvider 
           initialState={initialPlaylistState} 
-          anonContext={{ deviceId: 'device-1', anonId: null }}
+          anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
         >
           <TestChild />
         </PlaylistStateProvider>
@@ -218,6 +251,12 @@ describe('PlaylistProvider', () => {
     it('handles fetch errors gracefully', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       mockedApiFetch.mockRejectedValue(new Error('Network error'))
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
 
       function TestChild() {
         return <div>Test</div>
@@ -225,7 +264,7 @@ describe('PlaylistProvider', () => {
 
       render(
         <PlaylistStateProvider 
-          initialState={initialPlaylistState} 
+          initialState={stateWithLocalData} 
           anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
         >
           <TestChild />
@@ -246,6 +285,12 @@ describe('PlaylistProvider', () => {
         json: vi.fn().mockResolvedValue({ error: 'Server error' })
       }))
       mockedApiFetch.mockResolvedValue(mockResponse)
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
 
       function TestChild() {
         return <div>Test</div>
@@ -253,7 +298,7 @@ describe('PlaylistProvider', () => {
 
       render(
         <PlaylistStateProvider 
-          initialState={initialPlaylistState} 
+          initialState={stateWithLocalData} 
           anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
         >
           <TestChild />
@@ -274,10 +319,16 @@ describe('PlaylistProvider', () => {
         json: vi.fn().mockResolvedValue({ error: 'unauthorized' })
       }))
       mockedApiFetch.mockResolvedValue(authResponse)
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
 
       render(
         <PlaylistStateProvider 
-          initialState={initialPlaylistState} 
+          initialState={stateWithLocalData} 
           anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
         >
           <div>Test</div>

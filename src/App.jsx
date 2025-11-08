@@ -75,8 +75,15 @@ import buildInitialPlaylistState from './features/playlist/buildInitialPlaylistS
  * Inner component that consumes playlist state from context
  * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: string, onAnonContextChange: Function }} props
  */
-function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persistedTracks, initialScreen, onAnonContextChange }) {
-  const [showMigrationNotice, setShowMigrationNotice] = useState(Boolean(pendingMigrationSnapshot))
+function AppInner({
+  persisted,
+  pendingMigrationSnapshot,
+  initialRecents,
+  persistedTracks,
+  initialScreen,
+  onAnonContextChange,
+  initialSyncStatus,
+}) {
   const migrationSnapshotRef = useRef(pendingMigrationSnapshot)
   
   // SIMPLE "ROUTING"
@@ -368,10 +375,9 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   useEffect(() => {
     const snapshot = migrationSnapshotRef.current
     if (!snapshot) return
-    if (!anonContext?.anonId || !anonContext?.deviceId) return
+    if (!anonContext?.deviceId) return
 
     let cancelled = false
-    setShowMigrationNotice(true)
     announce('Finishing upgrade in the background...')
 
     const runMigration = async () => {
@@ -492,14 +498,13 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
           clearPendingMigrationSnapshot()
           migrationSnapshotRef.current = null
           console.info('[storage:migration] completed successfully')
-          setShowMigrationNotice(false)
           announce('Upgrade complete.')
         }
       } catch (err) {
         if (cancelled) return
         console.error('[storage:migration] failed', err)
         stashPendingMigrationSnapshot(snapshot)
-        setShowMigrationNotice(false)
+        announce('Upgrade failed. Your previous notes are still safe; please try again later.')
       }
     }
 
@@ -763,7 +768,12 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   const onAddNote = (trackId) => {
     dispatch(playlistActions.startNoteEdit(trackId))
     editorInvokerRef.current = document.getElementById(`add-note-btn-${trackId}`)
-    setTimeout(() => { focusById(`note-input-${trackId}`) }, 0)
+    setTimeout(() => {
+      const targetId = `note-input-${trackId}`
+      if (document.getElementById(targetId)) {
+        focusById(targetId)
+      }
+    }, 0)
   }
 
   const onSaveNote = async (trackId) => {
@@ -846,26 +856,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
       {/* Screen reader announcements */}
       <LiveRegion message={announceMsg} />
 
-      {showMigrationNotice && (
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            position: 'fixed',
-            top: 16,
-            right: 16,
-            background: 'var(--surface, #0f1115)',
-            color: 'var(--fg, #ffffff)',
-            padding: '12px 16px',
-            borderRadius: 8,
-            boxShadow: '0 12px 32px rgba(0, 0, 0, 0.35)',
-            border: '1px solid var(--border, rgba(255, 255, 255, 0.16))',
-            zIndex: 30,
-          }}
-        >
-          Finishing upgrade in the background...
-        </div>
-      )}
+      {/* Migration notice now uses announcements only; no blocking UI */}
 
       <header style={{ maxWidth: 880, margin: '20px auto 0', padding: '0 16px' }}>
         <div
@@ -1044,11 +1035,12 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
                   void handleLoadMore()
                 }}
                 announce={announce}
-                backgroundSync={backgroundSync}
-                skipFocusManagement={skipPlaylistFocusManagement}
-                focusContext={trackFocusContext}
-                onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
-              />
+              backgroundSync={backgroundSync}
+              initialSyncStatus={initialSyncStatus}
+              skipFocusManagement={skipPlaylistFocusManagement}
+              focusContext={trackFocusContext}
+              onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
+            />
             )}
           </>
         )}
@@ -1124,8 +1116,14 @@ function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRece
     anonId: getAnonId()
   }))
 
+  const [initialSyncStatus, setInitialSyncStatus] = useState({ status: 'idle', lastError: null })
+
   return (
-    <PlaylistStateProvider initialState={initialPlaylistStateWithData} anonContext={anonContext}>
+    <PlaylistStateProvider
+      initialState={initialPlaylistStateWithData}
+      anonContext={anonContext}
+      onInitialSyncStatusChange={setInitialSyncStatus}
+    >
       <AppInner
         persisted={persisted}
         pendingMigrationSnapshot={pendingMigrationSnapshot}
@@ -1133,6 +1131,7 @@ function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRece
         persistedTracks={persistedTracks}
         initialScreen={initialScreen}
         onAnonContextChange={setAnonContext}
+        initialSyncStatus={initialSyncStatus}
       />
     </PlaylistStateProvider>
   )

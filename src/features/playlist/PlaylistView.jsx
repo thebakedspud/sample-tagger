@@ -49,6 +49,7 @@ const EMPTY_PLACEHOLDERS = Object.freeze([])
  * @param {string[]} props.stockTags
  * @param {string[]} props.customTags
  * @param {(message: string) => void} props.announce
+ * @param {{ status: 'idle' | 'loading' | 'complete' | 'error', lastError?: string | null }} [props.initialSyncStatus]
  * @param {BackgroundSyncState} [props.backgroundSync]
  * @param {{ reason: string|null, ts: number }} [props.focusContext]
  * @param {boolean} [props.skipFocusManagement] - When true, the filter-aware focus management
@@ -96,6 +97,7 @@ export default function PlaylistView({
   focusContext,
   skipFocusManagement = false,
   onFirstVisibleTrackChange,
+  initialSyncStatus,
 }) {
   const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
   const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
@@ -280,6 +282,9 @@ export default function PlaylistView({
       : null
   const showBackgroundError =
     loadingStatus === 'error' && typeof backgroundSync?.lastError === 'string'
+  const showInitialSyncBanner =
+    initialSyncStatus?.status === 'loading' || initialSyncStatus?.status === 'error'
+
   const cooldownMessage =
     isCooldown && typeof backgroundSync?.lastError === 'string'
       ? backgroundSync.lastError
@@ -343,6 +348,27 @@ export default function PlaylistView({
         totalCount={totalCount}
         searchInputRef={searchInputRef}
       />
+
+      {showInitialSyncBanner && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 12,
+            padding: '8px 12px',
+            background: 'var(--surface)',
+            borderRadius: 6,
+            border: '1px solid var(--border)',
+            color:
+              initialSyncStatus?.status === 'error'
+                ? 'var(--warning, #ffa726)'
+                : 'var(--muted)',
+          }}
+        >
+          {initialSyncStatus?.status === 'error'
+            ? `Sync paused: ${initialSyncStatus?.lastError ?? 'Unknown error'}`
+            : 'Syncing notes in the background…'}
+        </div>
+      )}
 
       {showFilteringBanner && (
         <div

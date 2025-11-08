@@ -16,50 +16,101 @@ import { notifyDeviceContextStale } from '../../lib/deviceState.js'
  * @param {Object} props
  * @param {typeof initialPlaylistState} props.initialState - Initial state for the reducer
  * @param {{ deviceId: string | null, anonId: string | null }} props.anonContext - Device context for sync
+ * @param {(status: { status: 'idle' | 'loading' | 'complete' | 'error', lastError?: string | null }) => void} [props.onInitialSyncStatusChange]
  * @param {import('react').ReactNode} props.children - Child components
  */
-export function PlaylistStateProvider({ initialState, anonContext, children }) {
+export function PlaylistStateProvider({ initialState, anonContext, onInitialSyncStatusChange, children }) {
   const [state, dispatch] = useReducer(playlistReducer, initialState)
   const tagSyncSchedulerRef = useRef(null)
+  const initialSyncStatusRef = useRef('idle')
+  const updateInitialSyncStatus = useCallback(
+    (next) => {
+      initialSyncStatusRef.current = next?.status ?? initialSyncStatusRef.current
+      onInitialSyncStatusChange?.(next)
+    },
+    [onInitialSyncStatusChange],
+  )
+
+  useEffect(() => {
+    initialSyncStatusRef.current = 'idle'
+  }, [anonContext?.deviceId])
 
   // Remote sync: fetch notes/tags from server on mount when anonId is available
   useEffect(() => {
-    if (!anonContext?.anonId) return
+    if (!anonContext?.deviceId) return
+    if (initialSyncStatusRef.current === 'complete') return
+    const hasAnyLocalData =
+      Array.isArray(initialState?.tracks) && initialState.tracks.length > 0
+    if (!hasAnyLocalData) {
+      updateInitialSyncStatus({ status: 'complete', lastError: null })
+      return
+    }
+
     let cancelled = false
+    let timeoutId = null
+    const schedule = typeof requestIdleCallback === 'function'
+      ? (cb) => requestIdleCallback(cb)
+      : (cb) => setTimeout(cb, 0)
 
     const syncNotes = async () => {
       try {
+        updateInitialSyncStatus({ status: 'loading', lastError: null })
+        timeoutId = setTimeout(() => {
+          if (!cancelled) {
+            updateInitialSyncStatus({
+              status: 'error',
+              lastError: 'Sync timed out. Retrying soon...',
+            })
+          }
+        }, 30000)
+
         const response = await apiFetch('/api/db/notes')
         const payload = await response.json().catch(() => ({}))
         if (cancelled) return
         if (!response.ok) {
+          clearTimeout(timeoutId)
           if (response.status === 401 || response.status === 403 || response.status === 404) {
             notifyDeviceContextStale({ source: 'notes-sync', status: response.status })
           }
           console.error('[notes sync] failed', payload)
+          updateInitialSyncStatus({
+            status: 'error',
+            lastError: payload?.error ?? `Sync failed (${response.status})`,
+          })
           return
         }
         const { notes: remoteMap, tags: remoteTagMap } = groupRemoteNotes(payload?.notes)
         const hasRemoteNotes = Object.keys(remoteMap).length > 0
         const hasRemoteTags = Object.keys(remoteTagMap).length > 0
         if (!hasRemoteNotes && !hasRemoteTags) {
+          updateInitialSyncStatus({ status: 'complete', lastError: null })
           return
         }
         // Merge remote data using reducer
         dispatch(playlistActions.mergeRemoteData(remoteMap, remoteTagMap))
+        updateInitialSyncStatus({ status: 'complete', lastError: null })
       } catch (err) {
         if (!cancelled) {
+          clearTimeout(timeoutId)
           console.error('[notes sync] error', err)
+          updateInitialSyncStatus({
+            status: 'error',
+            lastError: err?.message ?? 'Sync failed',
+          })
         }
       }
     }
 
-    syncNotes()
+    const deferredHandle = schedule(syncNotes)
 
     return () => {
       cancelled = true
+      clearTimeout(timeoutId)
+      if (typeof cancelIdleCallback === 'function' && deferredHandle && deferredHandle > 0) {
+        cancelIdleCallback(deferredHandle)
+      }
     }
-  }, [anonContext?.anonId])
+  }, [anonContext?.deviceId, updateInitialSyncStatus, initialState?.tracks])
 
   // Helper to send tag update to server
   const sendTagUpdate = useCallback(

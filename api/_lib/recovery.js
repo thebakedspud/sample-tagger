@@ -2,8 +2,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import { getHasher, getVerifier } from './argon.js';
 
 const ARGON_OPTIONS = {
-  memoryCost: 19_456,
-  timeCost: 2,
+  memoryCost: 8_192,
+  timeCost: 1,
   parallelism: 1,
   hashLength: 32,
 };

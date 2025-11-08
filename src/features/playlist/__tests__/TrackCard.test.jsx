@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TrackCard from '../TrackCard.jsx'
 
@@ -15,9 +15,11 @@ function renderTrackCard(overrides = {}) {
   const props = {
     track: { ...defaultTrack, ...overrides.track },
     index: 0,
-    pending: overrides.pending ?? new Map(),
+    placeholders: overrides.placeholders ?? [],
     isPending: overrides.isPending ?? (() => false),
-    editingState: overrides.editingState ?? { editingId: null, draft: '', error: null },
+    isEditing: overrides.isEditing ?? false,
+    editingDraft: overrides.editingDraft ?? '',
+    editingError: overrides.editingError ?? null,
     onDraftChange: overrides.onDraftChange ?? vi.fn(),
     onAddNote: overrides.onAddNote ?? vi.fn(),
     onSaveNote: overrides.onSaveNote ?? vi.fn(),
@@ -65,8 +67,12 @@ describe('TrackCard', () => {
 
   it('calls onCancelNote when cancel button pressed during editing', async () => {
     const onCancelNote = vi.fn()
-    const editingState = { editingId: 'track-1', draft: 'draft text', error: null }
-    const { user } = renderTrackCard({ onCancelNote, editingState })
+    const { user } = renderTrackCard({
+      onCancelNote,
+      isEditing: true,
+      editingDraft: 'draft text',
+      editingError: null,
+    })
 
     const cancelButton = await screen.findByRole('button', { name: 'Cancel' })
     await user.click(cancelButton)
@@ -77,19 +83,16 @@ describe('TrackCard', () => {
   it('routes undo action through onUndo when placeholder button clicked', async () => {
     const onUndo = vi.fn()
     const pendingId = 'pending-1'
-    const pendingMap = new Map([
-      [
-        pendingId,
-        {
-          trackId: 'track-1',
-          index: 0,
-          restoreFocusId: 'restore-1',
-          fallbackFocusId: 'fallback-1',
-        },
-      ],
-    ])
-    const isPending = (id) => pendingMap.has(id)
-    const { user } = renderTrackCard({ onUndo, pending: pendingMap, isPending })
+    const placeholders = [
+      {
+        pid: pendingId,
+        index: 0,
+        restoreFocusId: 'restore-1',
+        fallbackFocusId: 'fallback-1',
+      },
+    ]
+    const isPending = (id) => id === pendingId
+    const { user } = renderTrackCard({ onUndo, placeholders, isPending })
 
     const undoButton = await screen.findByRole('button', { name: 'Undo' })
     await user.click(undoButton)
@@ -97,7 +100,7 @@ describe('TrackCard', () => {
     expect(onUndo).toHaveBeenCalledWith(pendingId)
   })
 
-  it('supports keyboard navigation between tag chips and add button', () => {
+  it('supports keyboard navigation between tag chips and add button', async () => {
     renderTrackCard({
       track: { ...defaultTrack, tags: ['rock', 'jazz'] },
     })
@@ -109,13 +112,13 @@ describe('TrackCard', () => {
 
     firstChip.focus()
     fireEvent.keyDown(firstChip, { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(secondChip)
+    await waitFor(() => expect(secondChip).toHaveFocus())
 
     fireEvent.keyDown(secondChip, { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(addButton)
+    await waitFor(() => expect(addButton).toHaveFocus())
 
     fireEvent.keyDown(addButton, { key: 'ArrowLeft' })
-    expect(document.activeElement).toBe(secondChip)
+    await waitFor(() => expect(secondChip).toHaveFocus())
   })
 
   it('omits date label when track has an invalid added date', () => {
