@@ -73,10 +73,11 @@ const declared = collectDeclaredModules(typeFiles);
 const config = readJson(configPath);
 const paths = collectPathTargets(config?.compilerOptions?.paths ?? {});
 
+const moduleIds = new Set([...paths.keys(), ...declared.keys()]);
 const conflicts = [];
 
-for (const [moduleId, pathTargets] of paths.entries()) {
-  const files = new Set(pathTargets);
+for (const moduleId of moduleIds) {
+  const files = new Set(paths.get(moduleId) ?? []);
   const declaredFiles = declared.get(moduleId);
 
   if (declaredFiles) {
