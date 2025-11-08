@@ -51,7 +51,7 @@ describe('TrackCard', () => {
     window.cancelAnimationFrame = originalCancelRaf
   })
 
-  it('invokes onRemoveTag and onFilterTag when tag chip clicked', async () => {
+  it('removes tag without triggering filter when chip clicked', async () => {
     const onRemoveTag = vi.fn()
     const onFilterTag = vi.fn()
     const { user } = renderTrackCard({ onRemoveTag, onFilterTag })
@@ -60,7 +60,7 @@ describe('TrackCard', () => {
     await user.click(chip)
 
     expect(onRemoveTag).toHaveBeenCalledWith('track-1', 'rock')
-    expect(onFilterTag).toHaveBeenCalledWith('rock')
+    expect(onFilterTag).not.toHaveBeenCalled()
   })
 
   it('calls onCancelNote when cancel button pressed during editing', async () => {
