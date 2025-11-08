@@ -36,19 +36,20 @@ function TagChipInner(props, ref) {
   } = safeProps
 
   const handleClick = (event) => {
-    if (onClick) {
-      onClick(event);
+    if (typeof onClick === 'function') {
+      onClick(event)
     }
-    if (event.defaultPrevented) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (onFilter) {
-      onFilter(tag);
+    if (event.defaultPrevented) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (typeof onRemove === 'function') {
+      onRemove(tag)
+      return
     }
-    if (onRemove) {
-      onRemove(tag);
+    if (typeof onFilter === 'function') {
+      onFilter(tag)
     }
-  };
+  }
 
   return (
     <button

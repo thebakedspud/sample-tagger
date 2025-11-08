@@ -9,13 +9,13 @@ describe('TagChip', () => {
     expect(button).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('invokes filter and remove callbacks when clicked', () => {
+  it('prefers remove callback over filter when both provided', () => {
     const onFilter = vi.fn()
     const onRemove = vi.fn()
     render(<TagChip tag="drill" onFilter={onFilter} onRemove={onRemove} />)
     fireEvent.click(screen.getByRole('button', { name: /remove tag drill/i }))
-    expect(onFilter).toHaveBeenCalledWith('drill')
     expect(onRemove).toHaveBeenCalledWith('drill')
+    expect(onFilter).not.toHaveBeenCalled()
   })
 
   it('respects onClick handlers that prevent default behavior', () => {
@@ -36,5 +36,12 @@ describe('TagChip', () => {
     render(<TagChip tag="solo" onRemove={onRemove} />)
     fireEvent.click(screen.getByRole('button', { name: /remove tag solo/i }))
     expect(onRemove).toHaveBeenCalledWith('solo')
+  })
+
+  it('handles filter-only chips', () => {
+    const onFilter = vi.fn()
+    render(<TagChip tag="focus" onFilter={onFilter} />)
+    fireEvent.click(screen.getByRole('button', { name: /remove tag focus/i }))
+    expect(onFilter).toHaveBeenCalledWith('focus')
   })
 })
