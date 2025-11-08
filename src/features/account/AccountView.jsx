@@ -36,8 +36,6 @@ function formatTimestamp(timestamp) {
 }
 
 export default function AccountView({
-  anonId,
-  deviceId,
   recoveryCode,
   recoveryAcknowledgedAt,
   recoveryCopyButtonRef,
@@ -46,10 +44,6 @@ export default function AccountView({
   regeneratingRecoveryCode = false,
   regenerationError = null,
   onOpenRestoreDialog,
-  onOpenSpotifyLink,
-  spotifyLinked = false,
-  spotifyAccountLabel = '',
-  emailLinkingEnabled = false,
   onRequestRecoveryModal,
   showBackupPrompt = false,
 }) {
@@ -62,10 +56,6 @@ export default function AccountView({
     () => formatTimestamp(recoveryAcknowledgedAt),
     [recoveryAcknowledgedAt]
   );
-
-  const spotifyStatus = spotifyLinked
-    ? spotifyAccountLabel || 'Linked'
-    : 'Not linked';
 
   useEffect(() => {
     if (!masked) {
@@ -111,8 +101,9 @@ export default function AccountView({
           <div>
             <h1 id="account-heading">Account</h1>
             <p className="account-card__description">
-              Your notes are tied to this anonymous ID. Save your recovery code
-              to restore on another device.
+              Your notes are tied to this anonymous recovery code. Save your
+              recovery code to restore notes and tags on another device or
+              browser.
             </p>
           </div>
           <button
@@ -131,14 +122,6 @@ export default function AccountView({
         </div>
 
         <dl className="account-summary__meta">
-          <div>
-            <dt>Device ID</dt>
-            <dd>{deviceId ?? 'Not registered yet'}</dd>
-          </div>
-          <div>
-            <dt>Anon ID</dt>
-            <dd>{anonId ?? 'Pending'}</dd>
-          </div>
           <div>
             <dt>Recovery status</dt>
             <dd>
@@ -195,35 +178,6 @@ export default function AccountView({
       <section className="card account-card">
         <header className="account-card__header">
           <div>
-            <h2>Spotify Account</h2>
-            <p className="account-card__description">
-              Connect to import playlists directly.
-            </p>
-          </div>
-          <span
-            className={`account-status${
-              spotifyLinked ? ' account-status--active' : ''
-            }`}
-            aria-live="polite"
-          >
-            {spotifyLinked ? 'Linked' : 'Not linked'}
-          </span>
-        </header>
-        <p className="account-card__note">{spotifyStatus}</p>
-        <div className="row account-card__actions">
-          <button
-            type="button"
-            className="btn"
-            onClick={onOpenSpotifyLink}
-          >
-            {spotifyLinked ? 'Delink Spotify Account' : 'Link Spotify Account'}
-          </button>
-        </div>
-      </section>
-
-      <section className="card account-card">
-        <header className="account-card__header">
-          <div>
             <h2>Recover Notes</h2>
             <p className="account-card__description">
               Restore notes from another device with your recovery code.
@@ -241,32 +195,7 @@ export default function AccountView({
         </div>
       </section>
 
-      <section className="card account-card">
-        <header className="account-card__header">
-          <div>
-            <h2>Link an Email Address</h2>
-            <p className="account-card__description">
-              Optional - get recovery help without losing anonymity.
-            </p>
-          </div>
-        </header>
-        <div className="row account-card__actions">
-          <button
-            type="button"
-            className="btn"
-            disabled={!emailLinkingEnabled}
-            aria-disabled={!emailLinkingEnabled ? 'true' : undefined}
-          >
-            Link Email
-          </button>
-          {!emailLinkingEnabled && (
-            <span className="account-card__note">
-              Coming soon - email linking is disabled for now.
-            </span>
-          )}
-        </div>
-      </section>
-
+      {/* Spotify Account and Link Email cards intentionally hidden for now */}
       <section className="card account-card">
         <header className="account-card__header">
           <div>

@@ -11,19 +11,13 @@ vi.mock('../../../components/display/FontSettings.jsx', () => ({
 }))
 
 const baseProps = {
-  anonId: 'anon-1',
-  deviceId: 'device-1',
   recoveryCode: 'ABCD-EFGH',
   recoveryAcknowledgedAt: '2024-01-01T00:00:00Z',
   recoveryCopyButtonRef: { current: null },
   onConfirmRegenerate: vi.fn(),
   onCopyRecoveryCode: vi.fn(),
   onOpenRestoreDialog: vi.fn(),
-  onOpenSpotifyLink: vi.fn(),
   onRequestRecoveryModal: vi.fn(),
-  spotifyLinked: false,
-  spotifyAccountLabel: '',
-  emailLinkingEnabled: true,
   showBackupPrompt: false,
 }
 
