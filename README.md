@@ -32,11 +32,13 @@ We aim to follow WCAG principles and inclusive design practices.
 ### Buttons & Controls
 - All actions use `<button>` elements with visible focus treatment.
 - Each control has a clear accessible name (`aria-label` for icon-only buttons).
+- The top-left “Playlist Notes” title is also a button so mouse users always have a predictable route back to the import screen.
 
 ### Keyboard Use
 - Everything is reachable with Tab/Shift+Tab and activatable with Enter/Space.
 - New inputs (e.g., “Add note”) receive focus automatically.
 - After actions complete, focus returns to a sensible place (often the invoking control).
+- Pressing `Home` (outside text inputs) jumps focus to the Playlist Notes title and returns you to the import screen—the same action the title button performs for mouse users.
 
 ### Feedback
 - A hidden `role="status"` live region announces updates (“Imported 3 tracks”, “Note added”).

@@ -66,6 +66,7 @@ vi.mock('../lib/deviceState.js', () => ({
   setDeviceId: () => {},
   getAnonId: () => 'anon-1',
   setAnonId: () => {},
+  hasDeviceContext: () => false,
   saveRecoveryCode: () => {},
   getStoredRecoveryCode: () => null,
   hasAcknowledgedRecovery: () => false,
@@ -74,6 +75,7 @@ vi.mock('../lib/deviceState.js', () => ({
   ensureRecoveryCsrfToken: () => 'csrf-token',
   clearRecoveryAcknowledgement: () => {},
   clearDeviceContext: () => {},
+  subscribeDeviceContextStale: () => () => {},
 }))
 
 vi.mock('../features/import/usePlaylistImportFlow.js', () => {

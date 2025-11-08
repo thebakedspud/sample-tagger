@@ -4,6 +4,7 @@ const RECOVERY_KEY = 'sta:recovery-code';
 const RECOVERY_ACK_KEY = 'sta:recovery-ack';
 const RECOVERY_CSRF_KEY = 'sta:recovery-csrf';
 const RECOVERY_CSRF_TTL_MS = 30 * 60 * 1000;
+const DEVICE_CONTEXT_STALE_EVENT = 'sta:device-context-stale';
 
 let runtimeDeviceId = null;
 let runtimeAnonId = null;
@@ -44,6 +45,10 @@ export function setAnonId(anonId) {
   if (isBrowser()) {
     window.localStorage.setItem(ANON_KEY, anonId);
   }
+}
+
+export function hasDeviceContext() {
+  return Boolean(getDeviceId() && getAnonId());
 }
 
 export function saveRecoveryCode(recoveryCode) {
@@ -187,3 +192,30 @@ export function clearDeviceContext() {
   }
   clearRecoveryState();
 }
+
+export function notifyDeviceContextStale(detail = null) {
+  if (!isBrowser() || typeof window.dispatchEvent !== 'function') return;
+  try {
+    const event = new CustomEvent(DEVICE_CONTEXT_STALE_EVENT, { detail });
+    window.dispatchEvent(event);
+  } catch (_err) {
+    // no-op
+  }
+}
+
+export function subscribeDeviceContextStale(callback) {
+  if (!isBrowser() || typeof window.addEventListener !== 'function') {
+    return () => {};
+  }
+  const handler = (event) => {
+    try {
+      callback?.(event?.detail ?? null);
+    } catch (_err) {
+      // suppress subscriber errors to avoid breaking global listeners
+    }
+  };
+  window.addEventListener(DEVICE_CONTEXT_STALE_EVENT, handler);
+  return () => window.removeEventListener(DEVICE_CONTEXT_STALE_EVENT, handler);
+}
+
+export { DEVICE_CONTEXT_STALE_EVENT };

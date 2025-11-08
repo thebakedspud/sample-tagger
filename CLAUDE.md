@@ -161,9 +161,10 @@ All API routes are serverless functions deployed to Vercel:
 ### Anonymous Device Endpoints
 - **POST /api/anon/bootstrap** → Returns deviceId (header), anonId, recoveryCode
 - **POST /api/anon/restore** → Accepts recoveryCode, swaps device identity
+- **POST /api/anon/recovery** → Rotates the recovery code (CSRF-protected + rate limited) and returns the new code plus timestamp
 
 ### Database Endpoints
-- **GET /api/db/notes** → Returns notes[], tags[] from Supabase
+- **GET /api/db/notes** → Returns an array of `{ id, trackId, body, tags[] }` records (tags live on each note; no standalone `tags[]` payload)
 - **POST /api/db/notes** → Body: { trackId, body?, tags? } → Syncs to Supabase
 
 ### Spotify Proxy
@@ -187,6 +188,7 @@ All API routes are serverless functions deployed to Vercel:
 {
   version: 6
   theme: 'dark' | 'light'
+  uiPrefs: { font: 'default' | 'system' | 'dyslexic' }
   playlistTitle: string
   importedAt: ISO timestamp | null
   lastImportUrl: string
@@ -199,13 +201,11 @@ All API routes are serverless functions deployed to Vercel:
 ```
 
 **Migration System (v5 → v6):**
-1. On load, if old version detected, creates pending snapshot
-2. Bootstraps device, then runs async migration
-3. Fetches existing remote notes/tags from Supabase
-4. Merges local snapshot with remote data
-5. Uploads new notes/tags in parallel
-6. Clears pending migration on success
-7. Auto-backup written before upload (recovery from failures)
+1. On load, `loadAppState` normalizes legacy payloads into the v6 shape (including `uiPrefs`).
+2. The normalized data is written to `sta:v6:pending-migration` so we can recover later if we need to re-run merges.
+3. A fresh copy of that normalized payload is immediately persisted at `sta:v6`; this step is purely local�no network requests are fired here.
+4. React bootstrap hydrates from the upgraded state, and the playlist provider later fetches/merges remote notes + tags via its own sync effect.
+5. Auto-backup snapshots still run before long persistence operations to keep a user-accessible JSON backup handy.
 
 **Utilities:**
 - `src/utils/storage.js` → `saveAppState`, `loadAppState`, `getPendingMigrationSnapshot`
@@ -276,9 +276,9 @@ focusById('track-note-btn-0')  // Uses requestAnimationFrame
 
 | Decision | Rationale |
 |----------|-----------|
-| **Monolithic App.jsx** | Single source of truth for complex state interactions; avoids prop drilling; easier to trace data flows |
+| **Centralized playlist state** | PlaylistStateProvider with reducer pattern centralizes playlist management; pure reducer with validated actions enables predictable state transitions; narrow selector hooks optimize re-renders; comprehensive test coverage ensures reliability |
 | **Feature modules over routes** | Organizes code by domain (import, tags, undo); enables tree-shaking; colocates tests with implementation |
-| **localStorage v5 versioning** | Smooth migrations with auto-fallback; pending snapshot approach preserves data across crashes |
+| **localStorage v6 versioning** | Smooth migrations with auto-fallback; pending snapshot approach preserves data across crashes |
 | **Device ID propagation** | Enables multi-device sync; recovery codes tied to device identity (security); auto-discovery via bootstrap |
 | **Adapter pattern + registry** | Decouples providers (Spotify/YouTube/SoundCloud); easy to mock or swap; centralized error handling |
 | **Debounced tag sync (350ms)** | Batches rapid tag changes; reduces API load; 60ms announce debounce prevents announcement spam |
@@ -427,6 +427,8 @@ Required for Spotify integration:
 Required for Supabase (notes/tags sync):
 - `SUPABASE_URL` → Supabase project URL
 - `SUPABASE_SERVICE_ROLE_KEY` → Service role key for API access
+- `SUPABASE_ANON_KEY` → Public anon key for the browser client (also accepted as `VITE_SUPABASE_ANON_KEY`)
+  - Server helpers also honor `SUPABASE_SERVICE_ROLE` / `SUPABASE_SERVICE_ROLE_KEY` and `VITE_SUPABASE_URL` fallbacks keep the Vercel envs in sync
 
 No `.env` file in repo (secrets managed via Vercel dashboard).
 
@@ -455,3 +457,15 @@ No `.env` file in repo (secrets managed via Vercel dashboard).
 ## Related Documentation
 
 For detailed import flow mapping (UI → code), see **src/docs/ORIENTATION.md**.
+
+
+
+
+
+
+
+
+
+
+
+

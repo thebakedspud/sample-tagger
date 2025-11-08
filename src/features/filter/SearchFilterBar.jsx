@@ -298,14 +298,7 @@ export default function SearchFilterBar({
             }}
           >
             {SORT_OPTIONS.map((option) => (
-              <option
-                key={option.value}
-                value={option.value}
-                style={{
-                  color: 'var(--fg)',
-                  background: 'var(--surface)',
-                }}
-              >
+              <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
