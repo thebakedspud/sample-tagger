@@ -179,27 +179,6 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
       reportedTrackId: trackId,
       prevTrackId,
     })
-
-    // Move focus to new first visible track when it changes
-    if (prevTrackId && prevTrackId !== trackId) {
-      requestAnimationFrame(() => {
-        const buttonId = `add-note-btn-${trackId}`
-        const elem = document.getElementById(buttonId)
-        if (elem) {
-          debugFocus('app:first-visible:refocus', {
-            buttonId,
-            from: `add-note-btn-${prevTrackId}`,
-            reason: 'first-visible-changed',
-          })
-          elem.focus()
-        } else {
-          debugFocus('app:first-visible:refocus-failed', {
-            buttonId,
-            reason: 'button-not-found',
-          })
-        }
-      })
-    }
   }, [])
 
   const markTrackFocusContext = useCallback((reason) => {
