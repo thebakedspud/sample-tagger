@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { focusElement } from '../utils/focusById.js';
 
 /** @type {import('react').CSSProperties} */
 const overlayStyle = {
@@ -51,7 +52,7 @@ export default function RecoveryModal({
     if (open) {
       setAckChecked(false);
       setFeedback('');
-      confirmRef.current?.focus({ preventScroll: true });
+      focusElement(confirmRef.current, { preventScroll: true });
     }
   }, [open, code]);
 

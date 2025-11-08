@@ -1,6 +1,6 @@
 // src/components/UndoPlaceholder.jsx
 import { useEffect, useRef } from 'react'
-import { focusById } from '../utils/focusById.js'
+import { focusById, focusElement } from '../utils/focusById.js'
 
 export default function UndoPlaceholder({
   onUndo,            // (pendingId?) -> void
@@ -28,7 +28,7 @@ export default function UndoPlaceholder({
   // Start/stop the countdown, pausing while focused or hovered
   useEffect(() => {
     lastTickRef.current = performance.now()
-    btnRef.current?.focus()
+    focusElement(btnRef.current)
 
     function isDomFocused() {
       return document.activeElement === btnRef.current

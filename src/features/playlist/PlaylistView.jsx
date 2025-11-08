@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import focusById from '../../utils/focusById.js'
+import focusById, { focusElement } from '../../utils/focusById.js'
 import SearchFilterBar from '../filter/SearchFilterBar.jsx'
 import useTrackFilter from '../filter/useTrackFilter.js'
 import { SORT_KEY } from '../filter/filterTracks.js'
@@ -196,7 +196,7 @@ export default function PlaylistView({
       debugFocus('playlist:focus-effect:focus-search', {
         reason: 'no-filtered-tracks',
       })
-      searchInputRef.current?.focus()
+      focusElement(searchInputRef.current)
       return
     }
     const active = document.activeElement
@@ -233,7 +233,7 @@ export default function PlaylistView({
     (tag) => {
       if (!tag) return
       toggleTag(tag)
-      searchInputRef.current?.focus()
+      focusElement(searchInputRef.current)
     },
     [toggleTag],
   )

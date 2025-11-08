@@ -2,6 +2,7 @@
 // UI for search, scope selection, sort menu, tag filters, and clear action.
 
 import { useMemo, useCallback, useRef } from 'react';
+import { focusElement } from '../../utils/focusById.js';
 import {
   SEARCH_SCOPE,
   SORT_KEY,
@@ -82,7 +83,7 @@ export default function SearchFilterBar({
   const requestScopeFocus = useCallback((value) => {
     const node = scopeRefs.current.get(value);
     if (node) {
-      node.focus();
+      focusElement(node);
     }
   }, []);
 
@@ -106,7 +107,10 @@ export default function SearchFilterBar({
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault();
-        searchInputRef?.current?.focus();
+        const searchInput = searchInputRef?.current;
+        if (searchInput) {
+          focusElement(searchInput);
+        }
       }
     },
     [query, onQueryChange, searchInputRef],
@@ -187,7 +191,10 @@ export default function SearchFilterBar({
       onKeyDown={(event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
           event.preventDefault();
-          searchInputRef?.current?.focus();
+          const searchInput = searchInputRef?.current;
+          if (searchInput) {
+            focusElement(searchInput);
+          }
         }
       }}
     >

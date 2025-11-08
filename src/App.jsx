@@ -32,7 +32,7 @@ import { createRecentCandidate } from './features/recent/recentUtils.js'
 
 /** @typedef {import('./features/import/adapters/types.js').ImportMeta} ImportMeta */
 /** @typedef {import('./features/import/adapters/types.js').ImportResult} ImportResult */
-import { focusById } from './utils/focusById.js'
+import { focusById, focusElement } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
 import './styles/app.css';
@@ -779,7 +779,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     // Optimistic update
     dispatch(playlistActions.saveNoteOptimistic(trackId, trimmed))
     announce('Note added.')
-    editorInvokerRef.current?.focus()
+    focusElement(editorInvokerRef.current)
 
     if (!anonContext?.deviceId) {
       console.warn('[note save] missing device id, skipping sync')
@@ -810,7 +810,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   const onCancelNote = () => {
     dispatch(playlistActions.cancelNoteEdit())
     announce('Note cancelled.')
-    editorInvokerRef.current?.focus()
+    focusElement(editorInvokerRef.current)
   }
 
   function makePendingId(trackId, index) {

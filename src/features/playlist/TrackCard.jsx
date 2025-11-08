@@ -3,6 +3,7 @@ import NoteList from './NoteList.jsx'
 import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
 import ErrorMessage from '../../components/ErrorMessage.jsx'
+import { focusElement } from '../../utils/focusById.js'
 
 /**
  * @param {object} props
@@ -124,7 +125,7 @@ export default function TrackCard({
     if (typeof pendingFocus === 'string') {
       const node = map.get(pendingFocus)
       if (node) {
-        node.focus()
+        focusElement(node)
         setPendingFocus(null)
         return
       }
@@ -137,12 +138,12 @@ export default function TrackCard({
         const fallbackTag = tags[targetIndex]
         const node = fallbackTag ? map.get(fallbackTag) : null
         if (node) {
-          node.focus()
+          focusElement(node)
           setPendingFocus(null)
           return
         }
       }
-      addTagBtnRef.current?.focus()
+      focusElement(addTagBtnRef.current)
       setPendingFocus(null)
     }
   }, [tags, pendingFocus])
@@ -161,14 +162,14 @@ export default function TrackCard({
     const tag = tags[targetIndex]
     if (!tag) {
       if (addingTag) {
-        tagInputRef.current?.focus()
+        focusElement(tagInputRef.current)
       } else {
-        addTagBtnRef.current?.focus()
+        focusElement(addTagBtnRef.current)
       }
       return
     }
     const node = chipRefs.current.get(tag)
-    if (node) node.focus()
+    if (node) focusElement(node)
   }
 
   const startAddTag = () => {
@@ -221,16 +222,16 @@ export default function TrackCard({
       if (chipIndex < tags.length - 1) {
         focusChipByIndex(chipIndex + 1)
       } else if (addingTag) {
-        tagInputRef.current?.focus()
+        focusElement(tagInputRef.current)
       } else {
-        addTagBtnRef.current?.focus()
+        focusElement(addTagBtnRef.current)
       }
     } else if (event.key === 'ArrowLeft') {
       event.preventDefault()
       if (chipIndex > 0) {
         focusChipByIndex(chipIndex - 1)
       } else {
-        addTagBtnRef.current?.focus()
+        focusElement(addTagBtnRef.current)
       }
     }
   }

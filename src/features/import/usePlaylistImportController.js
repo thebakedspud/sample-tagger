@@ -7,7 +7,7 @@ import { ensureNotesEntries, ensureTagsEntries } from '../../utils/notesTagsData
 import { EMPTY_IMPORT_META } from '../../utils/storageBootstrap.js';
 import { normalizeTimestamp } from '../../utils/trackProcessing.js';
 import { playlistActions } from '../playlist/actions.js';
-import { focusById } from '../../utils/focusById.js';
+import { focusById, focusElement } from '../../utils/focusById.js';
 import { debugFocus } from '../../utils/debug.js';
 
 /**
@@ -182,6 +182,17 @@ export default function usePlaylistImportController({
   const pagerRequestIdRef = useRef(0);
   const startBackgroundPaginationRef = useRef(() => {});
 
+  const focusImportInput = useCallback(() => {
+    const node = importInputRef?.current;
+    if (!node || typeof node.focus !== 'function') return;
+    requestAnimationFrame(() => {
+      node.focus();
+      if (typeof node.select === 'function') {
+        node.select();
+      }
+    });
+  }, [importInputRef]);
+
   const getPagerKey = useCallback((meta) => {
     if (!meta || typeof meta !== 'object') return null;
     const provider =
@@ -306,7 +317,7 @@ export default function usePlaylistImportController({
               resolvedTargetId: node.id,
               ...metaInfo,
             });
-            node.focus();
+            focusElement(node);
             return true;
           }
           debugFocus('app:init-import:target-missing', {
@@ -343,7 +354,7 @@ export default function usePlaylistImportController({
               reportedTrackId: targetId,
               resolvedTargetId: firstAddNoteBtn.id,
             });
-            firstAddNoteBtn.focus();
+            focusElement(firstAddNoteBtn);
             initialFocusAppliedRef.current = true;
           } else {
             debugFocus('app:init-import:fallback-heading', {
@@ -442,8 +453,7 @@ export default function usePlaylistImportController({
         const msg = 'Paste a playlist URL to import.';
         setImportError(msg);
         announce('Import failed. URL missing.');
-        importInputRef.current?.focus();
-        importInputRef.current?.select();
+        focusImportInput();
         console.log('[import error]', { code: 'URL_MISSING', raw: null });
         return;
       }
@@ -452,8 +462,7 @@ export default function usePlaylistImportController({
         const msg = msgFromCode(CODES.ERR_UNSUPPORTED_URL);
         setImportError(msg);
         announce('Import failed. Unsupported URL.');
-        importInputRef.current?.focus();
-        importInputRef.current?.select();
+        focusImportInput();
         console.log('[import error]', { code: CODES.ERR_UNSUPPORTED_URL, raw: null });
         return;
       }
@@ -473,8 +482,7 @@ export default function usePlaylistImportController({
           console.log('[import error]', { code, raw: result.error });
           setImportError(msg);
           announce('Import failed. ' + msg);
-          importInputRef.current?.focus();
-          importInputRef.current?.select();
+          focusImportInput();
           return;
         }
 
@@ -498,8 +506,7 @@ export default function usePlaylistImportController({
         console.log('[import error]', { code, raw: err });
         setImportError(msg);
         announce('Import failed. ' + msg);
-        importInputRef.current?.focus();
-        importInputRef.current?.select();
+        focusImportInput();
       }
     },
     [
@@ -625,7 +632,7 @@ export default function usePlaylistImportController({
         console.log('[reimport error]', { code, raw: result.error });
         setImportError(msg);
         announce(msg);
-        if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus());
+        if (wasActive) focusElement(reimportBtnRef.current);
         return;
       }
 
@@ -648,7 +655,7 @@ export default function usePlaylistImportController({
         },
         updateLastImportUrl: false,
       });
-      if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus());
+      if (wasActive) focusElement(reimportBtnRef.current);
     } catch (err) {
       if (err?.name === 'AbortError') {
         return;
@@ -658,7 +665,7 @@ export default function usePlaylistImportController({
       console.log('[reimport error]', { code, raw: err });
       setImportError(msg);
       announce(msg);
-      if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus());
+      if (wasActive) focusElement(reimportBtnRef.current);
     }
   }, [
     announce,
@@ -713,7 +720,7 @@ export default function usePlaylistImportController({
                 debugFocus('app:load-more:manual-fallback', {
                   added: result.added,
                 });
-                loadMoreBtnRef.current?.focus();
+                focusElement(loadMoreBtnRef.current);
               });
             }
             announce(`${result.added} more tracks loaded.`);
