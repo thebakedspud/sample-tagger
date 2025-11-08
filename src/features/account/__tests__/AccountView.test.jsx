@@ -11,8 +11,6 @@ vi.mock('../../../components/display/FontSettings.jsx', () => ({
 }))
 
 const baseProps = {
-  anonId: 'anon-1',
-  deviceId: 'device-1',
   recoveryCode: 'ABCD-EFGH',
   recoveryAcknowledgedAt: '2024-01-01T00:00:00Z',
   recoveryCopyButtonRef: { current: null },
