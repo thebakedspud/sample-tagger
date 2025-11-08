@@ -18,7 +18,6 @@ const {
   apiFetchMock,
   focusByIdMock,
 } = vi.hoisted(() => {
-  const now = Date.now()
   const persistedState = {
     playlistTitle: 'Mocked Playlist',
     importedAt: '2024-01-01T00:00:00.000Z',
