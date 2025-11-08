@@ -7,10 +7,42 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
+      rel="preload"
+      as="style"
       href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@400;500;600&display=swap"
-      rel="stylesheet"
+      onload="this.onload=null;this.rel='stylesheet'"
     />
-    <script src="/font-boot.js"></script>
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@400;500;600&display=swap"
+      />
+    </noscript>
+    <script>
+      (() => {
+        const FONT_KEY = 'sta:v6'
+        const LEGACY_KEY = 'sta:v5'
+        const FALLBACK = 'default'
+        let font = FALLBACK
+
+        if (typeof window !== 'undefined' && 'localStorage' in window) {
+          try {
+            const raw = localStorage.getItem(FONT_KEY) ?? localStorage.getItem(LEGACY_KEY)
+            if (raw) {
+              const parsed = JSON.parse(raw)
+              const candidate = parsed?.uiPrefs?.font
+              if (candidate === 'system' || candidate === 'dyslexic' || candidate === 'default') {
+                font = candidate
+              }
+            }
+          } catch {
+            font = FALLBACK
+          }
+        }
+
+        document.documentElement.setAttribute('data-font', font)
+      })()
+    </script>
     <title>Vite + React</title>
   </head>
   <body>
