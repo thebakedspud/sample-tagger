@@ -424,6 +424,27 @@
   font-weight: 700;
 }
 
+.app-title__link {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.app-title__link:hover {
+  text-decoration: underline;
+}
+
+.app-title__link:focus-visible {
+  outline: 2px solid var(--accent, #5ab4ff);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
 #landing-title {
   font-size: 1.25rem;
   font-weight: 600;

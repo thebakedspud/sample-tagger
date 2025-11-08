@@ -44,6 +44,7 @@ import useInlineUndo from './features/undo/useInlineUndo.js'
 import PlaylistView from './features/playlist/PlaylistView.jsx'
 import AccountView from './features/account/AccountView.jsx'
 import useDeviceRecovery from './features/account/useDeviceRecovery.js'
+import { useGlobalKeybindings } from './hooks/useGlobalKeybindings.js'
 
 // Extracted helpers
 import usePlaylistImportController from './features/import/usePlaylistImportController.js'
@@ -82,8 +83,11 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   const [screen, setScreen] = useState(
     /** @type {'landing' | 'playlist' | 'account'} */ (initialScreen)
   )
+  const goToLanding = useCallback(() => { setScreen('landing') }, [setScreen])
 
   const { message: announceMsg, announce } = useAnnounce({ debounceMs: 60 })
+
+  const landingTitleRef = useRef(null)
 
   // IMPORT state
   const importInputRef = useRef(null)
@@ -539,28 +543,20 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   // 🔐 Safety: if you somehow land on the playlist screen with zero tracks, bounce to landing
   useEffect(() => {
     if (screen === 'playlist' && tracks.length === 0) {
-      setScreen('landing')
+      goToLanding()
     }
-  }, [screen, tracks.length])
+  }, [screen, tracks.length, goToLanding])
 
-  // Ctrl/Cmd+Z undo
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
-        if (pending.size > 0) {
-          e.preventDefault()
-          undoInline()
-        }
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [pending, undoInline])
+  const undoShortcut = pending.size > 0 ? undoInline : null
+  useGlobalKeybindings({
+    onUndo: undoShortcut,
+    onJumpHome: goToLanding,
+    homeFocusRef: landingTitleRef,
+  })
 
   // ===== tiny extracted handlers =====
   function handleImportUrlChange(e) { setImportUrl(e.target.value); setImportError(null) }
   const handleDraftChange = (value) => { dispatch(playlistActions.changeDraft(value)) }
-  function handleBackToLanding() { setScreen('landing') }
 
   const handleBackupNotes = async () => {
     try {
@@ -696,7 +692,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     resetImportFlow()
 
     // Route back to landing + UX polish
-    setScreen('landing')
+    goToLanding()
     announce("All saved data cleared. You're back at the start.")
     setTimeout(() => importInputRef.current?.focus(), 0)
   }
@@ -880,13 +876,24 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
             flexWrap: 'wrap',
           }}
         >
-          <h1 className="app-title">Playlist Notes</h1>
+          <h1 className="app-title">
+            <button
+              type="button"
+              className="app-title__link"
+              ref={landingTitleRef}
+              onClick={goToLanding}
+              title="Go to import screen"
+              aria-label="Playlist Notes — go to import screen"
+            >
+              Playlist Notes
+            </button>
+          </h1>
           <div className="app-header__actions">
             <nav className="app-nav" aria-label="Primary navigation">
               <button
                 type="button"
                 className={`app-nav__btn${screen === 'landing' ? ' is-active' : ''}`}
-                onClick={() => setScreen('landing')}
+                onClick={goToLanding}
                 aria-current={screen === 'landing' ? 'page' : undefined}
               >
                 Import
@@ -1028,7 +1035,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
                   void handleReimport()
                 }}
                 onClear={handleClearAll}
-                onBack={handleBackToLanding}
+                onBack={goToLanding}
                 canReimport={Boolean(lastImportUrl)}
                 reimportBtnRef={reimportBtnRef}
                 loadMoreBtnRef={loadMoreBtnRef}
