@@ -308,7 +308,7 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
       for (const [trackId, entry] of pendingTagQueueRef.current) {
         try {
           await sendTagUpdate(trackId, entry.tags)
-        } catch (err) {
+        } catch (_err) {
           break
         }
       }
