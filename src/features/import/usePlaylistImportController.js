@@ -776,6 +776,15 @@ export default function usePlaylistImportController({
     cancelBackgroundPagination({ resetHistory: true });
     const wasActive = document.activeElement === reimportBtnRef.current;
     setImportError(null);
+    const cachedEntry = hydrateFromCache(lastImportUrl, {
+      focusBehavior: 'heading',
+      announceMessage: REFRESHING_FROM_CACHE_ANNOUNCEMENT,
+      recents: null,
+    });
+    const hydratedFromCache = Boolean(cachedEntry);
+    if (hydratedFromCache) {
+      setIsRefreshingCachedData(true);
+    }
     announce('Re-importing playlist.');
     try {
       const result = await reimportPlaylist(lastImportUrl, {
@@ -826,14 +835,20 @@ export default function usePlaylistImportController({
       setImportError(msg);
       announce(msg);
       if (wasActive) focusElement(reimportBtnRef.current);
+    } finally {
+      if (hydratedFromCache) {
+        setIsRefreshingCachedData(false);
+      }
     }
   }, [
     announce,
     applyImportResult,
     cancelBackgroundPagination,
+    hydrateFromCache,
     importMeta,
     lastImportUrl,
     playlistTitle,
+    setIsRefreshingCachedData,
     msgFromCode,
     reimportBtnRef,
     reimportPlaylist,

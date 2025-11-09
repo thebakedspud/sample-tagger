@@ -466,6 +466,65 @@ describe('usePlaylistImportController', () => {
     expect(deps.setPlaylistTitle).toHaveBeenLastCalledWith('Refreshed Playlist');
   });
 
+  it('reuses cached data when reimporting while refreshing in the background', async () => {
+    const spotifyUrl = 'https://open.spotify.com/playlist/xyz';
+    const deps = createDeps({
+      lastImportUrl: spotifyUrl,
+      lastImportUrlRef: { current: spotifyUrl },
+    });
+    const cachedPayload = {
+      tracks: [{ id: 'track-1', title: 'Cached Track', artist: 'Artist A' }],
+      meta: {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: null,
+        hasMore: false,
+        sourceUrl: spotifyUrl,
+      },
+      title: 'Cached Playlist',
+    };
+    const refreshedPayload = {
+      tracks: [{ id: 'track-2', title: 'New Track', artist: 'Artist B' }],
+      meta: {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: null,
+        hasMore: false,
+        sourceUrl: spotifyUrl,
+      },
+      title: 'Refreshed Playlist',
+    };
+    importInitialMock.mockResolvedValueOnce({ ok: true, data: cachedPayload });
+
+    const { result } = renderHook(() => usePlaylistImportController(deps));
+    await act(() => {
+      result.current.setImportUrl(spotifyUrl);
+    });
+    await act(async () => {
+      await result.current.handleImport();
+    });
+
+    deps.setPlaylistTitle.mockClear();
+    deps.announce.mockClear();
+    const deferred = createDeferred();
+    reimportMock.mockImplementationOnce(() => deferred.promise);
+
+    await act(async () => {
+      const pending = result.current.handleReimport();
+      await Promise.resolve();
+      expect(result.current.isRefreshingCachedData).toBe(true);
+      expect(deps.setPlaylistTitle).toHaveBeenCalledWith('Cached Playlist');
+      expect(deps.announce).toHaveBeenCalledWith(
+        expect.stringContaining('Showing saved playlist while refreshing'),
+      );
+      deferred.resolve({ ok: true, data: refreshedPayload });
+      await pending;
+    });
+
+    expect(result.current.isRefreshingCachedData).toBe(false);
+    expect(deps.setPlaylistTitle).toHaveBeenLastCalledWith('Refreshed Playlist');
+  });
+
   it('primes upstream services once per session when a Spotify URL is entered', async () => {
     const deps = createDeps();
     const { result } = renderHook(() => usePlaylistImportController(deps));
