@@ -1085,12 +1085,15 @@ function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRece
       snapshotId: null,
     }),
   )
+  const handleInitialSyncStatusChange = useCallback((status) => {
+    setInitialSyncStatus(status)
+  }, [])
 
   return (
     <PlaylistStateProvider
       initialState={initialPlaylistStateWithData}
       anonContext={anonContext}
-      onInitialSyncStatusChange={(status) => setInitialSyncStatus(status)}
+      onInitialSyncStatusChange={handleInitialSyncStatusChange}
     >
       <AppInner
         persisted={persisted}
