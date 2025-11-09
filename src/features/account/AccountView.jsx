@@ -59,8 +59,8 @@ function formatTimestamp(timestamp) {
  * @param {AccountViewProps} props
  */
 export default function AccountView({
-  anonId = null,
-  deviceId = null,
+  anonId: _anonId = null,
+  deviceId: _deviceId = null,
   recoveryCode,
   recoveryAcknowledgedAt,
   recoveryCopyButtonRef,
@@ -70,10 +70,10 @@ export default function AccountView({
   regenerationError = null,
   onOpenRestoreDialog,
   onRequestRecoveryModal,
-  onOpenSpotifyLink,
-  spotifyLinked = false,
-  spotifyAccountLabel = '',
-  emailLinkingEnabled = false,
+  onOpenSpotifyLink: _onOpenSpotifyLink,
+  spotifyLinked: _spotifyLinked = false,
+  spotifyAccountLabel: _spotifyAccountLabel = '',
+  emailLinkingEnabled: _emailLinkingEnabled = false,
   showBackupPrompt = false,
 }) {
   const [masked, setMasked] = useState(true);
