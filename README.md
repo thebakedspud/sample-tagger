@@ -52,6 +52,19 @@ For a detailed architectural map, see ORIENTATION.md.
 
 ---
 
+## Type Checking
+
+This project keeps type safety in plain JavaScript by relying on JSDoc plus the TypeScript compiler. `jsconfig.json` enables `"checkJs": true`, so `tsc` can analyze `.js`/`.jsx` files, surface errors, and power editor IntelliSense without a wholesale migration to `.ts`.
+
+### Available Scripts
+
+- `npm run check:tsc` &mdash; runs `tsc --noEmit` using `tsconfig.json` (which extends `jsconfig`). Run this before sending a PR or when touching any code that might affect types.
+- `npm run check:types:overlap` &mdash; a custom guard that scans `types/**/*.d.ts` plus our `prop-types` path remaps to ensure each module is declared once. We ship bespoke `prop-types` definitions (see `jsconfig.json` paths) to patch gaps in DefinitelyTyped, so this script keeps those declarations consistent.
+
+The CI workflow runs `check:tsc` on every push/PR; consider adding the overlap check locally to catch duplicate declarations early.
+
+---
+
 ## Running Log
 
 - 23-10-2025: Notes backup/export and recovery flows integrated into the app.
