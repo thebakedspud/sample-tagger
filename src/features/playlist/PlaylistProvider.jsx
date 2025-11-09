@@ -25,6 +25,7 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
   const [state, dispatch] = useReducer(playlistReducer, initialState)
   const tagSyncSchedulerRef = useRef(null)
   const initialSyncStatusRef = useRef('idle')
+  const syncAttemptedRef = useRef(false)
   const updateInitialSyncStatus = useCallback(
     (next) => {
       const payload = /** @type {BackgroundSyncState} */ ({
@@ -48,12 +49,15 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
 
   useEffect(() => {
     initialSyncStatusRef.current = 'idle'
+    syncAttemptedRef.current = false
   }, [anonContext?.deviceId])
 
   // Remote sync: fetch notes/tags from server on mount when anonId is available
   useEffect(() => {
     if (!anonContext?.deviceId) return
     if (initialSyncStatusRef.current === 'complete') return
+    if (syncAttemptedRef.current) return
+    syncAttemptedRef.current = true
     const hasAnyLocalData =
       Array.isArray(initialState?.tracks) && initialState.tracks.length > 0
     if (!hasAnyLocalData) {
