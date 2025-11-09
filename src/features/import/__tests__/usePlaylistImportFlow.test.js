@@ -17,6 +17,7 @@ import usePlaylistImportFlow, { ImportFlowStatus } from '../usePlaylistImportFlo
 const importPlaylistMock = vi.fn()
 const importNextMock = vi.fn()
 const resetMock = vi.fn()
+const primeProvidersMock = vi.fn(async () => {})
 const loadingState = { value: false }
 
 vi.mock('../useImportPlaylist.js', () => ({
@@ -25,6 +26,7 @@ vi.mock('../useImportPlaylist.js', () => ({
     importNext: importNextMock,
     reset: resetMock,
     loading: loadingState.value,
+    primeProviders: primeProvidersMock,
   }),
 }))
 
@@ -48,6 +50,7 @@ describe('usePlaylistImportFlow', () => {
     importPlaylistMock.mockReset()
     importNextMock.mockReset()
     resetMock.mockReset()
+    primeProvidersMock.mockReset()
     loadingState.value = false
   })
 
@@ -332,5 +335,13 @@ describe('usePlaylistImportFlow', () => {
     loadingState.value = true
     const { result } = renderHook(() => usePlaylistImportFlow())
     expect(result.current.loading).toBe(true)
+  })
+
+  it('primes upstream services through primeUpstreamServices', async () => {
+    const { result } = renderHook(() => usePlaylistImportFlow())
+    await act(async () => {
+      await result.current.primeUpstreamServices()
+    })
+    expect(primeProvidersMock).toHaveBeenCalledTimes(1)
   })
 })

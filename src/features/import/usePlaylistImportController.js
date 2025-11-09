@@ -69,6 +69,7 @@ import { debugFocus } from '../../utils/debug.js';
  * @property {BackgroundSyncState} backgroundSync
  * @property {() => void} resetImportFlow
  * @property {'idle' | 'importing' | 'reimporting' | 'loadingMore'} importStatus
+ * @property {() => Promise<void>} primeUpstreamServices
  */
 
 /**
@@ -162,7 +163,10 @@ export default function usePlaylistImportController({
     reimport: reimportPlaylist,
     loadMore: loadMoreTracks,
     resetFlow: resetImportFlow,
+    primeUpstreamServices,
   } = usePlaylistImportFlow();
+
+  const hasPrimedUpstreamRef = useRef(false);
 
   const msgFromCode = useCallback(
     (code) =>
@@ -520,6 +524,18 @@ export default function usePlaylistImportController({
       providerChip,
     ],
   );
+
+  useEffect(() => {
+    if (hasPrimedUpstreamRef.current) return;
+    const trimmedUrl = typeof importUrl === 'string' ? importUrl.trim() : '';
+    if (!trimmedUrl) return;
+    if (providerChip !== 'spotify') return;
+    if (typeof primeUpstreamServices !== 'function') return;
+    hasPrimedUpstreamRef.current = true;
+    Promise.resolve(primeUpstreamServices()).catch(() => {
+      // Best-effort warmup; failures are intentionally ignored.
+    });
+  }, [importUrl, providerChip, primeUpstreamServices]);
   const handleSelectRecent = useCallback(
     async (recent) => {
       if (!recent || !recent.id) {
@@ -1123,5 +1139,6 @@ export default function usePlaylistImportController({
     backgroundSync,
     resetImportFlow,
     importStatus,
+    primeUpstreamServices,
   };
 }

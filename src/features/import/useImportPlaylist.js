@@ -2,7 +2,7 @@
 // Provides a single entry point for importing playlists from any provider.
 
 // @ts-check
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import detectProvider from './detectProvider.js';
 import * as spotifyAdapter from './adapters/spotifyAdapter.js';
 import * as youtubeAdapter from './adapters/youtubeAdapter.js';
@@ -573,7 +573,7 @@ export default function useImportPlaylist() {
     }
   }
 
-  function reset() {
+function reset() {
     controllerRef.current?.abort();
     controllerRef.current = null;
     requestIdRef.current += 1;
@@ -586,6 +586,24 @@ export default function useImportPlaylist() {
     setTotal(null);
   }
 
+  const primeProviders = useCallback(async () => {
+    const adapters = Object.values(ADAPTER_REGISTRY);
+    await Promise.allSettled(
+      adapters.map((adapter) => {
+        const primeFn = adapter && typeof adapter.prime === 'function' ? adapter.prime : null;
+        if (!primeFn) return Promise.resolve();
+        try {
+          return primeFn();
+        } catch (err) {
+          if (isDev()) {
+            console.debug('[import] prime:adapter-error', { err });
+          }
+          return Promise.resolve();
+        }
+      }),
+    );
+  }, []);
+
   return {
     importPlaylist,
     importNext,
@@ -597,5 +615,6 @@ export default function useImportPlaylist() {
     errorCode,
     total,
     progress: computeProgress(tracks, total),
+    primeProviders,
   };
 }

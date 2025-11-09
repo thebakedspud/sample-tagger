@@ -600,7 +600,22 @@ export async function importPlaylist(options = {}) {
   throw /** @type {Error} */ (lastError ?? createAdapterError(CODES.ERR_UNKNOWN));
 }
 
-export default { importPlaylist };
+/**
+ * Prefetch and memoize a Spotify access token so user-initiated imports
+ * can skip the round trip when possible. Errors are swallowed on purpose
+ * to avoid surfacing noise for speculative calls.
+ * @param {{ signal?: AbortSignal, fetchClient?: ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient> }} [options]
+ */
+export async function prime(options = {}) {
+  const fetchClient = options.fetchClient ?? defaultFetchClient;
+  try {
+    await fetchAccessToken(fetchClient, { signal: options.signal });
+  } catch (err) {
+    debugLog('token:prime_failed', { message: err instanceof Error ? err.message : String(err ?? 'unknown') });
+  }
+}
+
+export default { importPlaylist, prime };
 
 export function __resetSpotifyTokenMemoForTests() {
   tokenMemo = null;

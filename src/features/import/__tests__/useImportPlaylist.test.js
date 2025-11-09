@@ -4,7 +4,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import useImportPlaylist from '../useImportPlaylist.js';
 import { CODES } from '../adapters/types.js';
 import * as youtubeAdapter from '../adapters/youtubeAdapter.js';
-import { __resetSpotifyTokenMemoForTests } from '../adapters/spotifyAdapter.js';
+import * as spotifyAdapter from '../adapters/spotifyAdapter.js';
+
+const { __resetSpotifyTokenMemoForTests } = spotifyAdapter;
 
 const SPOTIFY_URL = 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M';
 const YOUTUBE_URL = 'https://www.youtube.com/playlist?list=PL123';
@@ -351,3 +353,15 @@ describe('useImportPlaylist', () => {
     });
   });
 });
+  it('primes adapters exposing a prime() method', async () => {
+    const primeSpy = vi.spyOn(spotifyAdapter, 'prime').mockResolvedValue();
+
+    const { result } = renderHook(() => useImportPlaylist());
+
+    await act(async () => {
+      await result.current.primeProviders();
+    });
+
+    expect(primeSpy).toHaveBeenCalledTimes(1);
+    primeSpy.mockRestore();
+  });

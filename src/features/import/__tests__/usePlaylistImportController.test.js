@@ -9,6 +9,7 @@ const importInitialMock = vi.hoisted(() => vi.fn());
 const reimportMock = vi.hoisted(() => vi.fn());
 const loadMoreMock = vi.hoisted(() => vi.fn());
 const resetFlowMock = vi.hoisted(() => vi.fn());
+const primeUpstreamServicesMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
 vi.mock('../detectProvider.js', () => ({
   default: detectProviderMock,
@@ -22,6 +23,7 @@ vi.mock('../usePlaylistImportFlow.js', () => ({
     reimport: reimportMock,
     loadMore: loadMoreMock,
     resetFlow: resetFlowMock,
+    primeUpstreamServices: primeUpstreamServicesMock,
   })),
   ImportFlowStatus: {
     IDLE: 'idle',
@@ -109,6 +111,7 @@ beforeEach(() => {
   reimportMock.mockReset();
   loadMoreMock.mockReset();
   resetFlowMock.mockReset();
+  primeUpstreamServicesMock.mockClear();
   focusByIdMock.mockReset();
   rafSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
     if (typeof cb === 'function') {
@@ -323,5 +326,24 @@ describe('usePlaylistImportController', () => {
         expect.objectContaining({ coverUrl: 'stored.jpg' }),
       );
     });
+  });
+
+  it('primes upstream services once per session when a Spotify URL is entered', async () => {
+    const deps = createDeps();
+    const { result } = renderHook(() => usePlaylistImportController(deps));
+
+    await act(() => {
+      result.current.setImportUrl('https://open.spotify.com/playlist/abc1234567890123456789');
+    });
+
+    await waitFor(() => {
+      expect(primeUpstreamServicesMock).toHaveBeenCalledTimes(1);
+    });
+
+    await act(() => {
+      result.current.setImportUrl('https://open.spotify.com/playlist/another1234567890123456');
+    });
+
+    expect(primeUpstreamServicesMock).toHaveBeenCalledTimes(1);
   });
 });
