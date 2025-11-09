@@ -7,7 +7,7 @@ import usePlaylistImportFlow, { ImportFlowStatus } from '../usePlaylistImportFlo
  * @typedef {Object} TestImportFlowApi
  * @property {typeof ImportFlowStatus[keyof typeof ImportFlowStatus]} status
  * @property {(url: string, options?: any) => Promise<ImportResult>} importInitial
- * @property {(options?: any) => Promise<ImportResult>} reimport
+ * @property {(url: string, options?: any) => Promise<ImportResult>} reimport
  * @property {(options?: any) => Promise<ImportResult>} loadMore
  * @property {() => void} resetFlow
  * @property {boolean} loading

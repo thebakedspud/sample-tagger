@@ -10,6 +10,23 @@ import { playlistActions } from '../playlist/actions.js';
 import { focusById, focusElement } from '../../utils/focusById.js';
 import { debugFocus } from '../../utils/debug.js';
 
+const REFRESHING_FROM_CACHE_ANNOUNCEMENT = 'Showing saved playlist while refreshing the latest data.';
+
+function normalizeSourceKey(raw) {
+  if (typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  return trimmed;
+}
+
+function computePayloadTotal(payload) {
+  if (!payload) return null;
+  if (typeof payload.total === 'number' && Number.isFinite(payload.total)) {
+    return payload.total;
+  }
+  const tracks = Array.isArray(payload.tracks) ? payload.tracks : [];
+  return tracks.length;
+}
+
 /**
  * @typedef {import('./adapters/types.js').ImportMeta} ImportMeta
  * @typedef {import('./adapters/types.js').ImportResult} ImportResult
@@ -70,6 +87,7 @@ import { debugFocus } from '../../utils/debug.js';
  * @property {() => void} resetImportFlow
  * @property {'idle' | 'importing' | 'reimporting' | 'loadingMore'} importStatus
  * @property {() => Promise<void>} primeUpstreamServices
+ * @property {boolean} isRefreshingCachedData
  */
 
 /**
@@ -154,6 +172,38 @@ export default function usePlaylistImportController({
   /** @type {[BackgroundSyncState, import('react').Dispatch<import('react').SetStateAction<BackgroundSyncState>>]} */
   const [backgroundSync, setBackgroundSync] = useState(() =>
     resolveInitialBackgroundState(baseImportMeta, initialPersistedTrackCount),
+  );
+  const cachedPlaylistsRef = useRef(new Map());
+  const [isRefreshingCachedData, setIsRefreshingCachedData] = useState(false);
+
+  const cacheKeyFromSource = useCallback((raw) => normalizeSourceKey(raw), []);
+
+  const getCachedResult = useCallback(
+    (sourceUrl) => {
+      const key = cacheKeyFromSource(sourceUrl);
+      if (!key) return null;
+      return cachedPlaylistsRef.current.get(key) ?? null;
+    },
+    [cacheKeyFromSource],
+  );
+
+  const rememberCachedResult = useCallback(
+    (sourceUrl, payload) => {
+      if (!payload) return;
+      const entry = {
+        data: payload,
+        storedAt: Date.now(),
+      };
+      const incomingKey = cacheKeyFromSource(sourceUrl);
+      const metaKey = cacheKeyFromSource(payload?.meta?.sourceUrl);
+      if (incomingKey) {
+        cachedPlaylistsRef.current.set(incomingKey, entry);
+      }
+      if (metaKey && metaKey !== incomingKey) {
+        cachedPlaylistsRef.current.set(metaKey, entry);
+      }
+    },
+    [cacheKeyFromSource],
   );
 
   const {
@@ -244,6 +294,23 @@ export default function usePlaylistImportController({
     },
     [],
   );
+  /**
+   * @param {any} payload
+   * @param {{
+   *   sourceUrl?: string,
+   *   announceMessage?: string,
+   *   fallbackTitle?: string,
+   *   focusBehavior?: 'first-track' | 'heading' | 'default-heading',
+   *   recents?: {
+   *     importedAt?: number | string | Date | null,
+   *     total?: number | null,
+   *     coverUrl?: string | null,
+   *     lastUsedAt?: number | null,
+   *     pinned?: boolean
+   *   } | null,
+   *   updateLastImportUrl?: boolean
+   * }} [options]
+   */
   const applyImportResult = useCallback(
     (payload, options = {}) => {
       const {
@@ -424,6 +491,9 @@ export default function usePlaylistImportController({
         snapshotId: meta?.snapshotId ?? null,
       });
 
+      const cacheSource = sourceUrl ?? meta?.sourceUrl ?? '';
+      rememberCachedResult(cacheSource, payload);
+
       return { trackCount, title: resolvedTitle };
     },
     [
@@ -436,6 +506,7 @@ export default function usePlaylistImportController({
       markTrackFocusContext,
       notesByTrack,
       pushRecentPlaylist,
+      rememberCachedResult,
       setImportedAt,
       setImportMeta,
       setLastImportUrl,
@@ -445,6 +516,50 @@ export default function usePlaylistImportController({
       tagsByTrack,
       tracksRef,
     ],
+  );
+  /**
+   * @param {string} sourceUrl
+   * @param {{
+   *   announceMessage?: string,
+   *   focusBehavior?: 'first-track' | 'heading' | 'default-heading',
+   *   recents?: {
+   *     coverUrl?: string | null,
+   *     pinned?: boolean,
+   *     lastUsedAt?: number | null
+   *   } | null
+   * }} [options]
+   */
+  const hydrateFromCache = useCallback(
+    (sourceUrl, options = {}) => {
+      const entry = getCachedResult(sourceUrl);
+      if (!entry?.data) {
+        return null;
+      }
+      const payload = entry.data;
+      const total = computePayloadTotal(payload);
+      const { recents: recentsOverrides, announceMessage: announceOverride, focusBehavior: focusOverride } =
+        options || {};
+      const shouldSkipRecents = recentsOverrides === null;
+      const mergedRecents = shouldSkipRecents
+        ? null
+        : {
+            importedAt: payload?.importedAt ?? null,
+            total,
+            coverUrl: payload?.coverUrl ?? recentsOverrides?.coverUrl ?? null,
+            lastUsedAt: recentsOverrides?.lastUsedAt ?? Date.now(),
+            pinned: recentsOverrides?.pinned,
+          };
+
+      applyImportResult(payload, {
+        sourceUrl,
+        announceMessage: announceOverride ?? REFRESHING_FROM_CACHE_ANNOUNCEMENT,
+        ...(focusOverride ? { focusBehavior: focusOverride } : {}),
+        recents: mergedRecents,
+      });
+
+      return entry;
+    },
+    [applyImportResult, getCachedResult],
   );
   const handleImportSubmit = useCallback(
     async (event) => {
@@ -472,6 +587,11 @@ export default function usePlaylistImportController({
       }
 
       announce('Import started.');
+      const cachedEntry = hydrateFromCache(trimmedUrl);
+      const hydratedFromCache = Boolean(cachedEntry);
+      if (hydratedFromCache) {
+        setIsRefreshingCachedData(true);
+      }
       try {
         const result = await importInitial(trimmedUrl, {
           providerHint: providerChip,
@@ -511,20 +631,25 @@ export default function usePlaylistImportController({
         setImportError(msg);
         announce('Import failed. ' + msg);
         focusImportInput();
+      } finally {
+        if (hydratedFromCache) {
+          setIsRefreshingCachedData(false);
+        }
       }
     },
     [
       announce,
       applyImportResult,
       cancelBackgroundPagination,
+      hydrateFromCache,
       focusImportInput,
       importInitial,
       importUrl,
+      setIsRefreshingCachedData,
       msgFromCode,
       providerChip,
     ],
   );
-
   useEffect(() => {
     if (hasPrimedUpstreamRef.current) return;
     const trimmedUrl = typeof importUrl === 'string' ? importUrl.trim() : '';
@@ -562,6 +687,19 @@ export default function usePlaylistImportController({
       setImportError(null);
       updateRecentCardState(recent.id, { loading: true, error: null });
       announce(`Loading playlist ${recent.title ? `"${recent.title}"` : ''}.`);
+      const cachedEntry = hydrateFromCache(trimmedUrl, {
+        focusBehavior: 'heading',
+        announceMessage: REFRESHING_FROM_CACHE_ANNOUNCEMENT,
+        recents: {
+          coverUrl: recent.coverUrl ?? null,
+          pinned: Boolean(recent.pinned),
+          lastUsedAt: Date.now(),
+        },
+      });
+      const hydratedFromCache = Boolean(cachedEntry);
+      if (hydratedFromCache) {
+        setIsRefreshingCachedData(true);
+      }
 
       try {
         const result = await importInitial(trimmedUrl, {
@@ -613,16 +751,22 @@ export default function usePlaylistImportController({
         setImportError(msg);
         announce(msg);
         return { ok: false, error: msg };
+      } finally {
+        if (hydratedFromCache) {
+          setIsRefreshingCachedData(false);
+        }
       }
     },
     [
       announce,
       applyImportResult,
       cancelBackgroundPagination,
+      hydrateFromCache,
       importInitial,
       importStatus,
       msgFromCode,
       setImportError,
+      setIsRefreshingCachedData,
       setImportUrl,
       updateRecentCardState,
     ],
@@ -1140,5 +1284,6 @@ export default function usePlaylistImportController({
     resetImportFlow,
     importStatus,
     primeUpstreamServices,
+    isRefreshingCachedData,
   };
 }

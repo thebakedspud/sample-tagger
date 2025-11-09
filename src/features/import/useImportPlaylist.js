@@ -191,7 +191,8 @@ function computeProgress(list, total) {
  *   importBusyKind: string | null,
  *   errorCode: import('./adapters/types.js').AdapterErrorCode | null,
  *   total: number | null,
- *   progress: { imported: number, total: number } | null
+ *   progress: { imported: number, total: number } | null,
+ *   primeProviders: () => Promise<void>
  * }}
  */
 export default function useImportPlaylist() {
@@ -590,7 +591,8 @@ function reset() {
     const adapters = Object.values(ADAPTER_REGISTRY);
     await Promise.allSettled(
       adapters.map((adapter) => {
-        const primeFn = adapter && typeof adapter.prime === 'function' ? adapter.prime : null;
+        const adapterAny = /** @type {any} */ (adapter);
+        const primeFn = adapterAny && typeof adapterAny.prime === 'function' ? adapterAny.prime : null;
         if (!primeFn) return Promise.resolve();
         try {
           return primeFn();
