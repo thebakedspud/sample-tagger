@@ -11,8 +11,6 @@ import {
   clearPendingMigrationSnapshot,
   writeAutoBackupSnapshot,
   stashPendingMigrationSnapshot,
-  saveRecent,
-  upsertRecent,
 } from './utils/storage.js'
 import { normalizeTag } from './features/tags/tagUtils.js'
 import { STOCK_TAGS } from './features/tags/constants.js'
@@ -28,7 +26,7 @@ import {
   groupRemoteNotes,
 } from './utils/notesTagsData.js'
 import { bootstrapStorageState, EMPTY_IMPORT_META } from './utils/storageBootstrap.js'
-import { createRecentCandidate } from './features/recent/recentUtils.js'
+import { useRecentPlaylists } from './features/recent/useRecentPlaylists.js'
 
 /** @typedef {import('./features/import/adapters/types.js').ImportMeta} ImportMeta */
 /** @typedef {import('./features/import/adapters/types.js').ImportResult} ImportResult */
@@ -138,55 +136,12 @@ function AppInner({
   const firstVisibleTrackIdRef = useRef(null)
   const [trackFocusContext, setTrackFocusContext] = useState({ reason: null, ts: 0 })
   const initialFocusAppliedRef = useRef(false)
-  const [recentPlaylists, setRecentPlaylists] = useState(() => initialRecents)
-  /** @type {import('react').MutableRefObject<typeof initialRecents>} */
-  const recentRef = useRef(recentPlaylists)
-  useEffect(() => {
-    recentRef.current = recentPlaylists
-  }, [recentPlaylists])
-
-  const [recentCardState, setRecentCardState] = useState(() => ({}))
-  const updateRecentCardState = useCallback((id, updater) => {
-    if (!id) return
-    setRecentCardState((prev) => {
-      const next = { ...prev }
-      if (typeof updater === 'function') {
-        const draft = updater(next[id] ?? {})
-        if (draft && Object.keys(draft).length > 0) {
-          next[id] = draft
-        } else {
-          delete next[id]
-        }
-      } else if (updater && Object.keys(updater).length > 0) {
-        next[id] = { ...(next[id] ?? {}), ...updater }
-      } else {
-        delete next[id]
-      }
-      return next
-    })
-  }, [])
-
-  const pushRecentPlaylist = useCallback((meta, options = {}) => {
-    const candidate = createRecentCandidate(meta, options)
-    if (!candidate) return
-    const next = upsertRecent(recentRef.current, candidate)
-    recentRef.current = next
-    setRecentPlaylists(next)
-    saveRecent(next)
-  }, [])
-
-  useEffect(() => {
-    setRecentCardState((prev) => {
-      const activeIds = new Set(recentPlaylists.map((item) => item.id))
-      const next = {}
-      Object.entries(prev).forEach(([id, state]) => {
-        if (activeIds.has(id)) {
-          next[id] = state
-        }
-      })
-      return next
-    })
-  }, [recentPlaylists])
+  const {
+    recentPlaylists,
+    recentCardState,
+    updateRecentCardState,
+    pushRecentPlaylist,
+  } = useRecentPlaylists(initialRecents)
 
   const handleFirstVisibleTrackChange = useCallback((trackId) => {
     const prevTrackId = firstVisibleTrackIdRef.current
