@@ -39,9 +39,20 @@ const mockedGroupRemoteNotes = vi.mocked(groupRemoteNotes)
 const mockedCreateTagSyncScheduler = vi.mocked(createTagSyncScheduler)
 const mockedNotifyDeviceContextStale = vi.mocked(notifyDeviceContextStale)
 
+const makeResolvedResponse = (overrides = {}) => ({
+  ok: true,
+  json: vi.fn().mockResolvedValue({}),
+  ...overrides,
+})
+
+const getTagQueueKey = (deviceId) => `sta:pending-tag-sync:${deviceId}`
+
 describe('PlaylistProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.clear()
+    }
     
     // Set up default mock implementations
     const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
@@ -157,7 +168,10 @@ describe('PlaylistProvider', () => {
       )
 
       await waitFor(() => {
-        expect(mockedApiFetch).toHaveBeenCalledWith('/api/db/notes')
+        expect(mockedApiFetch).toHaveBeenCalledWith(
+          '/api/db/notes',
+          expect.objectContaining({ signal: expect.any(AbortSignal) })
+        )
       })
     })
 
@@ -340,6 +354,171 @@ describe('PlaylistProvider', () => {
           source: 'notes-sync',
           status: 401
         })
+      })
+    })
+
+    it('aborts in-flight sync when deviceId changes', async () => {
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
+
+      const abortError = Object.assign(new Error('Aborted'), { name: 'AbortError' })
+      let abortTriggered = false
+
+      mockedApiFetch.mockImplementationOnce((_url, init = {}) => {
+        const { signal } = init
+        return new Promise((_, reject) => {
+          signal?.addEventListener('abort', () => {
+            abortTriggered = true
+            reject(abortError)
+          })
+        })
+      })
+
+      const { rerender } = render(
+        <PlaylistStateProvider 
+          initialState={stateWithLocalData} 
+          anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
+        >
+          <div>Test</div>
+        </PlaylistStateProvider>
+      )
+
+      await waitFor(() => {
+        expect(mockedApiFetch).toHaveBeenCalledTimes(1)
+      })
+
+      rerender(
+        <PlaylistStateProvider 
+          initialState={stateWithLocalData} 
+          anonContext={{ deviceId: 'device-2', anonId: 'anon-1' }}
+        >
+          <div>Test</div>
+        </PlaylistStateProvider>
+      )
+
+      await waitFor(() => {
+        expect(abortTriggered).toBe(true)
+      })
+
+      await waitFor(() => {
+        expect(mockedApiFetch).toHaveBeenCalledTimes(2)
+      })
+    })
+  })
+
+  describe('Persistent Tag Queue', () => {
+    it('persists tag updates until sync succeeds', async () => {
+      const storageKey = getTagQueueKey('device-1')
+      mockedCreateTagSyncScheduler.mockReturnValue(null)
+
+      const postResponse = /** @type {Response} */ (/** @type {unknown} */ (makeResolvedResponse()))
+      mockedApiFetch.mockResolvedValue(postResponse)
+
+      function TestChild() {
+        const { syncTrackTags } = usePlaylistSync()
+        return (
+          <button onClick={() => syncTrackTags('t1', ['tag1'])}>
+            Sync
+          </button>
+        )
+      }
+
+      render(
+        <PlaylistStateProvider 
+          initialState={initialPlaylistState} 
+          anonContext={{ deviceId: 'device-1', anonId: null }}
+        >
+          <TestChild />
+        </PlaylistStateProvider>
+      )
+
+      const button = screen.getByText('Sync')
+      button.click()
+
+      const rawQueue = window.localStorage.getItem(storageKey)
+      expect(rawQueue).toContain('"trackId":"t1"')
+
+      await waitFor(() => {
+        expect(window.localStorage.getItem(storageKey)).toBeNull()
+      })
+    })
+
+    it('retains pending entries when sync fails', async () => {
+      const storageKey = getTagQueueKey('device-1')
+      mockedCreateTagSyncScheduler.mockReturnValue(null)
+      mockedApiFetch.mockRejectedValue(new Error('offline'))
+
+      function TestChild() {
+        const { syncTrackTags } = usePlaylistSync()
+        const handleSync = () => {
+          syncTrackTags('t1', ['offline']).catch(() => {})
+        }
+        return <button onClick={handleSync}>Sync</button>
+      }
+
+      render(
+        <PlaylistStateProvider 
+          initialState={initialPlaylistState} 
+          anonContext={{ deviceId: 'device-1', anonId: null }}
+        >
+          <TestChild />
+        </PlaylistStateProvider>
+      )
+
+      const button = screen.getByText('Sync')
+      button.click()
+
+      await waitFor(() => {
+        expect(window.localStorage.getItem(storageKey)).toContain('"trackId":"t1"')
+      })
+    })
+
+    it('flushes persisted queue on mount', async () => {
+      const storageKey = getTagQueueKey('device-1')
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify([{ trackId: 't1', tags: ['pending'], updatedAt: Date.now() }]),
+      )
+
+      mockedApiFetch.mockImplementation((url, init = {}) => {
+        if (init?.method === 'POST') {
+          return Promise.resolve(
+            /** @type {Response} */ (/** @type {unknown} */ (makeResolvedResponse())),
+          )
+        }
+        return Promise.resolve(
+          /** @type {Response} */ (/** @type {unknown} */ ({
+            ok: true,
+            json: vi.fn().mockResolvedValue({ notes: [] }),
+          })),
+        )
+      })
+
+      render(
+        <PlaylistStateProvider 
+          initialState={initialPlaylistState} 
+          anonContext={{ deviceId: 'device-1', anonId: null }}
+        >
+          <div>Test</div>
+        </PlaylistStateProvider>
+      )
+
+      await waitFor(() => {
+        expect(mockedApiFetch).toHaveBeenCalledWith(
+          '/api/db/notes',
+          expect.objectContaining({
+            method: 'POST',
+            body: JSON.stringify({ trackId: 't1', tags: ['pending'] }),
+          }),
+        )
+      })
+
+      await waitFor(() => {
+        expect(window.localStorage.getItem(storageKey)).toBeNull()
       })
     })
   })
