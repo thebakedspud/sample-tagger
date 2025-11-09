@@ -32,6 +32,8 @@ import { createRecentCandidate } from './features/recent/recentUtils.js'
 
 /** @typedef {import('./features/import/adapters/types.js').ImportMeta} ImportMeta */
 /** @typedef {import('./features/import/adapters/types.js').ImportResult} ImportResult */
+/** @typedef {import('./features/import/usePlaylistImportController.js').BackgroundSyncStatus} BackgroundSyncStatus */
+/** @typedef {import('./features/import/usePlaylistImportController.js').BackgroundSyncState} BackgroundSyncState */
 import { focusById, focusElement } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
@@ -67,13 +69,16 @@ import {
 import buildInitialPlaylistState from './features/playlist/buildInitialPlaylistState.js'
 
 /**
- * @typedef {'idle' | 'pending' | 'loading' | 'cooldown' | 'complete' | 'error'} BackgroundSyncStatus
- * @typedef {{ status: BackgroundSyncStatus, loaded: number, total: number|null, lastError: string|null, snapshotId?: string|null }} BackgroundSyncState
- */
-
-/**
  * Inner component that consumes playlist state from context
- * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: string, onAnonContextChange: Function }} props
+ * @param {{
+ *  persisted: any,
+ *  pendingMigrationSnapshot: any,
+ *  initialRecents: any,
+ *  persistedTracks: any,
+ *  initialScreen: string,
+ *  onAnonContextChange: Function,
+ *  initialSyncStatus: BackgroundSyncState
+ * }} props
  */
 function AppInner({
   persisted,
@@ -1116,13 +1121,21 @@ function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRece
     anonId: getAnonId()
   }))
 
-  const [initialSyncStatus, setInitialSyncStatus] = useState({ status: 'idle', lastError: null })
+  const [initialSyncStatus, setInitialSyncStatus] = useState(
+    /** @type {BackgroundSyncState} */ ({
+      status: 'idle',
+      lastError: null,
+      loaded: 0,
+      total: null,
+      snapshotId: null,
+    }),
+  )
 
   return (
     <PlaylistStateProvider
       initialState={initialPlaylistStateWithData}
       anonContext={anonContext}
-      onInitialSyncStatusChange={setInitialSyncStatus}
+      onInitialSyncStatusChange={(status) => setInitialSyncStatus(status)}
     >
       <AppInner
         persisted={persisted}

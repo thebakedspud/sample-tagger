@@ -19,17 +19,20 @@ import { initialPlaylistState } from './playlistReducer.js';
 import { computeHasLocalNotes, computeAllCustomTags } from './helpers.js';
 
 /**
+ * @typedef {Object} PlaylistBootstrapState
+ * @property {any} persisted
+ * @property {any} pendingMigrationSnapshot
+ * @property {any[]} initialRecents
+ * @property {any[]} persistedTracks
+ * @property {string} initialScreen
+ */
+
+/**
  * Builds the initial playlist state from bootstrapped storage data.
  *
- * @param {{
- *   persisted: any,
- *   pendingMigrationSnapshot: any,
- *   initialRecents: any[],
- *   persistedTracks: any[],
- *   initialScreen: string,
- * }} bootstrapState Bootstrapped storage state returned by bootstrapStorageState().
+ * @param {PlaylistBootstrapState} bootstrapState Bootstrapped storage state returned by bootstrapStorageState().
  * @returns {{
- *   bootstrapState: typeof bootstrapState,
+ *   bootstrapState: PlaylistBootstrapState,
  *   initialNotesMap: ReturnType<typeof createInitialNotesMap>,
  *   initialTagsMap: ReturnType<typeof createInitialTagsMap>,
  *   initialPlaylistStateWithData: typeof initialPlaylistState,

@@ -8,7 +8,7 @@ import { getTagSuggestions, normalizeTag } from './tagUtils.js';
  * @property {string[]} [stockTags]
  * @property {string[]} [customTags]
  * @property {string[]} [existingTags]
- * @property {(tag: string) => boolean | void} [onAdd]
+ * @property {(tag: string) => boolean | { success?: boolean } | void} [onAdd]
  * @property {() => void} [onCancel]
  * @property {string} [placeholder]
  * @property {boolean} [autoFocus]
@@ -21,7 +21,7 @@ import { getTagSuggestions, normalizeTag } from './tagUtils.js';
  *   stockTags?: string[];
  *   customTags?: string[];
  *   existingTags?: string[];
- *   onAdd?: (tag: string) => boolean | void;
+ *   onAdd?: (tag: string) => boolean | { success?: boolean } | void;
  *   onCancel?: () => void;
  *   placeholder?: string;
  *   autoFocus?: boolean;
@@ -103,10 +103,10 @@ function TagInputInner(props, ref) {
     const normalized = normalizeTag(rawTag);
     if (!normalized) return;
     const result = onAdd ? onAdd(normalized) : true;
-    const succeeded =
-      typeof result === 'object' && result !== null
-        ? result.success !== false
-        : result !== false;
+    let succeeded = result !== false;
+    if (typeof result === 'object' && result !== null) {
+      succeeded = result.success !== false;
+    }
     if (succeeded) {
       setQuery('');
       setHighlightIndex(-1);

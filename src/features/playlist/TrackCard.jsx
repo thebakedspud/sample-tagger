@@ -31,7 +31,7 @@ import { focusElement } from '../../utils/focusById.js'
  * @param {(trackId: string|number) => void} props.onSaveNote
  * @param {() => void} props.onCancelNote
  * @param {(trackId: string|number, noteIndex: number) => void} props.onDeleteNote
- * @param {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string }} props.onAddTag
+ * @param {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string, tag?: string }} props.onAddTag
  * @param {(trackId: string|number, tag: string) => void} props.onRemoveTag
  * @param {string[]} props.stockTags
  * @param {string[]} props.customTags

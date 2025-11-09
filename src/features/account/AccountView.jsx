@@ -35,7 +35,32 @@ function formatTimestamp(timestamp) {
   }
 }
 
+/**
+ * @typedef {Object} AccountViewProps
+ * @property {string|null} [anonId]
+ * @property {string|null} [deviceId]
+ * @property {string|null} [recoveryCode]
+ * @property {Date|string|null} [recoveryAcknowledgedAt]
+ * @property {import('react').RefObject<HTMLButtonElement>} [recoveryCopyButtonRef]
+ * @property {() => void} [onConfirmRegenerate]
+ * @property {() => void} [onCopyRecoveryCode]
+ * @property {boolean} [regeneratingRecoveryCode]
+ * @property {string|null} [regenerationError]
+ * @property {() => void} [onOpenRestoreDialog]
+ * @property {() => void} [onRequestRecoveryModal]
+ * @property {boolean} [showBackupPrompt]
+ * @property {() => void} [onOpenSpotifyLink]
+ * @property {boolean} [spotifyLinked]
+ * @property {string} [spotifyAccountLabel]
+ * @property {boolean} [emailLinkingEnabled]
+ */
+
+/**
+ * @param {AccountViewProps} props
+ */
 export default function AccountView({
+  anonId = null,
+  deviceId = null,
   recoveryCode,
   recoveryAcknowledgedAt,
   recoveryCopyButtonRef,
@@ -45,6 +70,10 @@ export default function AccountView({
   regenerationError = null,
   onOpenRestoreDialog,
   onRequestRecoveryModal,
+  onOpenSpotifyLink,
+  spotifyLinked = false,
+  spotifyAccountLabel = '',
+  emailLinkingEnabled = false,
   showBackupPrompt = false,
 }) {
   const [masked, setMasked] = useState(true);

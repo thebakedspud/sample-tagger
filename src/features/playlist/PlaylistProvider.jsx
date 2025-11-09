@@ -10,13 +10,15 @@ import { createTagSyncScheduler } from '../tags/tagSyncQueue.js'
 import { PlaylistStateContext, PlaylistDispatchContext, PlaylistSyncContext } from './contexts.js'
 import { notifyDeviceContextStale } from '../../lib/deviceState.js'
 
+/** @typedef {import('../import/usePlaylistImportController.js').BackgroundSyncState} BackgroundSyncState */
+
 /**
  * Provider component that manages playlist state via reducer
  * 
  * @param {Object} props
  * @param {typeof initialPlaylistState} props.initialState - Initial state for the reducer
  * @param {{ deviceId: string | null, anonId: string | null }} props.anonContext - Device context for sync
- * @param {(status: { status: 'idle' | 'loading' | 'complete' | 'error', lastError?: string | null }) => void} [props.onInitialSyncStatusChange]
+ * @param {(status: BackgroundSyncState) => void} [props.onInitialSyncStatusChange]
  * @param {import('react').ReactNode} props.children - Child components
  */
 export function PlaylistStateProvider({ initialState, anonContext, onInitialSyncStatusChange, children }) {
@@ -25,8 +27,21 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
   const initialSyncStatusRef = useRef('idle')
   const updateInitialSyncStatus = useCallback(
     (next) => {
-      initialSyncStatusRef.current = next?.status ?? initialSyncStatusRef.current
-      onInitialSyncStatusChange?.(next)
+      const payload = /** @type {BackgroundSyncState} */ ({
+        status: next?.status ?? initialSyncStatusRef.current ?? 'idle',
+        lastError:
+          typeof next?.lastError === 'string' || next?.lastError === null
+            ? next.lastError
+            : null,
+        loaded: typeof next?.loaded === 'number' ? next.loaded : 0,
+        total:
+          typeof next?.total === 'number' || next?.total === null
+            ? next.total
+            : null,
+        snapshotId: typeof next?.snapshotId === 'string' ? next.snapshotId : null,
+      })
+      initialSyncStatusRef.current = payload.status
+      onInitialSyncStatusChange?.(payload)
     },
     [onInitialSyncStatusChange],
   )
@@ -47,10 +62,8 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
     }
 
     let cancelled = false
+    /** @type {ReturnType<typeof setTimeout> | null} */
     let timeoutId = null
-    const schedule = typeof requestIdleCallback === 'function'
-      ? (cb) => requestIdleCallback(cb)
-      : (cb) => setTimeout(cb, 0)
 
     const syncNotes = async () => {
       try {
@@ -68,7 +81,7 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
         const payload = await response.json().catch(() => ({}))
         if (cancelled) return
         if (!response.ok) {
-          clearTimeout(timeoutId)
+          if (timeoutId) clearTimeout(timeoutId)
           if (response.status === 401 || response.status === 403 || response.status === 404) {
             notifyDeviceContextStale({ source: 'notes-sync', status: response.status })
           }
@@ -91,7 +104,7 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
         updateInitialSyncStatus({ status: 'complete', lastError: null })
       } catch (err) {
         if (!cancelled) {
-          clearTimeout(timeoutId)
+          if (timeoutId) clearTimeout(timeoutId)
           console.error('[notes sync] error', err)
           updateInitialSyncStatus({
             status: 'error',
@@ -101,12 +114,20 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
       }
     }
 
-    const deferredHandle = schedule(syncNotes)
+    let deferredHandle = /** @type {number | null} */ (null)
+    if (typeof requestIdleCallback === 'function') {
+      deferredHandle = requestIdleCallback(syncNotes)
+    } else {
+      setTimeout(syncNotes, 0)
+    }
 
     return () => {
       cancelled = true
-      clearTimeout(timeoutId)
-      if (typeof cancelIdleCallback === 'function' && deferredHandle && deferredHandle > 0) {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      if (typeof cancelIdleCallback === 'function' && typeof deferredHandle === 'number') {
         cancelIdleCallback(deferredHandle)
       }
     }

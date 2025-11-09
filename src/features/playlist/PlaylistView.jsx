@@ -6,7 +6,7 @@ import { SORT_KEY } from '../filter/filterTracks.js'
 import { DEBUG_FOCUS, debugFocus } from '../../utils/debug.js'
 import TrackCard from './TrackCard.jsx'
 
-/** @typedef {import('../../App.jsx').BackgroundSyncState} BackgroundSyncState */
+/** @typedef {import('../import/usePlaylistImportController.js').BackgroundSyncState} BackgroundSyncState */
 
 const DEFAULT_BACKGROUND_SYNC = Object.freeze({
   status: 'idle',
@@ -49,7 +49,7 @@ const EMPTY_PLACEHOLDERS = Object.freeze([])
  * @param {string[]} props.stockTags
  * @param {string[]} props.customTags
  * @param {(message: string) => void} props.announce
- * @param {{ status: 'idle' | 'loading' | 'complete' | 'error', lastError?: string | null }} [props.initialSyncStatus]
+ * @param {BackgroundSyncState} [props.initialSyncStatus]
  * @param {BackgroundSyncState} [props.backgroundSync]
  * @param {{ reason: string|null, ts: number }} [props.focusContext]
  * @param {boolean} [props.skipFocusManagement] - When true, the filter-aware focus management

@@ -1,12 +1,14 @@
 import { useEffect } from 'react'
 
 /**
- * @param {Object} params
- * @param {(() => void) | null | undefined} params.onUndo
- * @param {(() => void) | null | undefined} params.onJumpHome
- * @param {import('react').RefObject<HTMLElement>} [params.homeFocusRef]
+ * @param {{
+ *   onUndo?: (() => void) | null,
+ *   onJumpHome?: (() => void) | null,
+ *   homeFocusRef?: import('react').RefObject<HTMLElement>,
+ * }} [params]
  */
-export function useGlobalKeybindings({ onUndo, onJumpHome, homeFocusRef } = {}) {
+export function useGlobalKeybindings(params = {}) {
+  const { onUndo, onJumpHome, homeFocusRef } = params
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
 
