@@ -511,8 +511,7 @@ describe('usePlaylistImportController', () => {
 
     await act(async () => {
       const pending = result.current.handleReimport();
-      await Promise.resolve();
-      expect(result.current.isRefreshingCachedData).toBe(true);
+      await waitFor(() => expect(result.current.isRefreshingCachedData).toBe(true));
       expect(deps.setPlaylistTitle).toHaveBeenCalledWith('Cached Playlist');
       expect(deps.announce).toHaveBeenCalledWith(
         expect.stringContaining('Showing saved playlist while refreshing'),
