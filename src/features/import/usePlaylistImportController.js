@@ -9,6 +9,7 @@ import { normalizeTimestamp } from '../../utils/trackProcessing.js';
 import { playlistActions } from '../playlist/actions.js';
 import { focusById, focusElement } from '../../utils/focusById.js';
 import { debugFocus } from '../../utils/debug.js';
+import usePersistentPlaylistCache from './usePersistentPlaylistCache.js';
 
 const REFRESHING_FROM_CACHE_ANNOUNCEMENT = 'Showing saved playlist while refreshing the latest data.';
 
@@ -160,6 +161,11 @@ export default function usePlaylistImportController({
     [initialImportMeta],
   );
 
+  const {
+    getCachedResult,
+    rememberCachedResult,
+  } = usePersistentPlaylistCache();
+
   const [importUrl, setImportUrl] = useState('');
   const providerChip = useMemo(() => detectProvider(importUrl || ''), [importUrl]);
   const [importError, setImportError] = useState(null);
@@ -173,37 +179,21 @@ export default function usePlaylistImportController({
   const [backgroundSync, setBackgroundSync] = useState(() =>
     resolveInitialBackgroundState(baseImportMeta, initialPersistedTrackCount),
   );
-  const cachedPlaylistsRef = useRef(new Map());
   const [isRefreshingCachedData, setIsRefreshingCachedData] = useState(false);
 
-  const cacheKeyFromSource = useCallback((raw) => normalizeSourceKey(raw), []);
-
-  const getCachedResult = useCallback(
-    (sourceUrl) => {
-      const key = cacheKeyFromSource(sourceUrl);
-      if (!key) return null;
-      return cachedPlaylistsRef.current.get(key) ?? null;
-    },
-    [cacheKeyFromSource],
-  );
-
-  const rememberCachedResult = useCallback(
+  const rememberResultInCache = useCallback(
     (sourceUrl, payload) => {
       if (!payload) return;
-      const entry = {
-        data: payload,
-        storedAt: Date.now(),
-      };
-      const incomingKey = cacheKeyFromSource(sourceUrl);
-      const metaKey = cacheKeyFromSource(payload?.meta?.sourceUrl);
+      const incomingKey = normalizeSourceKey(sourceUrl ?? '');
+      const metaKey = normalizeSourceKey(payload?.meta?.sourceUrl ?? '');
       if (incomingKey) {
-        cachedPlaylistsRef.current.set(incomingKey, entry);
+        rememberCachedResult(incomingKey, payload);
       }
       if (metaKey && metaKey !== incomingKey) {
-        cachedPlaylistsRef.current.set(metaKey, entry);
+        rememberCachedResult(metaKey, payload);
       }
     },
-    [cacheKeyFromSource],
+    [rememberCachedResult],
   );
 
   const {
@@ -492,7 +482,7 @@ export default function usePlaylistImportController({
       });
 
       const cacheSource = sourceUrl ?? meta?.sourceUrl ?? '';
-      rememberCachedResult(cacheSource, payload);
+      rememberResultInCache(cacheSource, payload);
 
       return { trackCount, title: resolvedTitle };
     },
@@ -506,7 +496,7 @@ export default function usePlaylistImportController({
       markTrackFocusContext,
       notesByTrack,
       pushRecentPlaylist,
-      rememberCachedResult,
+      rememberResultInCache,
       setImportedAt,
       setImportMeta,
       setLastImportUrl,
@@ -528,14 +518,14 @@ export default function usePlaylistImportController({
    *     lastUsedAt?: number | null
    *   } | null
    * }} [options]
-   */
+  */
   const hydrateFromCache = useCallback(
     (sourceUrl, options = {}) => {
-      const entry = getCachedResult(sourceUrl);
-      if (!entry?.data) {
+      const resolvedSource = normalizeSourceKey(sourceUrl ?? '');
+      const payload = resolvedSource ? getCachedResult(resolvedSource) : null;
+      if (!payload) {
         return null;
       }
-      const payload = entry.data;
       const total = computePayloadTotal(payload);
       const { recents: recentsOverrides, announceMessage: announceOverride, focusBehavior: focusOverride } =
         options || {};
@@ -551,13 +541,13 @@ export default function usePlaylistImportController({
           };
 
       applyImportResult(payload, {
-        sourceUrl,
+        sourceUrl: resolvedSource || sourceUrl || '',
         announceMessage: announceOverride ?? REFRESHING_FROM_CACHE_ANNOUNCEMENT,
         ...(focusOverride ? { focusBehavior: focusOverride } : {}),
         recents: mergedRecents,
       });
 
-      return entry;
+      return { data: payload };
     },
     [applyImportResult, getCachedResult],
   );

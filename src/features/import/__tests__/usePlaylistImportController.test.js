@@ -58,6 +58,24 @@ vi.mock('../../utils/debug.js', () => ({
   debugFocus: vi.fn(),
 }));
 
+const cacheStore = vi.hoisted(() => ({
+  map: new Map(),
+}));
+
+const cacheApi = vi.hoisted(() => ({
+  cachedPlaylists: cacheStore.map,
+  isHydrating: false,
+  getCachedResult: vi.fn(),
+  rememberCachedResult: vi.fn(),
+  forgetCachedResult: vi.fn(),
+  clearCache: vi.fn(),
+}));
+
+vi.mock('../usePersistentPlaylistCache.js', () => ({
+  __esModule: true,
+  default: () => cacheApi,
+}));
+
 const createDeps = (overrides = {}) => {
   const importInputRef = /** @type {import('react').RefObject<HTMLInputElement>} */ ({
     current: /** @type {unknown} */ ({
@@ -119,6 +137,18 @@ let querySelectorSpy;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  cacheStore.map.clear();
+  cacheApi.getCachedResult.mockReset();
+  cacheApi.rememberCachedResult.mockReset();
+  cacheApi.forgetCachedResult.mockReset();
+  cacheApi.clearCache.mockReset();
+  cacheApi.getCachedResult.mockImplementation((key) =>
+    key ? cacheStore.map.get(key) ?? null : null,
+  );
+  cacheApi.rememberCachedResult.mockImplementation((key, payload) => {
+    if (!key) return;
+    cacheStore.map.set(key.trim(), payload);
+  });
   importFlowState.status = 'idle';
   importFlowState.loading = false;
   detectProviderMock.mockReturnValue('spotify');
