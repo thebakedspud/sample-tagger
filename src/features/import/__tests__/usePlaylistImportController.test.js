@@ -511,6 +511,7 @@ describe('usePlaylistImportController', () => {
 
     await act(async () => {
       const pending = result.current.handleReimport();
+      await Promise.resolve();
       await waitFor(() => expect(result.current.isRefreshingCachedData).toBe(true));
       expect(deps.setPlaylistTitle).toHaveBeenCalledWith('Cached Playlist');
       expect(deps.announce).toHaveBeenCalledWith(
