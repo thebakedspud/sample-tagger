@@ -142,6 +142,7 @@ function AppInner({
     updateRecentCardState,
     pushRecentPlaylist,
   } = useRecentPlaylists(initialRecents)
+  const [refreshingRecentId, setRefreshingRecentId] = useState(null)
 
   const handleFirstVisibleTrackChange = useCallback((trackId) => {
     const prevTrackId = firstVisibleTrackIdRef.current
@@ -172,12 +173,13 @@ function AppInner({
     showReimportSpinner,
     showLoadMoreSpinner,
     handleImport,
-    handleSelectRecent,
+    handleSelectRecent: handleSelectRecentInternal,
     handleReimport,
     handleLoadMore,
     cancelBackgroundPagination,
     backgroundSync,
     resetImportFlow,
+    isRefreshingCachedData,
   } = usePlaylistImportController({
     dispatch,
     announce,
@@ -205,6 +207,30 @@ function AppInner({
     initialImportMeta,
     initialPersistedTrackCount: Array.isArray(persistedTracks) ? persistedTracks.length : 0,
   })
+
+  useEffect(() => {
+    if (!isRefreshingCachedData) {
+      setRefreshingRecentId(null)
+    }
+  }, [isRefreshingCachedData])
+
+  const handleSelectRecent = useCallback(
+    async (recent) => {
+      if (recent?.id) {
+        setRefreshingRecentId(recent.id)
+      } else {
+        setRefreshingRecentId(null)
+      }
+      try {
+        return await handleSelectRecentInternal(recent)
+      } finally {
+        if (!isRefreshingCachedData) {
+          setRefreshingRecentId(null)
+        }
+      }
+    },
+    [handleSelectRecentInternal, isRefreshingCachedData],
+  )
 
   // OLD: These state variables moved to playlistReducer
   // const [editingId, setEditingId] = useState(null)
@@ -956,6 +982,8 @@ function AppInner({
                   onSelect={handleSelectRecent}
                   cardState={recentCardState}
                   disabled={isAnyImportBusy}
+                  refreshingId={refreshingRecentId}
+                  isRefreshing={isRefreshingCachedData}
                 />
               </section>
             )}
