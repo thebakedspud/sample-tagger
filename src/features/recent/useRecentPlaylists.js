@@ -1,6 +1,22 @@
 import { useState, useCallback, useEffect } from 'react'
 import { saveRecent, upsertRecent } from '../../utils/storage.js'
 import { createRecentCandidate } from './recentUtils.js'
+import { normalizeTimestamp } from '../../utils/trackProcessing.js'
+import usePersistentPlaylistCache from '../import/usePersistentPlaylistCache.js'
+
+const normalizeSourceKey = (raw) =>
+  typeof raw === 'string' && raw.trim() ? raw.trim() : ''
+
+const computeTotalFromPayload = (payload) => {
+  if (!payload) return null
+  if (typeof payload.total === 'number' && payload.total >= 0) {
+    return Math.round(payload.total)
+  }
+  if (Array.isArray(payload.tracks)) {
+    return payload.tracks.length
+  }
+  return null
+}
 
 /**
  * Manage the recent playlists list plus any per-card UI state.
@@ -19,6 +35,7 @@ import { createRecentCandidate } from './recentUtils.js'
 export function useRecentPlaylists(initialRecents) {
   const [recentPlaylists, setRecentPlaylists] = useState(() => initialRecents)
   const [recentCardState, setRecentCardState] = useState(() => ({}))
+  const { cachedPlaylists, isHydrating } = usePersistentPlaylistCache()
 
   const updateRecentCardState = useCallback((id, updater) => {
     if (!id) return
@@ -63,6 +80,56 @@ export function useRecentPlaylists(initialRecents) {
       return next
     })
   }, [recentPlaylists])
+
+  useEffect(() => {
+    if (isHydrating) return
+    if (!cachedPlaylists || typeof cachedPlaylists.get !== 'function') return
+    setRecentPlaylists((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev
+      let changed = false
+      const next = prev.map((item) => {
+        const key = normalizeSourceKey(item?.sourceUrl)
+        if (!key) return item
+        const entry = cachedPlaylists.get(key)
+        const payload = entry?.data ?? entry
+        if (!payload || typeof payload !== 'object') return item
+
+        const updates = {}
+        const cachedTitle =
+          typeof payload.title === 'string' && payload.title.trim()
+            ? payload.title.trim()
+            : null
+        if (cachedTitle && cachedTitle !== item.title) {
+          updates.title = cachedTitle
+        }
+        const cachedCover =
+          typeof payload.coverUrl === 'string' && payload.coverUrl.trim()
+            ? payload.coverUrl.trim()
+            : null
+        if (cachedCover && cachedCover !== item.coverUrl) {
+          updates.coverUrl = cachedCover
+        }
+        const cachedTotal = computeTotalFromPayload(payload)
+        if (cachedTotal != null && cachedTotal !== item.total) {
+          updates.total = cachedTotal
+        }
+        const cachedImportedAt = normalizeTimestamp(payload.importedAt)
+        if (cachedImportedAt != null && cachedImportedAt !== item.importedAt) {
+          updates.importedAt = cachedImportedAt
+        }
+        if (Object.keys(updates).length === 0) {
+          return item
+        }
+        changed = true
+        return { ...item, ...updates }
+      })
+      if (changed) {
+        saveRecent(next)
+        return next
+      }
+      return prev
+    })
+  }, [cachedPlaylists, isHydrating])
 
   return {
     recentPlaylists,
