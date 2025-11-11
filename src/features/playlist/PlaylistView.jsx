@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import focusById, { focusElement } from '../../utils/focusById.js'
 import SearchFilterBar from '../filter/SearchFilterBar.jsx'
@@ -126,7 +126,6 @@ export default function PlaylistView({
 
   const searchInputRef = useRef(null)
   const listContainerRef = useRef(null)
-  const [listOffset, setListOffset] = useState(0)
   const trackCount = Array.isArray(tracks) ? tracks.length : 0
   const virtualizationPreference = useMemo(
     () => resolveVirtualizationPreference(trackCount),
@@ -213,27 +212,10 @@ export default function PlaylistView({
     count: virtualizationEnabled ? filteredTracks.length : 0,
     estimateSize: estimateTrackSize,
     overscan: 10,
-    scrollMargin: listOffset,
     getItemKey: getVirtualItemKey,
   })
   const virtualItems = virtualizationEnabled ? virtualizer.getVirtualItems() : []
   const totalVirtualSize = virtualizationEnabled ? virtualizer.getTotalSize() : 0
-
-  useLayoutEffect(() => {
-    if (typeof window === 'undefined') return undefined
-    const updateOffset = () => {
-      if (!listContainerRef.current) return
-      const rect = listContainerRef.current.getBoundingClientRect()
-      setListOffset(rect.top + window.scrollY)
-    }
-    updateOffset()
-    window.addEventListener('resize', updateOffset)
-    window.addEventListener('orientationchange', updateOffset)
-    return () => {
-      window.removeEventListener('resize', updateOffset)
-      window.removeEventListener('orientationchange', updateOffset)
-    }
-  }, [filteredTracks.length, virtualizationEnabled])
 
   // Notify App of the first visible track ID for focus management.
   // This runs on every filteredTracks change to keep App's focus target in sync with the
@@ -268,13 +250,15 @@ export default function PlaylistView({
       virtualizer.scrollToIndex(0, { align: 'start' })
       return
     }
-    if (typeof window !== 'undefined') {
-      window.scrollTo({
-        top: Math.max(listOffset - 16, 0),
-        behavior: 'smooth',
-      })
+    const container = listContainerRef.current
+    if (container && typeof container.scrollIntoView === 'function') {
+      container.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
     }
-  }, [filterSignature, virtualizationEnabled, virtualizer, listOffset])
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }, [filterSignature, virtualizationEnabled, virtualizer])
 
   const focusTrackButton = useCallback(
     (trackId) => {
@@ -538,7 +522,7 @@ export default function PlaylistView({
         >
           {initialSyncStatus?.status === 'error'
             ? `Sync paused: ${initialSyncStatus?.lastError ?? 'Unknown error'}`
-            : 'Syncing notes in the backgroundâ€¦'}
+            : 'Syncing notes in the background...'}
         </div>
       )}
 
@@ -598,7 +582,7 @@ export default function PlaylistView({
             color: 'var(--muted)',
           }}
         >
-          Loading more to complete â€œrecently addedâ€ orderâ€¦{' '}
+          Loading more to complete "recently added" order{' '}
           {totalLabel
             ? `(loaded ${loadedLabel} of ${totalLabel})`
             : `(loaded ${loadedLabel})`}
@@ -714,4 +698,3 @@ export default function PlaylistView({
     </section>
   )
 }
-
