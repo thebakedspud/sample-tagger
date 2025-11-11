@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import focusById, { focusElement } from '../../utils/focusById.js'
 import SearchFilterBar from '../filter/SearchFilterBar.jsx'
 import useTrackFilter from '../filter/useTrackFilter.js'
@@ -17,6 +18,25 @@ const DEFAULT_BACKGROUND_SYNC = Object.freeze({
 })
 
 const EMPTY_PLACEHOLDERS = Object.freeze([])
+const VIRTUALIZATION_FLAG_KEY = 'ff:virtualization'
+const VIRTUALIZATION_THRESHOLD = 100
+
+function resolveVirtualizationPreference(trackCount) {
+  const envValue = import.meta?.env?.VITE_ENABLE_VIRTUALIZATION
+  if (envValue === 'true') return true
+  if (envValue === 'false') return false
+
+  if (typeof window !== 'undefined') {
+    try {
+      const override = window.localStorage?.getItem(VIRTUALIZATION_FLAG_KEY)
+      if (override === 'on') return true
+      if (override === 'off') return false
+    } catch {
+      // ignore storage failures
+    }
+  }
+  return trackCount > VIRTUALIZATION_THRESHOLD
+}
 
 /**
  * @param {object} props
@@ -105,6 +125,13 @@ export default function PlaylistView({
   const showLoadMore = Boolean(importMeta?.hasMore && importMeta?.cursor)
 
   const searchInputRef = useRef(null)
+  const listContainerRef = useRef(null)
+  const [listOffset, setListOffset] = useState(0)
+  const trackCount = Array.isArray(tracks) ? tracks.length : 0
+  const virtualizationPreference = useMemo(
+    () => resolveVirtualizationPreference(trackCount),
+    [trackCount],
+  )
   const lastFocusContextTsRef = useRef(null)
   const availableTags = useMemo(() => {
     const bucket = new Set()
@@ -174,6 +201,40 @@ export default function PlaylistView({
     announce,
   })
 
+  const virtualizationEnabled = virtualizationPreference && filteredTracks.length > 0
+  const estimateTrackSize = useCallback(() => 172, [])
+  const getVirtualItemKey = useCallback(
+    (index) => filteredTracks[index]?.id ?? `virtual-${index}`,
+    [filteredTracks],
+  )
+
+  const virtualizer = useWindowVirtualizer({
+    enabled: virtualizationEnabled,
+    count: virtualizationEnabled ? filteredTracks.length : 0,
+    estimateSize: estimateTrackSize,
+    overscan: 10,
+    scrollMargin: listOffset,
+    getItemKey: getVirtualItemKey,
+  })
+  const virtualItems = virtualizationEnabled ? virtualizer.getVirtualItems() : []
+  const totalVirtualSize = virtualizationEnabled ? virtualizer.getTotalSize() : 0
+
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const updateOffset = () => {
+      if (!listContainerRef.current) return
+      const rect = listContainerRef.current.getBoundingClientRect()
+      setListOffset(rect.top + window.scrollY)
+    }
+    updateOffset()
+    window.addEventListener('resize', updateOffset)
+    window.addEventListener('orientationchange', updateOffset)
+    return () => {
+      window.removeEventListener('resize', updateOffset)
+      window.removeEventListener('orientationchange', updateOffset)
+    }
+  }, [filteredTracks.length, virtualizationEnabled])
+
   // Notify App of the first visible track ID for focus management.
   // This runs on every filteredTracks change to keep App's focus target in sync with the
   // actual display order (which may differ from import order due to sorting).
@@ -187,6 +248,63 @@ export default function PlaylistView({
       onFirstVisibleTrackChange(firstId)
     }
   }, [filteredTracks, onFirstVisibleTrackChange])
+
+  const filterSignature = useMemo(() => {
+    const normalizedTags = Array.isArray(selectedTags)
+      ? [...selectedTags].sort().join('|')
+      : ''
+    const normalizedQuery = typeof query === 'string' ? query.trim() : ''
+    const sortSignature = `${sort?.key ?? SORT_KEY.DATE}:${sort?.direction ?? 'desc'}`
+    return [normalizedQuery, scope, normalizedTags, hasNotesOnly ? '1' : '0', sortSignature].join(
+      '::',
+    )
+  }, [query, scope, selectedTags, hasNotesOnly, sort])
+
+  const lastFilterSignatureRef = useRef(filterSignature)
+  useEffect(() => {
+    if (lastFilterSignatureRef.current === filterSignature) return
+    lastFilterSignatureRef.current = filterSignature
+    if (virtualizationEnabled && virtualizer) {
+      virtualizer.scrollToIndex(0, { align: 'start' })
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.scrollTo({
+        top: Math.max(listOffset - 16, 0),
+        behavior: 'smooth',
+      })
+    }
+  }, [filterSignature, virtualizationEnabled, virtualizer, listOffset])
+
+  const focusTrackButton = useCallback(
+    (trackId) => {
+      if (!trackId) return
+      const focusTarget = `add-note-btn-${trackId}`
+      const scheduleFocus = () => {
+        if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+          focusById(focusTarget)
+          return
+        }
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            focusById(focusTarget)
+          })
+        })
+      }
+      if (virtualizationEnabled && virtualizer) {
+        const targetIndex = filteredTracks.findIndex((track) => track.id === trackId)
+        if (targetIndex === -1) {
+          focusById(focusTarget)
+          return
+        }
+        virtualizer.scrollToIndex(targetIndex, { align: 'start' })
+        scheduleFocus()
+        return
+      }
+      focusById(focusTarget)
+    },
+    [filteredTracks, virtualizer, virtualizationEnabled],
+  )
 
   // Filter-aware focus management: restore focus when current track is hidden by filters.
   // IMPORTANT: This effect must not run when skipFocusManagement is true. During initial
@@ -234,7 +352,7 @@ export default function PlaylistView({
         debugFocus('playlist:focus-effect:body-recovery', {
           targetId: `add-note-btn-${firstId}`,
         })
-        focusById(`add-note-btn-${firstId}`)
+        focusTrackButton(firstId)
       }
       return
     }
@@ -252,10 +370,10 @@ export default function PlaylistView({
           targetId: `add-note-btn-${firstId}`,
           cause: 'filter-hide',
         })
-        focusById(`add-note-btn-${firstId}`)
+        focusTrackButton(firstId)
       }
     }
-  }, [skipFocusManagement, filteredTracks, tracks, focusContext])
+  }, [skipFocusManagement, filteredTracks, tracks, focusContext, focusTrackButton])
 
   const handleFilterTag = useCallback(
     (tag) => {
@@ -264,6 +382,60 @@ export default function PlaylistView({
       focusElement(searchInputRef.current)
     },
     [toggleTag],
+  )
+
+  const renderTrackRow = useCallback(
+    (track, index, options = {}) => {
+      if (!track) return null
+      const placeholders = pendingByTrack.get(track.id) ?? EMPTY_PLACEHOLDERS
+      const isEditingTrack = editingState?.editingId === track.id
+      const editingDraft = isEditingTrack ? editingState?.draft ?? '' : ''
+      const editingError = isEditingTrack ? editingState?.error ?? null : null
+
+      return (
+        <TrackCard
+          key={options.key ?? track.id}
+          track={track}
+          index={index}
+          placeholders={placeholders}
+          isPending={isPending}
+          isEditing={isEditingTrack}
+          editingDraft={editingDraft}
+          editingError={editingError}
+          onDraftChange={onDraftChange}
+          onAddNote={onAddNote}
+          onSaveNote={onSaveNote}
+          onCancelNote={onCancelNote}
+          onDeleteNote={onDeleteNote}
+          onAddTag={onAddTag}
+          onRemoveTag={onRemoveTag}
+          stockTags={stockTags}
+          customTags={customTags}
+          onUndo={onUndo}
+          onDismissUndo={onDismissUndo}
+          onFilterTag={handleFilterTag}
+          style={options.style}
+          ref={options.measureRef ?? null}
+        />
+      )
+    },
+    [
+      customTags,
+      editingState,
+      handleFilterTag,
+      isPending,
+      onAddNote,
+      onAddTag,
+      onCancelNote,
+      onDeleteNote,
+      onDismissUndo,
+      onDraftChange,
+      onRemoveTag,
+      onSaveNote,
+      onUndo,
+      pendingByTrack,
+      stockTags,
+    ],
   )
 
   const showFilteringBanner = showLoadMore && hasActiveFilters
@@ -366,7 +538,7 @@ export default function PlaylistView({
         >
           {initialSyncStatus?.status === 'error'
             ? `Sync paused: ${initialSyncStatus?.lastError ?? 'Unknown error'}`
-            : 'Syncing notes in the background…'}
+            : 'Syncing notes in the backgroundâ€¦'}
         </div>
       )}
 
@@ -426,7 +598,7 @@ export default function PlaylistView({
             color: 'var(--muted)',
           }}
         >
-          Loading more to complete “recently added” order…{' '}
+          Loading more to complete â€œrecently addedâ€ orderâ€¦{' '}
           {totalLabel
             ? `(loaded ${loadedLabel} of ${totalLabel})`
             : `(loaded ${loadedLabel})`}
@@ -463,38 +635,46 @@ export default function PlaylistView({
         >
           {emptyMessage || 'No matches. Try clearing filters.'}
         </div>
+      ) : virtualizationEnabled ? (
+        <ul
+          ref={listContainerRef}
+          data-virtualized="true"
+          style={{
+            listStyle: 'none',
+            padding: 0,
+            margin: 0,
+            position: 'relative',
+            height: totalVirtualSize,
+          }}
+        >
+          {virtualItems.map((virtualRow) => {
+            const track = filteredTracks[virtualRow.index]
+            const key = track?.id ?? virtualRow.key
+            return renderTrackRow(track, virtualRow.index, {
+              key,
+              style: {
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${virtualRow.start}px)`,
+              },
+              measureRef: virtualizer.measureElement,
+            })
+          })}
+        </ul>
       ) : (
-        <ul style={{ padding: 0, listStyle: 'none' }}>
-          {filteredTracks.map((track, index) => {
-            const placeholders = pendingByTrack.get(track.id) ?? EMPTY_PLACEHOLDERS
-            const isEditingTrack = editingState?.editingId === track.id
-            const editingDraft = isEditingTrack ? editingState?.draft ?? '' : ''
-            const editingError = isEditingTrack ? editingState?.error ?? null : null
-
-            return (
-            <TrackCard
-              key={track.id}
-              track={track}
-              index={index}
-              placeholders={placeholders}
-              isPending={isPending}
-              isEditing={isEditingTrack}
-              editingDraft={editingDraft}
-              editingError={editingError}
-              onDraftChange={onDraftChange}
-              onAddNote={onAddNote}
-              onSaveNote={onSaveNote}
-              onCancelNote={onCancelNote}
-              onDeleteNote={onDeleteNote}
-              onAddTag={onAddTag}
-              onRemoveTag={onRemoveTag}
-              stockTags={stockTags}
-              customTags={customTags}
-              onUndo={onUndo}
-              onDismissUndo={onDismissUndo}
-              onFilterTag={handleFilterTag}
-            />
-          )})}
+        <ul
+          ref={listContainerRef}
+          style={{
+            padding: 0,
+            listStyle: 'none',
+            margin: 0,
+          }}
+        >
+          {filteredTracks.map((track, index) =>
+            renderTrackRow(track, index, { key: track.id }),
+          )}
         </ul>
       )}
 
@@ -534,3 +714,4 @@ export default function PlaylistView({
     </section>
   )
 }
+

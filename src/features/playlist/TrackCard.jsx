@@ -1,9 +1,33 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, memo, useEffect, useMemo, useRef, useState } from 'react'
 import NoteList from './NoteList.jsx'
 import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
 import ErrorMessage from '../../components/ErrorMessage.jsx'
 import { focusElement } from '../../utils/focusById.js'
+
+/**
+ * @typedef {object} TrackCardProps
+ * @property {{ id: string|number, title: string, artist: string, notes: string[], tags?: string[], dateAdded?: string, thumbnailUrl?: string }} track
+ * @property {number} index
+ * @property {Array<{ pid: string, index: number, restoreFocusId?: string, fallbackFocusId?: string }>} [placeholders]
+ * @property {(id: string) => boolean} isPending
+ * @property {boolean} isEditing
+ * @property {string} editingDraft
+ * @property {string|null} editingError
+ * @property {(value: string) => void} onDraftChange
+ * @property {(trackId: string|number) => void} onAddNote
+ * @property {(trackId: string|number) => void} onSaveNote
+ * @property {() => void} onCancelNote
+ * @property {(trackId: string|number, noteIndex: number) => void} onDeleteNote
+ * @property {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string, tag?: string }} onAddTag
+ * @property {(trackId: string|number, tag: string) => void} onRemoveTag
+ * @property {string[]} stockTags
+ * @property {string[]} customTags
+ * @property {(pendingId: string) => void} onUndo
+ * @property {(pendingId: string) => void} onDismissUndo
+ * @property {(tag: string) => void} [onFilterTag]
+ * @property {import('react').CSSProperties} [style]
+ */
 
 /**
  * @param {object} props
@@ -39,27 +63,32 @@ import { focusElement } from '../../utils/focusById.js'
  * @param {(pendingId: string) => void} props.onDismissUndo
  * @param {(tag: string) => void} [props.onFilterTag]
  */
-function TrackCard({
-  track,
-  index,
-  placeholders = [],
-  isPending,
-  isEditing,
-  editingDraft,
-  editingError,
-  onDraftChange,
-  onAddNote,
-  onSaveNote,
-  onCancelNote,
-  onDeleteNote,
-  onAddTag,
-  onRemoveTag,
-  stockTags = [],
-  customTags = [],
-  onUndo,
-  onDismissUndo,
-  onFilterTag,
-}) {
+const TrackCardComponent = forwardRef(function TrackCard(
+  /** @type {TrackCardProps} */
+  {
+    track,
+    index,
+    placeholders = [],
+    isPending,
+    isEditing,
+    editingDraft,
+    editingError,
+    onDraftChange,
+    onAddNote,
+    onSaveNote,
+    onCancelNote,
+    onDeleteNote,
+    onAddTag,
+    onRemoveTag,
+    stockTags = [],
+    customTags = [],
+    onUndo,
+    onDismissUndo,
+    onFilterTag,
+    style,
+  },
+  /** @type {import('react').ForwardedRef<HTMLLIElement>} */ ref,
+) {
   const noteArr = Array.isArray(track.notes) ? track.notes : []
   const tags = useMemo(
     () => (Array.isArray(track.tags) ? track.tags : []),
@@ -242,6 +271,7 @@ function TrackCard({
 
   return (
     <li
+      ref={ref}
       id={`track-${track.id}`}
       data-track-id={track.id}
       tabIndex={-1}
@@ -252,6 +282,7 @@ function TrackCard({
         borderRadius: 8,
         padding: 12,
         marginBottom: 12,
+        ...(style || {}),
       }}
     >
       <div
@@ -413,6 +444,8 @@ function TrackCard({
       )}
     </li>
   )
-}
+})
 
-export default memo(TrackCard)
+const TrackCard = memo(TrackCardComponent)
+
+export default TrackCard
