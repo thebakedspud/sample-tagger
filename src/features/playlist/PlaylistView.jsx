@@ -18,6 +18,19 @@ const DEFAULT_BACKGROUND_SYNC = Object.freeze({
 })
 
 const EMPTY_PLACEHOLDERS = Object.freeze([])
+const CARD_GAP = 12
+const JUMP_STEP = 100
+const SR_ONLY_STYLE = Object.freeze({
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  padding: 0,
+  margin: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+})
 const VIRTUALIZATION_FLAG_KEY = 'ff:virtualization'
 const VIRTUALIZATION_THRESHOLD = 100
 
@@ -216,6 +229,22 @@ export default function PlaylistView({
   })
   const virtualItems = virtualizationEnabled ? virtualizer.getVirtualItems() : []
   const totalVirtualSize = virtualizationEnabled ? virtualizer.getTotalSize() : 0
+  const liveWindowSummary = useMemo(() => {
+    if (filteredCount === 0) {
+      return 'No tracks to display.'
+    }
+    if (!virtualizationEnabled || !virtualizer) {
+      return summaryText
+    }
+    const items = virtualizer.getVirtualItems()
+    if (!items || items.length === 0) {
+      return summaryText
+    }
+    const start = items[0].index + 1
+    const end = items[items.length - 1].index + 1
+    const visibleCount = Math.max(end - start + 1, 0)
+    return `Showing ${visibleCount} of ${filteredCount} tracks (rows ${start}-${end}).`
+  }, [filteredCount, summaryText, virtualizationEnabled, virtualizer])
 
   // Notify App of the first visible track ID for focus management.
   // This runs on every filteredTracks change to keep App's focus target in sync with the
@@ -289,6 +318,54 @@ export default function PlaylistView({
     },
     [filteredTracks, virtualizer, virtualizationEnabled],
   )
+
+  const getAnchorIndex = useCallback(() => {
+    if (virtualizationEnabled && virtualizer) {
+      const items = virtualizer.getVirtualItems()
+      if (items.length > 0) {
+        return items[0].index
+      }
+    }
+    if (typeof document !== 'undefined') {
+      const active = document.activeElement
+      if (active && typeof active.closest === 'function') {
+        const container = active.closest('[data-track-id]')
+        if (container) {
+          const activeId = container.getAttribute('data-track-id')
+          const idx = filteredTracks.findIndex((track) => String(track.id) === activeId)
+          if (idx !== -1) {
+            return idx
+          }
+        }
+      }
+    }
+    return 0
+  }, [filteredTracks, virtualizationEnabled, virtualizer])
+
+  const jumpToIndex = useCallback(
+    (index) => {
+      if (!Array.isArray(filteredTracks) || filteredTracks.length === 0) return
+      const clamped = Math.max(0, Math.min(index, filteredTracks.length - 1))
+      const targetTrack = filteredTracks[clamped]
+      if (!targetTrack) return
+      focusTrackButton(targetTrack.id)
+    },
+    [filteredTracks, focusTrackButton],
+  )
+
+  const jumpByStep = useCallback(
+    (direction) => {
+      const anchor = getAnchorIndex()
+      const targetIndex = anchor + direction * JUMP_STEP
+      jumpToIndex(targetIndex)
+    },
+    [getAnchorIndex, jumpToIndex],
+  )
+
+  const showJumpControls = filteredTracks.length > JUMP_STEP
+  const anchorIndex = showJumpControls ? getAnchorIndex() : 0
+  const canJumpBackward = anchorIndex > 0
+  const canJumpForward = anchorIndex < filteredTracks.length - 1
 
   // Filter-aware focus management: restore focus when current track is hidden by filters.
   // IMPORTANT: This effect must not run when skipFocusManagement is true. During initial
@@ -399,7 +476,6 @@ export default function PlaylistView({
           onDismissUndo={onDismissUndo}
           onFilterTag={handleFilterTag}
           style={options.style}
-          ref={options.measureRef ?? null}
         />
       )
     },
@@ -504,6 +580,48 @@ export default function PlaylistView({
         totalCount={totalCount}
         searchInputRef={searchInputRef}
       />
+
+      <div role="status" aria-live="polite" style={SR_ONLY_STYLE}>
+        {liveWindowSummary}
+      </div>
+
+      {showJumpControls && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 8,
+            margin: '8px 0 12px',
+          }}
+        >
+          <button type="button" className="btn" onClick={() => jumpToIndex(0)}>
+            Jump to top
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => jumpByStep(-1)}
+            disabled={!canJumpBackward}
+          >
+            Jump -{JUMP_STEP}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => jumpByStep(1)}
+            disabled={!canJumpForward}
+          >
+            Jump +{JUMP_STEP}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => jumpToIndex(filteredTracks.length - 1)}
+          >
+            Jump to bottom
+          </button>
+        </div>
+      )}
 
       {showInitialSyncBanner && (
         <div
@@ -620,13 +738,9 @@ export default function PlaylistView({
           {emptyMessage || 'No matches. Try clearing filters.'}
         </div>
       ) : virtualizationEnabled ? (
-        <ul
+        <div
           ref={listContainerRef}
-          data-virtualized="true"
           style={{
-            listStyle: 'none',
-            padding: 0,
-            margin: 0,
             position: 'relative',
             height: totalVirtualSize,
           }}
@@ -634,19 +748,28 @@ export default function PlaylistView({
           {virtualItems.map((virtualRow) => {
             const track = filteredTracks[virtualRow.index]
             const key = track?.id ?? virtualRow.key
-            return renderTrackRow(track, virtualRow.index, {
-              key,
-              style: {
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${virtualRow.start}px)`,
-              },
-              measureRef: virtualizer.measureElement,
-            })
+            const isLast = virtualRow.index === filteredTracks.length - 1
+            return (
+              <div
+                key={key}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start}px)`,
+                  paddingBottom: isLast ? 0 : CARD_GAP,
+                }}
+              >
+                {renderTrackRow(track, virtualRow.index, {
+                  key,
+                  style: { marginBottom: 0 },
+                })}
+              </div>
+            )
           })}
-        </ul>
+        </div>
       ) : (
         <ul
           ref={listContainerRef}
@@ -657,7 +780,10 @@ export default function PlaylistView({
           }}
         >
           {filteredTracks.map((track, index) =>
-            renderTrackRow(track, index, { key: track.id }),
+            renderTrackRow(track, index, {
+              key: track.id,
+              style: { marginBottom: index === filteredTracks.length - 1 ? 0 : CARD_GAP },
+            }),
           )}
         </ul>
       )}
