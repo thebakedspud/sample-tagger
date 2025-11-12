@@ -282,6 +282,7 @@ const TrackCardComponent = forwardRef(function TrackCard(
         boxShadow: 'var(--shadow)',
         borderRadius: 8,
         padding: 12,
+        marginBottom: 12,
         ...(style || {}),
       }}
     >

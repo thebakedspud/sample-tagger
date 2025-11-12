@@ -742,33 +742,43 @@ export default function PlaylistView({
           ref={listContainerRef}
           style={{
             position: 'relative',
-            height: totalVirtualSize,
+            height: totalVirtualSize + CARD_GAP,
           }}
         >
-          {virtualItems.map((virtualRow) => {
-            const track = filteredTracks[virtualRow.index]
-            const key = track?.id ?? virtualRow.key
-            const isLast = virtualRow.index === filteredTracks.length - 1
-            return (
-              <div
-                key={key}
-                ref={virtualizer.measureElement}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${virtualRow.start}px)`,
-                  paddingBottom: isLast ? 0 : CARD_GAP,
-                }}
-              >
-                {renderTrackRow(track, virtualRow.index, {
-                  key,
-                  style: { marginBottom: 0 },
-                })}
-              </div>
-            )
-          })}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+            }}
+          >
+            {virtualItems.map((virtualRow) => {
+              const track = filteredTracks[virtualRow.index]
+              const key = track?.id ?? virtualRow.key
+              const isLast = virtualRow.index === filteredTracks.length - 1
+              return (
+                <div
+                  key={key}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: virtualRow.start,
+                    left: 0,
+                    right: 0,
+                    paddingBottom: isLast ? 0 : CARD_GAP,
+                  }}
+                >
+                  {renderTrackRow(track, virtualRow.index, {
+                    key,
+                    style: { marginBottom: 0 },
+                  })}
+                </div>
+              )
+            })}
+          </div>
         </div>
       ) : (
         <ul
