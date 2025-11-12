@@ -116,6 +116,15 @@ function TagInputInner(props, ref) {
     });
   };
 
+  const handleContainerKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setQuery('');
+      setHighlightIndex(-1);
+      if (onCancel) onCancel();
+    }
+  };
+
   const handleKeyDown = (event) => {
     if (event.key === 'ArrowDown') {
       if (suggestions.length === 0) return;
@@ -144,12 +153,6 @@ function TagInputInner(props, ref) {
       }
       return;
     }
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      setQuery('');
-      setHighlightIndex(-1);
-      if (onCancel) onCancel();
-    }
   };
 
   const activeOptionId =
@@ -158,7 +161,10 @@ function TagInputInner(props, ref) {
       : undefined;
 
   return (
-    <div className={`tag-input ${className}`.trim()}>
+    <div
+      className={`tag-input ${className}`.trim()}
+      onKeyDown={handleContainerKeyDown}
+    >
       <input
         {...restProps}
         ref={mergedRef}
@@ -193,6 +199,7 @@ function TagInputInner(props, ref) {
         <ul
           id={listboxId}
           role="listbox"
+          tabIndex="-1"
           className="tag-input__suggestions"
         >
           {suggestions.map((tag, index) => (
