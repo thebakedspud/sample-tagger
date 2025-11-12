@@ -578,7 +578,7 @@ describe('playlistReducer', () => {
         notesByTrack: { t1: ['local note'] },
       }
 
-      const remoteNotes = {}
+      const remoteNotes = /** @type {Record<string, string[]>} */ ({})
 
       const action = playlistActions.mergeRemoteData(remoteNotes, {})
       const next = playlistReducer(state, action)

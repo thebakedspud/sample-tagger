@@ -44,7 +44,9 @@ describe('TrackCard', () => {
   const originalCancelRaf = window.cancelAnimationFrame
 
   beforeEach(() => {
+    // @ts-expect-error - setTimeout returns Timeout in Node, number in browser
     window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 0)
+    // clearTimeout accepts Timeout in Node, number in browser
     window.cancelAnimationFrame = (id) => clearTimeout(id)
   })
 

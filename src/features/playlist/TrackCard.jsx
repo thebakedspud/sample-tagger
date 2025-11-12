@@ -62,6 +62,7 @@ import { focusElement } from '../../utils/focusById.js'
  * @param {(pendingId: string) => void} props.onUndo
  * @param {(pendingId: string) => void} props.onDismissUndo
  * @param {(tag: string) => void} [props.onFilterTag]
+ * @param {import('react').CSSProperties} [props.style]
  */
 const TrackCardComponent = forwardRef(function TrackCard(
   /** @type {TrackCardProps} */

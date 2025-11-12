@@ -7,12 +7,15 @@ import {
   PLAYLIST_CACHE_MAX_ENTRIES,
 } from '../playlistCache.js'
 
-const makeEntry = (key, storedAt) => ({
+const makeEntry = (key, storedAt) => /** @type {import('../playlistCache.js').PlaylistCacheEntry} */ ({
   key,
   storedAt,
   data: {
-    tracks: [{ id: `${key}-track`, title: 'Song', artist: 'Artist' }],
-    meta: { provider: 'spotify', playlistId: key },
+    ok: true,
+    data: {
+      tracks: [{ id: `${key}-track`, title: 'Song', artist: 'Artist' }],
+      meta: { provider: 'spotify', playlistId: key, snapshotId: 'snap-1', cursor: '0', hasMore: false, sourceUrl: 'https://example.com', total: 1 },
+    },
   },
 })
 
@@ -42,6 +45,6 @@ describe('playlistCache storage helpers', () => {
     expect(loaded).toHaveLength(2)
     expect(loaded[0].key).toBe('alpha')
     expect(loaded[1].key).toBe('beta')
-    expect(loaded[0].data.meta.playlistId).toBe('alpha')
+    expect(loaded[0].data.data.meta.playlistId).toBe('alpha')
   })
 })

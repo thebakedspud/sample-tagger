@@ -20,7 +20,7 @@ describe('youtubeAdapter importPlaylist', () => {
     const result = { ok: true, data: [] }
     importPlaylistMock.mockResolvedValueOnce(result)
 
-    await expect(importPlaylist({ cursor: null })).resolves.toBe(result)
+    await expect(importPlaylist({ url: 'https://youtube.com/test', cursor: null })).resolves.toBe(result)
   })
 
   it('maps AbortError to ERR_ABORTED', async () => {
@@ -28,7 +28,7 @@ describe('youtubeAdapter importPlaylist', () => {
     error.name = 'AbortError'
     importPlaylistMock.mockRejectedValueOnce(error)
 
-    await expect(importPlaylist({ cursor: null })).rejects.toMatchObject({
+    await expect(importPlaylist({ url: 'https://youtube.com/test', cursor: null })).rejects.toMatchObject({
       code: CODES.ERR_ABORTED,
       details: { provider: 'youtube' },
     })
@@ -37,7 +37,7 @@ describe('youtubeAdapter importPlaylist', () => {
   it('maps 429 to ERR_RATE_LIMITED', async () => {
     importPlaylistMock.mockRejectedValueOnce({ status: 429 })
 
-    await expect(importPlaylist({ cursor: null })).rejects.toMatchObject({
+    await expect(importPlaylist({ url: 'https://youtube.com/test', cursor: null })).rejects.toMatchObject({
       code: CODES.ERR_RATE_LIMITED,
       details: { provider: 'youtube' },
     })
@@ -46,7 +46,7 @@ describe('youtubeAdapter importPlaylist', () => {
   it('maps 401 to ERR_PRIVATE_PLAYLIST', async () => {
     importPlaylistMock.mockRejectedValueOnce({ status: 401 })
 
-    await expect(importPlaylist({ cursor: null })).rejects.toMatchObject({
+    await expect(importPlaylist({ url: 'https://youtube.com/test', cursor: null })).rejects.toMatchObject({
       code: CODES.ERR_PRIVATE_PLAYLIST,
       details: { provider: 'youtube' },
     })
@@ -55,7 +55,7 @@ describe('youtubeAdapter importPlaylist', () => {
   it('falls back to ERR_UNKNOWN for unexpected errors', async () => {
     importPlaylistMock.mockRejectedValueOnce({ status: 500 })
 
-    await expect(importPlaylist({ cursor: null })).rejects.toMatchObject({
+    await expect(importPlaylist({ url: 'https://youtube.com/test', cursor: null })).rejects.toMatchObject({
       code: CODES.ERR_UNKNOWN,
       details: { provider: 'youtube' },
     })

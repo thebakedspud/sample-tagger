@@ -67,7 +67,9 @@ describe('useDeviceRecovery', () => {
     deviceStateMocks.hasAcknowledgedRecovery.mockReturnValue(false)
     // @ts-ignore - Mock function type
     deviceStateMocks.ensureRecoveryCsrfToken.mockReturnValue('csrf-token-123')
+    // @ts-ignore
     deviceStateMocks.hasDeviceContext.mockReturnValue(false)
+    // @ts-ignore
     deviceStateMocks.subscribeDeviceContextStale.mockReturnValue(() => {})
 
     // Default apiFetch mock (suppresses bootstrap calls)
@@ -126,8 +128,11 @@ describe('useDeviceRecovery', () => {
     })
 
     it('skips automatic bootstrap when device context already exists', async () => {
+      // @ts-ignore
       deviceStateMocks.getDeviceId.mockReturnValue('device-existing')
+      // @ts-ignore
       deviceStateMocks.getAnonId.mockReturnValue('anon-existing')
+      // @ts-ignore
       deviceStateMocks.hasDeviceContext.mockReturnValue(true)
 
       await renderDeviceRecovery({}, { waitForBootstrap: false })
@@ -137,9 +142,13 @@ describe('useDeviceRecovery', () => {
 
     it('re-runs bootstrap when a stale-device event fires', async () => {
       const listeners = []
+      // @ts-ignore
       deviceStateMocks.getDeviceId.mockReturnValue('device-existing')
+      // @ts-ignore
       deviceStateMocks.getAnonId.mockReturnValue('anon-existing')
+      // @ts-ignore
       deviceStateMocks.hasDeviceContext.mockReturnValue(true)
+      // @ts-ignore
       deviceStateMocks.subscribeDeviceContextStale.mockImplementation((cb) => {
         listeners.push(cb)
         return () => {}

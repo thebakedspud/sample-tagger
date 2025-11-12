@@ -9,7 +9,7 @@ describe('createPagedMockAdapter', () => {
 
   it('returns paginated results with deterministic ids and cursors', async () => {
     const adapter = createPagedMockAdapter({
-      provider: 'test',
+      provider: /** @type {any} */ ('test'),
       title: 'Mock Playlist',
       tracks: baseTracks,
       total: 12,
@@ -35,7 +35,7 @@ describe('createPagedMockAdapter', () => {
 
   it('falls back to generated dates and clears non-string cover urls', async () => {
     const adapter = createPagedMockAdapter({
-      provider: 'demo',
+      provider: /** @type {any} */ ('demo'),
       title: 'Demo Playlist',
       tracks: [{ title: 'Single', artist: 'Demo Artist', dateAdded: 'invalid-date' }],
       total: 1,
@@ -49,7 +49,7 @@ describe('createPagedMockAdapter', () => {
 
   it('treats invalid cursors as the first page and honors abort signals', async () => {
     const adapter = createPagedMockAdapter({
-      provider: 'abort',
+      provider: /** @type {any} */ ('abort'),
       title: 'Abortable Playlist',
       tracks: baseTracks,
       total: 5,

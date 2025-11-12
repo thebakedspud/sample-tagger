@@ -56,7 +56,7 @@ describe('TagInput', () => {
     fireEvent.change(input, { target: { value: 'drone' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(duplicateAdd).toHaveBeenCalledWith('drone')
-    expect(input.value).toBe('drone')
+    expect(/** @type {HTMLInputElement} */ (input).value).toBe('drone')
   })
 
   it('clears query and calls onCancel when Escape pressed', () => {
@@ -64,6 +64,6 @@ describe('TagInput', () => {
     fireEvent.change(input, { target: { value: 'ambient' } })
     fireEvent.keyDown(input, { key: 'Escape' })
     expect(handleCancel).toHaveBeenCalled()
-    expect(input.value).toBe('')
+    expect(/** @type {HTMLInputElement} */ (input).value).toBe('')
   })
 })

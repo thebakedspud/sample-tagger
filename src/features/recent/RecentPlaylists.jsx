@@ -61,6 +61,15 @@ function describeRecency(importedAt, lastUsedAt) {
   }
 }
 
+/**
+ * @param {object} props
+ * @param {Array<any>} props.items - Array of recent playlist items
+ * @param {(item: any) => Promise<any>} props.onSelect - Callback when a playlist is selected
+ * @param {Record<string, any>} [props.cardState] - State for individual playlist cards (loading, error)
+ * @param {boolean} [props.disabled] - Whether all cards are disabled
+ * @param {string|null} [props.refreshingId] - ID of the playlist currently being refreshed
+ * @param {boolean} [props.isRefreshing] - Whether a refresh operation is in progress
+ */
 export default function RecentPlaylists({
   items,
   onSelect,
