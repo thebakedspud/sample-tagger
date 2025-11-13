@@ -48,7 +48,7 @@ export function usePlaylistTracks() {
 
 /**
  * Hook to access notesByTrack map
- * @returns {Record<string, string[]>}
+ * @returns {Record<string, import('../../utils/notesTagsData.js').NoteEntry[]>}
  * @throws {Error} If used outside PlaylistStateProvider
  */
 export function usePlaylistNotesByTrack() {
@@ -110,4 +110,3 @@ export function usePlaylistSync() {
   }
   return sync
 }
-

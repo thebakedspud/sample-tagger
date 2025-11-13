@@ -16,7 +16,6 @@ import { normalizeTag } from './features/tags/tagUtils.js'
 import { STOCK_TAGS } from './features/tags/constants.js'
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from './features/tags/validation.js'
 import {
-  getNotes,
   normalizeNotesList,
   cloneNotesMap,
   normalizeTagList,
@@ -24,6 +23,7 @@ import {
   ensureNotesEntries,
   ensureTagsEntries,
   groupRemoteNotes,
+  getNoteBody,
 } from './utils/notesTagsData.js'
 import { bootstrapStorageState, EMPTY_IMPORT_META } from './utils/storageBootstrap.js'
 import { useRecentPlaylists } from './features/recent/useRecentPlaylists.js'
@@ -32,7 +32,7 @@ import { useRecentPlaylists } from './features/recent/useRecentPlaylists.js'
 /** @typedef {import('./features/import/adapters/types.js').ImportResult} ImportResult */
 /** @typedef {import('./features/import/usePlaylistImportController.js').BackgroundSyncStatus} BackgroundSyncStatus */
 /** @typedef {import('./features/import/usePlaylistImportController.js').BackgroundSyncState} BackgroundSyncState */
-import { focusById, focusElement } from './utils/focusById.js'
+import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
 import './styles/app.css';
@@ -53,17 +53,17 @@ import { getDeviceId, getAnonId } from './lib/deviceState.js'
 
 // NEW: Playlist state reducer + context provider
 import { playlistActions } from './features/playlist/actions.js'
-import { createNoteSnapshot, validateTag } from './features/playlist/helpers.js'
+import { validateTag } from './features/playlist/helpers.js'
 import { PlaylistStateProvider } from './features/playlist/PlaylistProvider.jsx'
 import {
   usePlaylistDispatch,
   usePlaylistTracks,
   usePlaylistNotesByTrack,
   usePlaylistTagsByTrack,
-  usePlaylistEditingState,
   usePlaylistDerived,
   usePlaylistSync,
 } from './features/playlist/usePlaylistContext.js'
+import { useNoteHandlers } from './features/notes/useNoteHandlers.js'
 import buildInitialPlaylistState from './features/playlist/buildInitialPlaylistState.js'
 
 /**
@@ -127,9 +127,7 @@ function AppInner({
   const tracks = usePlaylistTracks()
   const notesByTrack = usePlaylistNotesByTrack()
   const tagsByTrack = usePlaylistTagsByTrack()
-  const editingState = usePlaylistEditingState()
   const { hasLocalNotes, allCustomTags } = usePlaylistDerived()
-  const { trackId: editingId, draft, error: editingError } = editingState
   const { syncTrackTags } = usePlaylistSync()
   const tracksRef = useRef(tracks)
   const [skipPlaylistFocusManagement, setSkipPlaylistFocusManagement] = useState(false)
@@ -238,7 +236,6 @@ function AppInner({
   // const [error, setError] = useState(null)
 
   // Remember which button opened the editor
-  const editorInvokerRef = useRef(null)
   const notesByTrackRef = useRef(notesByTrack)
   const tagsByTrackRef = useRef(tagsByTrack)
   const backupFileInputRef = useRef(null)
@@ -268,6 +265,7 @@ function AppInner({
     onUndo: (meta) => {
       if (!meta) return
       const { trackId, note, index, restoreFocusId, fallbackFocusId } = meta
+      if (!note) return
       
       // Restore note using reducer
       dispatch(playlistActions.restoreNote(trackId, note, index))
@@ -347,6 +345,39 @@ function AppInner({
     [deviceId, anonId]
   )
 
+  const syncNote = useCallback(
+    async (trackId, body) => {
+      if (!anonContext?.deviceId) {
+        console.warn('[note save] missing device id, skipping sync')
+        return
+      }
+      const response = await apiFetch('/api/db/notes', {
+        method: 'POST',
+        body: JSON.stringify({ trackId, body }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.error ?? 'Failed to save note')
+      }
+    },
+    [anonContext?.deviceId],
+  )
+
+  const {
+    editingId,
+    draft,
+    editingError,
+    onDraftChange,
+    onAddNote,
+    onSaveNote,
+    onCancelNote,
+    onDeleteNote,
+  } = useNoteHandlers({
+    announce,
+    scheduleInlineUndo,
+    syncNote,
+  })
+
   const handleOpenSpotifyLink = useCallback(() => {
     announce('Spotify linking is coming soon.')
   }, [announce])
@@ -382,7 +413,14 @@ function AppInner({
         /** @type {Map<string, Set<string>>} */
         const remoteNoteSets = new Map()
         Object.entries(remoteNoteMap).forEach(([trackId, noteList]) => {
-          remoteNoteSets.set(trackId, new Set(noteList))
+          const bodySet = new Set(
+            Array.isArray(noteList)
+              ? noteList
+                  .map((note) => getNoteBody(note))
+                  .filter(Boolean)
+              : []
+          )
+          remoteNoteSets.set(trackId, bodySet)
         })
 
         const combinedLocal = cloneNotesMap(snapshot.notesByTrack || {})
@@ -392,9 +430,13 @@ function AppInner({
             const id = track.id
             if (!id) return
             const existing = Array.isArray(combinedLocal[id]) ? [...combinedLocal[id]] : []
+            const seenBodies = new Set(existing.map((entry) => getNoteBody(entry)).filter(Boolean))
             const cleaned = normalizeNotesList(track.notes)
             cleaned.forEach((note) => {
-              if (!existing.includes(note)) existing.push(note)
+              const body = getNoteBody(note)
+              if (!body || seenBodies.has(body)) return
+              existing.push(note)
+              seenBodies.add(body)
             })
             if (existing.length > 0) {
               combinedLocal[id] = existing
@@ -407,7 +449,7 @@ function AppInner({
         Object.entries(combinedLocal).forEach(([trackId, notes]) => {
           const remoteSet = remoteNoteSets.get(trackId) ?? new Set()
           notes.forEach((note) => {
-            const clean = typeof note === 'string' ? note.trim() : ''
+            const clean = getNoteBody(note).trim()
             if (!clean) return
             if (!remoteSet.has(clean)) {
               uploads.push({ trackId, body: clean })
@@ -523,14 +565,6 @@ function AppInner({
     })
   }, [playlistTitle, importedAt, lastImportUrl, tracks, importMeta, notesByTrack, tagsByTrack])
 
-  // Safety: close editor if its track disappears or changes
-  useEffect(() => {
-    if (editingId == null) return
-    if (!tracks.some(t => t.id === editingId)) {
-      dispatch(playlistActions.cancelNoteEdit())
-    }
-  }, [tracks, editingId, dispatch])
-
   // 🔐 Safety: if you somehow land on the playlist screen with zero tracks, bounce to landing
   useEffect(() => {
     if (screen === 'playlist' && tracks.length === 0) {
@@ -547,7 +581,6 @@ function AppInner({
 
   // ===== tiny extracted handlers =====
   function handleImportUrlChange(e) { setImportUrl(e.target.value); setImportError(null) }
-  const handleDraftChange = (value) => { dispatch(playlistActions.changeDraft(value)) }
 
   const handleBackupNotes = async () => {
     try {
@@ -751,89 +784,6 @@ function AppInner({
     [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks, dispatch],
   )
 
-  const onAddNote = (trackId) => {
-    dispatch(playlistActions.startNoteEdit(trackId))
-    editorInvokerRef.current = document.getElementById(`add-note-btn-${trackId}`)
-    setTimeout(() => {
-      const targetId = `note-input-${trackId}`
-      if (document.getElementById(targetId)) {
-        focusById(targetId)
-      }
-    }, 0)
-  }
-
-  const onSaveNote = async (trackId) => {
-    if (!draft.trim()) {
-      announce('Note not saved. The note is empty.')
-      dispatch(playlistActions.setEditingError('Note cannot be empty.'))
-      return
-    }
-    const trimmed = draft.trim()
-    // Create snapshot before optimistic update
-    const snapshot = createNoteSnapshot(notesByTrack, trackId)
-    
-    // Optimistic update
-    dispatch(playlistActions.saveNoteOptimistic(trackId, trimmed))
-    announce('Note added.')
-    focusElement(editorInvokerRef.current)
-
-    if (!anonContext?.deviceId) {
-      console.warn('[note save] missing device id, skipping sync')
-      return
-    }
-
-    try {
-      const response = await apiFetch('/api/db/notes', {
-        method: 'POST',
-        body: JSON.stringify({ trackId, body: trimmed }),
-      })
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}))
-        throw new Error(payload?.error ?? 'Failed to save note')
-      }
-    } catch (err) {
-      console.error('[note save] error', err)
-      // Rollback on failure (atomic update)
-      dispatch(playlistActions.rollbackNoteSaveWithError(
-        trackId, 
-        snapshot.previousNotes, 
-        'Failed to save note. Restored previous notes.'
-      ))
-      announce('Note save failed. Restored previous note list.')
-    }
-  }
-
-  const onCancelNote = () => {
-    dispatch(playlistActions.cancelNoteEdit())
-    announce('Note cancelled.')
-    focusElement(editorInvokerRef.current)
-  }
-
-  function makePendingId(trackId, index) {
-    return `${trackId}::${index}::${Date.now()}`
-  }
-
-  const onDeleteNote = (trackId, noteIndex) => {
-    const track = tracks.find(t => t.id === trackId)
-    const notes = getNotes(track)
-    const noteToDelete = notes[noteIndex]
-    if (noteToDelete == null) return
-
-    // Delete note
-    dispatch(playlistActions.deleteNote(trackId, noteIndex))
-
-    // Schedule undo
-    const id = makePendingId(trackId, noteIndex)
-    scheduleInlineUndo(id, {
-      trackId,
-      note: noteToDelete,
-      index: noteIndex,
-      restoreFocusId: `del-btn-${trackId}-${noteIndex}`,
-      fallbackFocusId: `add-note-btn-${trackId}`,
-    })
-    announce('Note deleted. Press Undo to restore')
-  }
-
   const hasPlaylist = Array.isArray(tracks) && tracks.length > 0
 
   // Helper to hide the mock prefix from SRs but keep it visible
@@ -1000,7 +950,7 @@ function AppInner({
                 pending={pending}
                 isPending={isPending}
                 editingState={{ editingId, draft, error: editingError }}
-                onDraftChange={handleDraftChange}
+                onDraftChange={onDraftChange}
                 onAddNote={onAddNote}
                 onSaveNote={onSaveNote}
                 onCancelNote={onCancelNote}

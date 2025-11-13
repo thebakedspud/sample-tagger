@@ -1,9 +1,10 @@
 import UndoPlaceholder from '../../components/UndoPlaceholder.jsx'
+import { getNoteBody } from '../../utils/notesTagsData.js'
 
 /**
  * @param {object} props
  * @param {string|number} props.trackId
- * @param {string[]} props.notes
+ * @param {Array<import('../../utils/notesTagsData.js').NoteEntry>} props.notes
  * @param {string} props.trackTitle
  * @param {Array<{ pid: string, index: number, restoreFocusId?: string, fallbackFocusId?: string }>} props.placeholders
  * @param {(id: string) => boolean} props.isPending
@@ -53,6 +54,7 @@ export default function NoteList({
 
     if (idx < noteCount) {
       const note = notes[idx]
+      const body = getNoteBody(note)
       rows.push(
         <li
           key={`n-${trackId}-${idx}`}
@@ -64,7 +66,7 @@ export default function NoteList({
             gap: 8,
           }}
         >
-          <span>- {note}</span>
+          <span>- {body}</span>
           <button
             type="button"
             id={`del-btn-${trackId}-${idx}`}

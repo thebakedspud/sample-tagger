@@ -9,6 +9,7 @@ import {
   createTagSnapshot,
   attachNotesToTrack
 } from '../helpers.js'
+import { noteBodies } from '../../../test-utils/noteHelpers.js'
 
 describe('playlist helpers', () => {
   describe('computeHasLocalNotes', () => {
@@ -169,10 +170,8 @@ describe('playlist helpers', () => {
       }
       const snapshot = createNoteSnapshot(notesByTrack, 't1')
       
-      expect(snapshot).toEqual({
-        trackId: 't1',
-        previousNotes: ['note1', 'note2']
-      })
+      expect(snapshot.trackId).toBe('t1')
+      expect(noteBodies(snapshot.previousNotes)).toEqual(['note1', 'note2'])
     })
 
     it('creates snapshot with empty array when no notes exist', () => {
@@ -252,12 +251,10 @@ describe('playlist helpers', () => {
       
       const result = attachNotesToTrack(track, notesByTrack, tagsByTrack)
       
-      expect(result).toEqual({
-        id: 't1',
-        title: 'Track 1',
-        notes: ['note1'],
-        tags: ['rock']
-      })
+      expect(result.id).toBe('t1')
+      expect(result.title).toBe('Track 1')
+      expect(noteBodies(result.notes)).toEqual(['note1'])
+      expect(result.tags).toEqual(['rock'])
     })
 
     it('attaches empty arrays when no notes/tags exist', () => {
@@ -281,8 +278,9 @@ describe('playlist helpers', () => {
       const result = attachNotesToTrack(track, notesByTrack, tagsByTrack)
       
       expect(result).not.toBe(track)
-      expect(result.notes).toBe(notesByTrack.t1) // References same array
-      expect(result.tags).toBe(tagsByTrack.t1) // References same array
+      expect(noteBodies(result.notes)).toEqual(['note1'])
+      expect(result.notes).not.toBe(notesByTrack.t1)
+      expect(result.tags).toBe(tagsByTrack.t1) // Tags still share reference
     })
 
     it('preserves all original track properties', () => {

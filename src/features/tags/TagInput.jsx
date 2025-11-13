@@ -199,7 +199,7 @@ function TagInputInner(props, ref) {
         <ul
           id={listboxId}
           role="listbox"
-          tabIndex="-1"
+          tabIndex={-1}
           className="tag-input__suggestions"
         >
           {suggestions.map((tag, index) => (

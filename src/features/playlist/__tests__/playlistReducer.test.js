@@ -3,6 +3,11 @@
 import { describe, it, expect } from 'vitest'
 import { playlistReducer, initialPlaylistState } from '../playlistReducer.js'
 import { playlistActions } from '../actions.js'
+import { noteBodies } from '../../../test-utils/noteHelpers.js'
+
+const expectBodies = (notes, expected) => {
+  expect(noteBodies(notes)).toEqual(expected)
+}
 
 describe('playlistReducer', () => {
   describe('initial state', () => {
@@ -130,8 +135,8 @@ describe('playlistReducer', () => {
       const action = playlistActions.saveNoteOptimistic('t1', 'test note')
       const next = playlistReducer(state, action)
 
-      expect(next.notesByTrack.t1).toEqual(['test note'])
-      expect(next.tracks[0].notes).toEqual(['test note'])
+      expectBodies(next.notesByTrack.t1, ['test note'])
+      expectBodies(next.tracks[0].notes, ['test note'])
     })
 
     it('appends to existing notes', () => {
@@ -144,8 +149,8 @@ describe('playlistReducer', () => {
       const action = playlistActions.saveNoteOptimistic('t1', 'note2')
       const next = playlistReducer(state, action)
 
-      expect(next.notesByTrack.t1).toEqual(['note1', 'note2'])
-      expect(next.tracks[0].notes).toEqual(['note1', 'note2'])
+      expectBodies(next.notesByTrack.t1, ['note1', 'note2'])
+      expectBodies(next.tracks[0].notes, ['note1', 'note2'])
     })
 
     it('clears editing state after save', () => {
@@ -191,8 +196,8 @@ describe('playlistReducer', () => {
       const action = playlistActions.rollbackNoteSave('t1', ['original'])
       const next = playlistReducer(state, action)
 
-      expect(next.notesByTrack.t1).toEqual(['original'])
-      expect(next.tracks[0].notes).toEqual(['original'])
+      expectBodies(next.notesByTrack.t1, ['original'])
+      expectBodies(next.tracks[0].notes, ['original'])
     })
 
     it('can rollback to empty notes', () => {
@@ -207,7 +212,7 @@ describe('playlistReducer', () => {
 
       // updateNotesMap removes entry when empty
       expect(next.notesByTrack.t1).toBeUndefined()
-      expect(next.tracks[0].notes).toEqual([])
+      expectBodies(next.tracks[0].notes, [])
       expect(next._derived.hasLocalNotes).toBe(false)
     })
   })
@@ -224,8 +229,8 @@ describe('playlistReducer', () => {
       const action = playlistActions.rollbackNoteSaveWithError('t1', ['original note'], 'API error')
       const next = playlistReducer(state, action)
 
-      expect(next.notesByTrack.t1).toEqual(['original note'])
-      expect(next.tracks[0].notes).toEqual(['original note'])
+      expectBodies(next.notesByTrack.t1, ['original note'])
+      expectBodies(next.tracks[0].notes, ['original note'])
       expect(next.editingState.error).toBe('API error')
     })
 
@@ -241,7 +246,7 @@ describe('playlistReducer', () => {
       const next = playlistReducer(state, action)
 
       expect(next.notesByTrack.t1).toBeUndefined()
-      expect(next.tracks[0].notes).toEqual([])
+      expectBodies(next.tracks[0].notes, [])
       expect(next.editingState.error).toBe('Failed to save')
       // Preserves other editing state
       expect(next.editingState.trackId).toBe('t1')
@@ -260,8 +265,8 @@ describe('playlistReducer', () => {
       const action = playlistActions.deleteNote('t1', 1)
       const next = playlistReducer(state, action)
 
-      expect(next.notesByTrack.t1).toEqual(['note1', 'note3'])
-      expect(next.tracks[0].notes).toEqual(['note1', 'note3'])
+      expectBodies(next.notesByTrack.t1, ['note1', 'note3'])
+      expectBodies(next.tracks[0].notes, ['note1', 'note3'])
     })
 
     it('removes last note', () => {
@@ -291,8 +296,8 @@ describe('playlistReducer', () => {
       const action = playlistActions.restoreNote('t1', 'note2', 1)
       const next = playlistReducer(state, action)
 
-      expect(next.notesByTrack.t1).toEqual(['note1', 'note2', 'note3'])
-      expect(next.tracks[0].notes).toEqual(['note1', 'note2', 'note3'])
+      expectBodies(next.notesByTrack.t1, ['note1', 'note2', 'note3'])
+      expectBodies(next.tracks[0].notes, ['note1', 'note2', 'note3'])
     })
 
     it('restores at beginning', () => {
@@ -305,7 +310,7 @@ describe('playlistReducer', () => {
       const action = playlistActions.restoreNote('t1', 'note1', 0)
       const next = playlistReducer(state, action)
 
-      expect(next.notesByTrack.t1).toEqual(['note1', 'note2'])
+      expectBodies(next.notesByTrack.t1, ['note1', 'note2'])
     })
 
     it('restores at end', () => {
@@ -318,7 +323,7 @@ describe('playlistReducer', () => {
       const action = playlistActions.restoreNote('t1', 'note2', 1)
       const next = playlistReducer(state, action)
 
-      expect(next.notesByTrack.t1).toEqual(['note1', 'note2'])
+      expectBodies(next.notesByTrack.t1, ['note1', 'note2'])
     })
   })
 
@@ -443,15 +448,19 @@ describe('playlistReducer', () => {
       const action = playlistActions.updateTracks(newTracks)
       const next = playlistReducer(state, action)
 
-      expect(next.tracks).toEqual([
+      const simplifiedTracks = next.tracks.map((track) => ({
+        ...track,
+        notes: noteBodies(track.notes),
+      }))
+      expect(simplifiedTracks).toEqual([
         { ...newTracks[0], notes: ['note'], tags: ['tag'] },
         { ...newTracks[1], notes: [], tags: [] },
       ])
       // Existing entries preserved
-      expect(next.notesByTrack.t1).toEqual(['note'])
+      expectBodies(next.notesByTrack.t1, ['note'])
       expect(next.tagsByTrack.t1).toEqual(['tag'])
       // New entries ensured (empty arrays)
-      expect(next.notesByTrack.t2).toEqual([])
+      expectBodies(next.notesByTrack.t2, [])
       expect(next.tagsByTrack.t2).toEqual([])
     })
 
@@ -467,8 +476,12 @@ describe('playlistReducer', () => {
       const action = playlistActions.updateTracks(newTracks)
       const next = playlistReducer(state, action)
 
-      expect(next.tracks).toEqual([{ ...newTracks[0], notes: ['old'], tags: ['old'] }])
-      expect(next.notesByTrack.t1).toEqual(['old'])
+      const simplifiedTracks = next.tracks.map((track) => ({
+        ...track,
+        notes: noteBodies(track.notes),
+      }))
+      expect(simplifiedTracks).toEqual([{ ...newTracks[0], notes: ['old'], tags: ['old'] }])
+      expectBodies(next.notesByTrack.t1, ['old'])
       expect(next.tagsByTrack.t1).toEqual(['old'])
     })
   })
@@ -490,9 +503,9 @@ describe('playlistReducer', () => {
       )
       const next = playlistReducer(state, action)
 
-      expect(next.tracks[0].notes).toEqual(['note'])
+      expectBodies(next.tracks[0].notes, ['note'])
       expect(next.tracks[0].tags).toEqual(['tag'])
-      expect(next.notesByTrack).toEqual(notesByTrack)
+      expectBodies(next.notesByTrack.t1, ['note'])
       expect(next.tagsByTrack).toEqual(tagsByTrack)
     })
 
@@ -532,9 +545,9 @@ describe('playlistReducer', () => {
       const next = playlistReducer(state, action)
 
       // Local note preserved
-      expect(next.notesByTrack.t1).toEqual(['local note'])
+      expectBodies(next.notesByTrack.t1, ['local note'])
       // Remote note added for t2 (no local)
-      expect(next.notesByTrack.t2).toEqual(['remote note 2'])
+      expectBodies(next.notesByTrack.t2, ['remote note 2'])
     })
 
     it('remote tags always replace local tags', () => {
@@ -567,7 +580,7 @@ describe('playlistReducer', () => {
       const action = playlistActions.mergeRemoteData(remoteNotes, remoteTags)
       const next = playlistReducer(state, action)
 
-      expect(next.tracks[0].notes).toEqual(['note'])
+      expectBodies(next.tracks[0].notes, ['note'])
       expect(next.tracks[0].tags).toEqual(['tag'])
     })
 
@@ -583,8 +596,8 @@ describe('playlistReducer', () => {
       const action = playlistActions.mergeRemoteData(remoteNotes, {})
       const next = playlistReducer(state, action)
 
-      expect(next.notesByTrack.t1).toEqual(['local note'])
-      expect(next.tracks[0].notes).toEqual(['local note'])
+      expectBodies(next.notesByTrack.t1, ['local note'])
+      expectBodies(next.tracks[0].notes, ['local note'])
     })
 
     it('updates derived state after merge', () => {
@@ -651,7 +664,7 @@ describe('playlistReducer', () => {
 
       expect(next.tracks).not.toBe(originalTracks)
       expect(next.notesByTrack).not.toBe(originalNotesMap)
-      expect(state.notesByTrack.t1).toEqual([]) // Original unchanged
+      expectBodies(state.notesByTrack.t1, []) // Original unchanged
     })
 
     it('does not mutate original state on TAG_ADD', () => {

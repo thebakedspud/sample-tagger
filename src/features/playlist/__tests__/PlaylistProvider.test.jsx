@@ -5,6 +5,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { PlaylistStateProvider } from '../PlaylistProvider.jsx'
 import { usePlaylistState, usePlaylistDispatch, usePlaylistSync } from '../usePlaylistContext.js'
 import { initialPlaylistState } from '../playlistReducer.js'
+import { noteBodies } from '../../../test-utils/noteHelpers.js'
 
 // Mock dependencies
 vi.mock('../../../lib/apiClient.js', () => ({
@@ -245,7 +246,8 @@ describe('PlaylistProvider', () => {
 
       function TestChild() {
         const state = usePlaylistState()
-        return <div data-testid="notes">{state.notesByTrack.t1?.join(',') || 'empty'}</div>
+        const bodies = noteBodies(state.notesByTrack.t1)
+        return <div data-testid="notes">{bodies.length > 0 ? bodies.join(',') : 'empty'}</div>
       }
 
       render(

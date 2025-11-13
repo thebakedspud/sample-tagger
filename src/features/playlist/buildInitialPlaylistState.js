@@ -44,7 +44,9 @@ export function buildInitialPlaylistState(bootstrapState) {
   const initialNotesMap = createInitialNotesMap(persisted);
   const initialTagsMap = createInitialTagsMap(persisted);
 
-  const notesMap = ensureNotesEntries(initialNotesMap, persistedTracks);
+  const notesMap = /** @type {import('../../utils/notesTagsData.js').NotesByTrack} */ (
+    ensureNotesEntries(initialNotesMap, persistedTracks)
+  );
   const tagsMap = ensureTagsEntries(initialTagsMap, persistedTracks);
 
   const tracksWithNotes = attachNotesToTracks(

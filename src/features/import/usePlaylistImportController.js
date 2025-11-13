@@ -39,7 +39,7 @@ function computePayloadTotal(payload) {
  * @property {Function} announce
  * @property {any[]} tracks
  * @property {import('react').MutableRefObject<any[]>} tracksRef
- * @property {Record<string, string[]>} notesByTrack
+ * @property {import('../../utils/notesTagsData.js').NotesByTrack} notesByTrack
  * @property {Record<string, string[]>} tagsByTrack
  * @property {Function} setScreen
  * @property {Function} pushRecentPlaylist

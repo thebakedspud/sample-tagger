@@ -7,7 +7,7 @@ import { focusElement } from '../../utils/focusById.js'
 
 /**
  * @typedef {object} TrackCardProps
- * @property {{ id: string|number, title: string, artist: string, notes: string[], tags?: string[], dateAdded?: string, thumbnailUrl?: string }} track
+ * @property {{ id: string|number, title: string, artist: string, notes: import('../../utils/notesTagsData.js').NoteEntry[], tags?: string[], dateAdded?: string, thumbnailUrl?: string }} track
  * @property {number} index
  * @property {Array<{ pid: string, index: number, restoreFocusId?: string, fallbackFocusId?: string }>} [placeholders]
  * @property {(id: string) => boolean} isPending
@@ -35,7 +35,7 @@ import { focusElement } from '../../utils/focusById.js'
  *   id: string|number,
  *   title: string,
  *   artist: string,
- *   notes: string[],
+ *   notes: import('../../utils/notesTagsData.js').NoteEntry[],
  *   tags?: string[],
  *   dateAdded?: string,
  *   thumbnailUrl?: string,

@@ -2,12 +2,13 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TrackCard from '../TrackCard.jsx'
+import { makeNote } from '../../../test-utils/noteHelpers.js'
 
 const defaultTrack = {
   id: 'track-1',
   title: 'Track One',
   artist: 'Artist A',
-  notes: ['first note'],
+  notes: [makeNote('first note')],
   tags: ['rock', 'jazz'],
 }
 

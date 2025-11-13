@@ -2,6 +2,8 @@
 
 import { normalizeTag } from '../tags/tagUtils.js'
 import { validateTag } from './helpers.js'
+/** @typedef {import('../../utils/notesTagsData.js').NoteEntry} NoteEntry */
+/** @typedef {import('../../utils/notesTagsData.js').NotesByTrack} NotesByTrack */
 
 /**
  * Action creators with built-in validation.
@@ -53,20 +55,25 @@ export const playlistActions = {
    * Save note optimistically (before API call)
    * @param {string} trackId
    * @param {string} note
+   * @param {{ timestampMs?: number | null }} [extra]
    * @returns {Object}
    */
-  saveNoteOptimistic(trackId, note) {
+  saveNoteOptimistic(trackId, note, extra = {}) {
     const trimmed = note?.trim()
     if (!trimmed) {
       throw new Error('Note cannot be empty')
     }
-    return { type: 'NOTE_SAVE_OPTIMISTIC', payload: { trackId, note: trimmed } }
+    const payload = { trackId, note: trimmed }
+    if (extra && typeof extra === 'object' && 'timestampMs' in extra) {
+      payload.timestampMs = extra.timestampMs
+    }
+    return { type: 'NOTE_SAVE_OPTIMISTIC', payload }
   },
 
   /**
    * Rollback note save on API failure
    * @param {string} trackId
-   * @param {string[]} previousNotes
+   * @param {import('../../utils/notesTagsData.js').NoteEntry[]} previousNotes
    * @returns {Object}
    */
   rollbackNoteSave(trackId, previousNotes) {
@@ -76,7 +83,7 @@ export const playlistActions = {
   /**
    * Rollback note save with error message (atomic update)
    * @param {string} trackId
-   * @param {string[]} previousNotes
+   * @param {import('../../utils/notesTagsData.js').NoteEntry[]} previousNotes
    * @param {string} error
    * @returns {Object}
    */
@@ -97,7 +104,7 @@ export const playlistActions = {
   /**
    * Restore a deleted note (for undo)
    * @param {string} trackId
-   * @param {string} note
+   * @param {NoteEntry} note
    * @param {number} index
    * @returns {Object}
    */
@@ -147,7 +154,7 @@ export const playlistActions = {
   /**
    * Set tracks with associated notes and tags
    * @param {Array} tracks
-   * @param {Record<string, string[]>} notesByTrack
+   * @param {NotesByTrack} notesByTrack
    * @param {Record<string, string[]>} tagsByTrack
    * @param {Array} baselineTracks - For comparison during merge
    * @param {string|null} importStamp - Timestamp for import
@@ -162,7 +169,7 @@ export const playlistActions = {
 
   /**
    * Merge remote data from API
-   * @param {Record<string, string[]>} remoteNotes
+   * @param {NotesByTrack} remoteNotes
    * @param {Record<string, string[]>} remoteTags
    * @returns {Object}
    */
@@ -178,4 +185,3 @@ export const playlistActions = {
     return { type: 'STATE_RESET' }
   }
 }
-

@@ -5,6 +5,7 @@
 // @ts-check
 
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from '../features/tags/validation.js'
+import { normalizeNotesList } from './notesTagsData.js'
 
 /**
  * @typedef {'dark' | 'light'} Theme
@@ -27,7 +28,7 @@ import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from '../features/
  * @property {string} id
  * @property {string} title
  * @property {string} artist
- * @property {string[]} notes
+ * @property {import('./notesTagsData.js').NoteEntry[]} notes
  * @property {string=} thumbnailUrl
  * @property {string=} sourceUrl
  * @property {number=} durationMs
@@ -38,7 +39,7 @@ import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from '../features/
  * @property {number=} originalIndex
  * @property {'spotify' | 'youtube' | 'soundcloud'=} provider
  *
- * @typedef {Record<string, string[]>} NotesByTrack
+ * @typedef {Record<string, import('./notesTagsData.js').NoteEntry[]>} NotesByTrack
  *
  * @typedef {Record<string, string[]>} TagsByTrack
  *
@@ -829,19 +830,11 @@ function safeString(value) {
 
 /**
  * @param {unknown} maybeNotes
- * @returns {string[]}
+ * @returns {import('./notesTagsData.js').NoteEntry[]}
  */
 function normalizeNotesArray(maybeNotes) {
   if (!Array.isArray(maybeNotes)) return [];
-  /** @type {string[]} */
-  const out = [];
-  maybeNotes.forEach((note) => {
-    if (typeof note !== 'string') return;
-    const trimmed = note.trim();
-    if (!trimmed) return;
-    out.push(trimmed);
-  });
-  return out;
+  return normalizeNotesList(maybeNotes);
 }
 
 /**

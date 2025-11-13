@@ -6,15 +6,17 @@ import {
   ensureNotesEntries,
   ensureTagsEntries,
   mergeRemoteNotes,
-  mergeRemoteTags
+  mergeRemoteTags,
+  normalizeNotesList,
 } from '../../utils/notesTagsData.js'
+/** @typedef {import('../../utils/notesTagsData.js').NoteEntry} NoteEntry */
 import { attachNotesToTracks } from '../../utils/trackProcessing.js'
 import { computeHasLocalNotes, computeAllCustomTags } from './helpers.js'
 
 /**
  * @typedef {Object} PlaylistState
  * @property {Array<any>} tracks
- * @property {Record<string, string[]>} notesByTrack
+ * @property {Record<string, NoteEntry[]>} notesByTrack
  * @property {Record<string, string[]>} tagsByTrack
  * @property {{ trackId: string | null, draft: string, error: string | null }} editingState
  * @property {{ hasLocalNotes: boolean, allCustomTags: string[] }} _derived
@@ -53,6 +55,23 @@ function recomputeDerived(state) {
       allCustomTags: computeAllCustomTags(state.tagsByTrack)
     }
   }
+}
+
+function normalizeTimestampMs(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return Math.trunc(value)
+}
+
+function createNoteEntry(body, payload = {}) {
+  const entry = {
+    body,
+    createdAt: Date.now()
+  }
+  const ts = normalizeTimestampMs(payload.timestampMs)
+  if (ts != null) {
+    entry.timestampMs = ts
+  }
+  return entry
 }
 
 /**
@@ -105,12 +124,14 @@ export function playlistReducer(state, action) {
     // ===== Note Operations =====
     case 'NOTE_SAVE_OPTIMISTIC': {
       const { trackId, note } = action.payload
-      const existing = state.notesByTrack[trackId] || []
-      const updated = [...existing, note]
-      const nextNotesMap = updateNotesMap(state.notesByTrack, trackId, updated)
+      const existing = normalizeNotesList(state.notesByTrack[trackId] || [])
+      const createdEntry = createNoteEntry(note, action.payload)
+      const pendingNotes = [...existing, createdEntry]
+      const nextNotesMap = updateNotesMap(state.notesByTrack, trackId, pendingNotes)
+      const hydratedNotes = nextNotesMap[trackId] || []
       const nextTracks = state.tracks.map(t =>
         t.id === trackId
-          ? { ...t, notes: updated }
+          ? { ...t, notes: hydratedNotes }
           : t
       )
 
@@ -125,9 +146,10 @@ export function playlistReducer(state, action) {
     case 'NOTE_SAVE_ROLLBACK': {
       const { trackId, previousNotes } = action.payload
       const nextNotesMap = updateNotesMap(state.notesByTrack, trackId, previousNotes)
+      const hydratedNotes = nextNotesMap[trackId] || []
       const nextTracks = state.tracks.map(t =>
         t.id === trackId
-          ? { ...t, notes: previousNotes }
+          ? { ...t, notes: hydratedNotes }
           : t
       )
 
@@ -141,9 +163,10 @@ export function playlistReducer(state, action) {
     case 'NOTE_SAVE_ROLLBACK_WITH_ERROR': {
       const { trackId, previousNotes, error } = action.payload
       const nextNotesMap = updateNotesMap(state.notesByTrack, trackId, previousNotes)
+      const hydratedNotes = nextNotesMap[trackId] || []
       const nextTracks = state.tracks.map(t =>
         t.id === trackId
-          ? { ...t, notes: previousNotes }
+          ? { ...t, notes: hydratedNotes }
           : t
       )
 
@@ -160,12 +183,13 @@ export function playlistReducer(state, action) {
 
     case 'NOTE_DELETE': {
       const { trackId, noteIndex } = action.payload
-      const existing = state.notesByTrack[trackId] || []
+      const existing = normalizeNotesList(state.notesByTrack[trackId] || [])
       const updated = existing.filter((_, i) => i !== noteIndex)
       const nextNotesMap = updateNotesMap(state.notesByTrack, trackId, updated)
+      const hydratedNotes = nextNotesMap[trackId] || []
       const nextTracks = state.tracks.map(t =>
         t.id === trackId
-          ? { ...t, notes: updated }
+          ? { ...t, notes: hydratedNotes }
           : t
       )
 
@@ -178,13 +202,19 @@ export function playlistReducer(state, action) {
 
     case 'NOTE_RESTORE': {
       const { trackId, note, index } = action.payload
-      const existing = state.notesByTrack[trackId] || []
+      const existing = normalizeNotesList(state.notesByTrack[trackId] || [])
+      const noteList = normalizeNotesList([note])
+      const entry = noteList[0]
+      if (!entry) {
+        return state
+      }
       const updated = [...existing]
-      updated.splice(index, 0, note)
+      updated.splice(index, 0, entry)
       const nextNotesMap = updateNotesMap(state.notesByTrack, trackId, updated)
+      const hydratedNotes = nextNotesMap[trackId] || []
       const nextTracks = state.tracks.map(t =>
         t.id === trackId
-          ? { ...t, notes: updated }
+          ? { ...t, notes: hydratedNotes }
           : t
       )
 
