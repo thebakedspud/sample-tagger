@@ -166,6 +166,12 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
     let cancelled = false
     /** @type {ReturnType<typeof setTimeout> | null} */
     let timeoutId = null
+    const clearTimer = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+    }
     /** @type {AbortController | null} */
     let activeAbortController = null
 
@@ -183,15 +189,19 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
             scheduleRetry()
             abortController.abort()
           }
+          timeoutId = null
         }, 30000)
 
         const response = await apiFetch('/api/db/notes', {
           signal: abortController.signal,
         })
         const payload = await response.json().catch(() => ({}))
-        if (cancelled) return
+        if (cancelled) {
+          clearTimer()
+          return
+        }
         if (!response.ok) {
-          if (timeoutId) clearTimeout(timeoutId)
+          clearTimer()
           if (response.status === 401 || response.status === 403 || response.status === 404) {
             notifyDeviceContextStale({ source: 'notes-sync', status: response.status })
           }
@@ -207,18 +217,21 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
         const hasRemoteNotes = Object.keys(remoteMap).length > 0
         const hasRemoteTags = Object.keys(remoteTagMap).length > 0
         if (!hasRemoteNotes && !hasRemoteTags) {
+          clearTimer()
           updateInitialSyncStatus({ status: 'complete', lastError: null })
           return
         }
         // Merge remote data using reducer
         dispatch(playlistActions.mergeRemoteData(remoteMap, remoteTagMap))
+        clearTimer()
         updateInitialSyncStatus({ status: 'complete', lastError: null })
       } catch (err) {
         if (err?.name === 'AbortError') {
+          clearTimer()
           return
         }
         if (!cancelled) {
-          if (timeoutId) clearTimeout(timeoutId)
+          clearTimer()
           console.error('[notes sync] error', err)
           markSyncError({
             status: 'error',
@@ -259,10 +272,7 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
 
     return () => {
       cancelled = true
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-        timeoutId = null
-      }
+      clearTimer()
       if (activeAbortController) {
         activeAbortController.abort()
         activeAbortController = null

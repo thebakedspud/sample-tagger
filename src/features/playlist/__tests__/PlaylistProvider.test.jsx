@@ -203,6 +203,74 @@ describe('PlaylistProvider', () => {
       expect(mockedApiFetch).not.toHaveBeenCalled()
     })
 
+    it('clears the sync timeout after a successful fetch', async () => {
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
+      const onStatusChange = vi.fn()
+      const mockResponse = makeResolvedResponse({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ notes: [] }),
+      })
+      mockedApiFetch.mockResolvedValue(mockResponse)
+
+      const originalSetTimeout = globalThis.setTimeout
+      const originalClearTimeout = globalThis.clearTimeout
+      const timeoutHandle = 9999
+      let capturedTimeoutCallback = null
+
+      const setTimeoutSpy = vi
+        .spyOn(globalThis, 'setTimeout')
+        .mockImplementation((callback, delay, ...args) => {
+          if (typeof delay === 'number' && delay >= 30000) {
+            capturedTimeoutCallback = () => callback(...args)
+            return timeoutHandle
+          }
+          return originalSetTimeout(callback, delay, ...args)
+        })
+
+      const clearTimeoutSpy = vi
+        .spyOn(globalThis, 'clearTimeout')
+        .mockImplementation((handle) => {
+          if (handle === timeoutHandle) {
+            return
+          }
+          return originalClearTimeout(handle)
+        })
+
+      function TestChild() {
+        return <div>Test</div>
+      }
+
+      try {
+        render(
+          <PlaylistStateProvider
+            initialState={stateWithLocalData}
+            anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
+            onInitialSyncStatusChange={onStatusChange}
+          >
+            <TestChild />
+          </PlaylistStateProvider>,
+        )
+
+        await waitFor(() =>
+          expect(onStatusChange).toHaveBeenCalledWith(
+            expect.objectContaining({ status: 'complete', lastError: null }),
+          ),
+        )
+
+        expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 30000)
+        expect(clearTimeoutSpy).toHaveBeenCalledWith(timeoutHandle)
+        expect(capturedTimeoutCallback).toBeInstanceOf(Function)
+      } finally {
+        setTimeoutSpy.mockRestore()
+        clearTimeoutSpy.mockRestore()
+      }
+    })
     it('skips fetch when there are no local tracks', async () => {
       function TestChild() {
         return <div>Test</div>
