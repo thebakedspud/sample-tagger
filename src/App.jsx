@@ -206,7 +206,9 @@ function AppInner({
     initialPersistedTrackCount: Array.isArray(persistedTracks) ? persistedTracks.length : 0,
   })
 
+  const isRefreshingCachedDataRef = useRef(isRefreshingCachedData)
   useEffect(() => {
+    isRefreshingCachedDataRef.current = isRefreshingCachedData
     if (!isRefreshingCachedData) {
       setRefreshingRecentId(null)
     }
@@ -222,12 +224,12 @@ function AppInner({
       try {
         return await handleSelectRecentInternal(recent)
       } finally {
-        if (!isRefreshingCachedData) {
+        if (!isRefreshingCachedDataRef.current) {
           setRefreshingRecentId(null)
         }
       }
     },
-    [handleSelectRecentInternal, isRefreshingCachedData],
+    [handleSelectRecentInternal],
   )
 
   // OLD: These state variables moved to playlistReducer

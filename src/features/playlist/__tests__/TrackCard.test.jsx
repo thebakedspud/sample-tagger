@@ -145,4 +145,37 @@ describe('TrackCard', () => {
     expect(screen.getByText(errorMessage)).toBeInTheDocument()
     expect(input).toHaveAttribute('aria-invalid', 'true')
   })
+
+  it('passes timestamp input to save handler', async () => {
+    const onSaveNote = vi.fn()
+    const { user } = renderTrackCard({
+      isEditing: true,
+      editingDraft: 'draft text',
+      onSaveNote,
+    })
+
+    const timestampInput = await screen.findByLabelText(/Timestamp \(optional\)/i)
+    await user.type(timestampInput, '1:23')
+    const saveButton = screen.getByRole('button', { name: /save note/i })
+    await user.click(saveButton)
+
+    expect(onSaveNote).toHaveBeenCalledWith('track-1', '1:23')
+  })
+
+  it('shows error when timestamp invalid and doesn’t save', async () => {
+    const onSaveNote = vi.fn()
+    const { user } = renderTrackCard({
+      isEditing: true,
+      editingDraft: 'draft text',
+      onSaveNote,
+    })
+
+    const timestampInput = await screen.findByLabelText(/Timestamp \(optional\)/i)
+    await user.type(timestampInput, 'abc')
+    const saveButton = screen.getByRole('button', { name: /save note/i })
+    await user.click(saveButton)
+
+    expect(onSaveNote).not.toHaveBeenCalled()
+    expect(screen.getByText(/Invalid timestamp format/i)).toBeInTheDocument()
+  })
 })

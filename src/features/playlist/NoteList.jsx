@@ -1,5 +1,6 @@
 import UndoPlaceholder from '../../components/UndoPlaceholder.jsx'
 import { getNoteBody } from '../../utils/notesTagsData.js'
+import { formatNoteCreatedAt, formatTimestampMs } from './noteTimestamps.js'
 
 /**
  * @param {object} props
@@ -55,18 +56,58 @@ export default function NoteList({
     if (idx < noteCount) {
       const note = notes[idx]
       const body = getNoteBody(note)
+      const createdAtLabel = formatNoteCreatedAt(note?.createdAt)
+      const timestampLabel = formatTimestampMs(note?.timestampMs)
       rows.push(
         <li
           key={`n-${trackId}-${idx}`}
           style={{
             color: 'var(--fg)',
             display: 'flex',
-            justifyContent: 'space-between',
             alignItems: 'center',
             gap: 8,
           }}
         >
-          <span>- {body}</span>
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
+          >
+            {timestampLabel && (
+              <span
+                style={{
+                  color: 'var(--muted)',
+                  fontSize: '0.81rem',
+                  whiteSpace: 'nowrap',
+                  border: '1px solid var(--border)',
+                  padding: '0 6px',
+                  borderRadius: 999,
+                  fontFamily: 'monospace',
+                }}
+              >
+                [{timestampLabel}]
+              </span>
+            )}
+            <span style={{ whiteSpace: 'normal', minWidth: 0 }}>- {body}</span>
+            {createdAtLabel && (
+              <span
+                style={{
+                  color: 'var(--muted)',
+                  fontSize: '0.82rem',
+                  whiteSpace: 'nowrap',
+                  marginLeft: 'auto',
+                }}
+                aria-label={`Note created at ${createdAtLabel}`}
+              >
+                {createdAtLabel}
+              </span>
+            )}
+          </div>
           <button
             type="button"
             id={`del-btn-${trackId}-${idx}`}

@@ -65,7 +65,7 @@ function resolveVirtualizationPreference(trackCount) {
  * @param {{ editingId: string|number|null, draft: string, error: string|null }} props.editingState
  * @param {(value: string) => void} props.onDraftChange
  * @param {(trackId: string|number) => void} props.onAddNote
- * @param {(trackId: string|number) => void} props.onSaveNote
+ * @param {(trackId: string|number, timestamp?: string) => void} props.onSaveNote
  * @param {() => void} props.onCancelNote
  * @param {(trackId: string|number, noteIndex: number) => void} props.onDeleteNote
  * @param {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string }} props.onAddTag

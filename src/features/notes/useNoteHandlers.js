@@ -9,6 +9,7 @@ import {
   usePlaylistNotesByTrack,
   usePlaylistTracks,
 } from '../playlist/usePlaylistContext.js'
+import { parseTimestampInput } from '../playlist/noteTimestamps.js'
 /** @typedef {import('../../utils/notesTagsData.js').NoteEntry} NoteEntry */
 
 /**
@@ -88,7 +89,7 @@ export function useNoteHandlers(options = {}) {
   )
 
   const onSaveNote = useCallback(
-    async (trackId) => {
+    async (trackId, timestampInput = '') => {
       const currentDraft = draft.trim()
       if (!currentDraft) {
         announceFn('Note not saved. The note is empty.')
@@ -97,7 +98,12 @@ export function useNoteHandlers(options = {}) {
       }
 
       const snapshot = createNoteSnapshot(notesByTrack, trackId)
-      dispatch(playlistActions.saveNoteOptimistic(trackId, currentDraft))
+      const parsedTimestamp = parseTimestampInput(timestampInput)
+      const extra = {}
+      if (typeof parsedTimestamp === 'number') {
+        extra.timestampMs = parsedTimestamp
+      }
+      dispatch(playlistActions.saveNoteOptimistic(trackId, currentDraft, extra))
       announceFn('Note added.')
       focusElement(editorInvokerRef.current)
 
