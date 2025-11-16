@@ -350,15 +350,24 @@ export default function PlaylistView({
     }
 
     if (!Array.isArray(tracks) || tracks.length === 0) return
+    const doc = typeof document !== 'undefined' ? document : null
+    const active = doc?.activeElement ?? null
     if (filteredTracks.length === 0) {
+      const interactingWithFilters =
+        active && typeof active.closest === 'function' && active.closest('[data-filter-bar="true"]')
+      if (interactingWithFilters) {
+        debugFocus('playlist:focus-effect:skip-empty-filter-bar', {
+          reason: 'filter-interaction',
+        })
+        return
+      }
       debugFocus('playlist:focus-effect:focus-search', {
         reason: 'no-filtered-tracks',
       })
       focusElement(searchInputRef.current)
       return
     }
-    const active = document.activeElement
-    if (active === document.body) {
+    if (active && doc && active === doc.body) {
       const firstId = filteredTracks[0]?.id
       if (firstId != null) {
         debugFocus('playlist:focus-effect:body-recovery', {
@@ -524,7 +533,7 @@ export default function PlaylistView({
         hasNotesOnly={hasNotesOnly}
         onHasNotesToggle={setHasNotesOnly}
         selectedTags={selectedTags}
-        onToggleTag={toggleTag}
+        onToggleTag={handleFilterTag}
         availableTags={availableTags}
         hasActiveFilters={hasActiveFilters}
         onClearFilters={clearFilters}

@@ -172,11 +172,22 @@ function SearchFilterBar({
     [onToggleTag],
   );
 
+  const handleTagKeyDown = useCallback(
+    (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        onToggleTag(event.currentTarget.value);
+      }
+    },
+    [onToggleTag],
+  );
+
   const sortLabel = useMemo(() => describeSort(sort), [sort]);
 
   return (
     <section
       aria-label="Track filters"
+      data-filter-bar="true"
       style={{
         background: 'var(--card)',
         border: '1px solid var(--border)',
@@ -339,6 +350,7 @@ function SearchFilterBar({
                     value={tag}
                     checked={selectedTags.includes(tag)}
                     onChange={handleTagChange}
+                    onKeyDown={handleTagKeyDown}
                   />
                   <span>{tag}</span>
                 </label>
