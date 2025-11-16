@@ -309,6 +309,7 @@ const TrackCardComponent = forwardRef(function TrackCard(
         borderRadius: 8,
         padding: 12,
         marginBottom: 12,
+        listStyle: 'none',
         ...(style || {}),
       }}
     >
