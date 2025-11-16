@@ -19,7 +19,6 @@ const DEFAULT_BACKGROUND_SYNC = Object.freeze({
 
 const EMPTY_PLACEHOLDERS = Object.freeze([])
 const CARD_GAP = 12
-const JUMP_STEP = 100
 const SR_ONLY_STYLE = Object.freeze({
   position: 'absolute',
   width: '1px',
@@ -319,54 +318,6 @@ export default function PlaylistView({
     [filteredTracks, virtualizer, virtualizationEnabled],
   )
 
-  const getAnchorIndex = useCallback(() => {
-    if (virtualizationEnabled && virtualizer) {
-      const items = virtualizer.getVirtualItems()
-      if (items.length > 0) {
-        return items[0].index
-      }
-    }
-    if (typeof document !== 'undefined') {
-      const active = document.activeElement
-      if (active && typeof active.closest === 'function') {
-        const container = active.closest('[data-track-id]')
-        if (container) {
-          const activeId = container.getAttribute('data-track-id')
-          const idx = filteredTracks.findIndex((track) => String(track.id) === activeId)
-          if (idx !== -1) {
-            return idx
-          }
-        }
-      }
-    }
-    return 0
-  }, [filteredTracks, virtualizationEnabled, virtualizer])
-
-  const jumpToIndex = useCallback(
-    (index) => {
-      if (!Array.isArray(filteredTracks) || filteredTracks.length === 0) return
-      const clamped = Math.max(0, Math.min(index, filteredTracks.length - 1))
-      const targetTrack = filteredTracks[clamped]
-      if (!targetTrack) return
-      focusTrackButton(targetTrack.id)
-    },
-    [filteredTracks, focusTrackButton],
-  )
-
-  const jumpByStep = useCallback(
-    (direction) => {
-      const anchor = getAnchorIndex()
-      const targetIndex = anchor + direction * JUMP_STEP
-      jumpToIndex(targetIndex)
-    },
-    [getAnchorIndex, jumpToIndex],
-  )
-
-  const showJumpControls = filteredTracks.length > JUMP_STEP
-  const anchorIndex = showJumpControls ? getAnchorIndex() : 0
-  const canJumpBackward = anchorIndex > 0
-  const canJumpForward = anchorIndex < filteredTracks.length - 1
-
   // Filter-aware focus management: restore focus when current track is hidden by filters.
   // IMPORTANT: This effect must not run when skipFocusManagement is true. During initial
   // imports, App sets this flag to prevent PlaylistView from interfering with its own
@@ -440,7 +391,9 @@ export default function PlaylistView({
     (tag) => {
       if (!tag) return
       toggleTag(tag)
-      focusElement(searchInputRef.current)
+      // Note: We intentionally do NOT move focus here to allow users to
+      // continue filtering with keyboard navigation. Screen readers will
+      // be notified of the filter change via the filter count announcement.
     },
     [toggleTag],
   )
@@ -584,44 +537,6 @@ export default function PlaylistView({
       <div role="status" aria-live="polite" style={SR_ONLY_STYLE}>
         {liveWindowSummary}
       </div>
-
-      {showJumpControls && (
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 8,
-            margin: '8px 0 12px',
-          }}
-        >
-          <button type="button" className="btn" onClick={() => jumpToIndex(0)}>
-            Jump to top
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => jumpByStep(-1)}
-            disabled={!canJumpBackward}
-          >
-            Jump -{JUMP_STEP}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => jumpByStep(1)}
-            disabled={!canJumpForward}
-          >
-            Jump +{JUMP_STEP}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => jumpToIndex(filteredTracks.length - 1)}
-          >
-            Jump to bottom
-          </button>
-        </div>
-      )}
 
       {showInitialSyncBanner && (
         <div
