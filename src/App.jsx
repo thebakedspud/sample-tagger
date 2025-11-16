@@ -129,6 +129,13 @@ function AppInner({
   const tagsByTrack = usePlaylistTagsByTrack()
   const { hasLocalNotes, allCustomTags } = usePlaylistDerived()
   const { syncTrackTags } = usePlaylistSync()
+  const noteCountForRecovery = useMemo(() => {
+    if (!notesByTrack) return 0
+    return Object.values(notesByTrack).reduce((count, notes) => {
+      if (!Array.isArray(notes)) return count
+      return count + notes.length
+    }, 0)
+  }, [notesByTrack])
   const tracksRef = useRef(tracks)
   const [skipPlaylistFocusManagement, setSkipPlaylistFocusManagement] = useState(false)
   const firstVisibleTrackIdRef = useRef(null)
@@ -334,6 +341,7 @@ function AppInner({
       },
       [announce, resetImportFlow, dispatch, setImportMeta, setPlaylistTitle, setImportedAt, setLastImportUrl, setImportUrl, setScreen]
     ),
+    noteCountForRecovery,
   })
 
   // Update parent's anonContext when device recovery changes
