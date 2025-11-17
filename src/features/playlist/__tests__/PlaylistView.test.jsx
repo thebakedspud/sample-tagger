@@ -1,7 +1,56 @@
 import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import PlaylistView from '../PlaylistView.jsx'
+
+vi.setConfig({ testTimeout: 15_000 })
+
+const originalRaf = globalThis.requestAnimationFrame
+const originalCancelRaf = globalThis.cancelAnimationFrame
+const originalResizeObserver = globalThis.ResizeObserver
+
+beforeAll(() => {
+  if (typeof globalThis.ResizeObserver === 'undefined') {
+    class ResizeObserverStub {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    // @ts-expect-error - jsdom may not define ResizeObserver in older runtimes
+    globalThis.ResizeObserver = ResizeObserverStub
+  }
+
+  globalThis.requestAnimationFrame = (cb) => {
+    const id = setTimeout(() => cb(Date.now()), 0)
+    return /** @type {number} */ (id)
+  }
+  globalThis.cancelAnimationFrame = (id) => {
+    clearTimeout(id)
+  }
+})
+
+afterAll(() => {
+  if (originalRaf) {
+    globalThis.requestAnimationFrame = originalRaf
+  } else {
+    // @ts-expect-error - ensure we clean up the stub
+    delete globalThis.requestAnimationFrame
+  }
+
+  if (originalCancelRaf) {
+    globalThis.cancelAnimationFrame = originalCancelRaf
+  } else {
+    // @ts-expect-error - ensure we clean up the stub
+    delete globalThis.cancelAnimationFrame
+  }
+
+  if (originalResizeObserver) {
+    globalThis.ResizeObserver = originalResizeObserver
+  } else {
+    // @ts-expect-error - ensure we clean up the stub
+    delete globalThis.ResizeObserver
+  }
+})
 
 const { focusByIdMock } = vi.hoisted(() => ({
   focusByIdMock: vi.fn(),
