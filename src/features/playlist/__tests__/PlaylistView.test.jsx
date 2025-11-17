@@ -385,4 +385,31 @@ describe('PlaylistView', () => {
 
     expect(focusByIdMock).not.toHaveBeenCalled()
   })
+
+  it('does not run body recovery when focus already sits on a track action', () => {
+    const tracks = [
+      { id: 'track-1', title: 'Track 1', artist: 'Artist A', notes: [] },
+      { id: 'track-2', title: 'Track 2', artist: 'Artist B', notes: [] },
+    ]
+    const baseProps = createProps({ tracks })
+    const { rerender } = render(<PlaylistView {...baseProps} />)
+
+    const secondAddBtn = document.getElementById('add-note-btn-track-2')
+    expect(secondAddBtn).not.toBeNull()
+    act(() => {
+      secondAddBtn.focus()
+    })
+
+    focusByIdMock.mockClear()
+
+    const updatedTracks = [
+      tracks[0],
+      { ...tracks[1], tags: ['fresh-tag'] },
+    ]
+
+    rerender(<PlaylistView {...createProps({ tracks: updatedTracks })} />)
+
+    expect(focusByIdMock).not.toHaveBeenCalled()
+    expect(secondAddBtn).toHaveFocus()
+  })
 })

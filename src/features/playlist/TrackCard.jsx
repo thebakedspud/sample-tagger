@@ -1,10 +1,21 @@
-import { forwardRef, memo, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import NoteList from './NoteList.jsx'
 import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
 import ErrorMessage from '../../components/ErrorMessage.jsx'
 import { focusElement } from '../../utils/focusById.js'
 import { parseTimestampInput } from './noteTimestamps.js'
+
+const FOCUS_ADD_TAG_BUTTON = Symbol('focus-add-tag-button')
 
 /**
  * @typedef {object} TrackCardProps
@@ -137,7 +148,14 @@ const TrackCardComponent = forwardRef(function TrackCard(
   const tagInputRef = useRef(null)
   const chipRefs = useRef(new Map())
 
-  useEffect(() => {
+  const focusAddTagButton = useCallback(() => {
+    const node = addTagBtnRef.current
+    if (!node || typeof node.focus !== 'function') return
+    node.focus()
+    focusElement(node) // schedule fallback to preserve historical behaviour
+  }, [])
+
+  useLayoutEffect(() => {
     const map = chipRefs.current
     if (!map) return
     Array.from(map.keys()).forEach((key) => {
@@ -146,6 +164,11 @@ const TrackCardComponent = forwardRef(function TrackCard(
       }
     })
     if (!pendingFocus) return
+    if (pendingFocus === FOCUS_ADD_TAG_BUTTON) {
+      focusAddTagButton()
+      setPendingFocus(null)
+      return
+    }
     if (typeof pendingFocus === 'string') {
       const node = map.get(pendingFocus)
       if (node) {
@@ -241,10 +264,8 @@ const TrackCardComponent = forwardRef(function TrackCard(
         ? addResult.success !== false
         : Boolean(addResult)
     if (success) {
-      const focusTag =
-        typeof addResult === 'object' && addResult?.tag ? addResult.tag : value
       setAddingTag(false)
-      setPendingFocus(focusTag)
+      setPendingFocus(FOCUS_ADD_TAG_BUTTON)
       setTagError(null)
       return true
     }
