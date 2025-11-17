@@ -17,6 +17,7 @@ const TRACK_FIELDS =
 const PAGE_SIZE = 100;
 const TOKEN_REFRESH_BUFFER_MS = 30_000;
 const CANONICAL_BASE_URL = 'https://open.spotify.com/playlist/';
+const TRACK_THUMB_DISPLAY_WIDTH = 40;
 const IDEAL_TRACK_THUMB_WIDTH = 80; // ~2x the 40px display size for HiDPI clarity
 
 /**
@@ -200,10 +201,19 @@ function selectAlbumThumb(albumImages, fallbackUrl) {
   const withWidth = normalized.filter((img) => typeof img.width === 'number');
   if (withWidth.length) {
     const sorted = withWidth.slice().sort((a, b) => a.width - b.width);
-    const candidate =
-      sorted.find((img) => (img.width ?? Infinity) >= IDEAL_TRACK_THUMB_WIDTH) ??
-      sorted[sorted.length - 1];
-    return candidate.url;
+    const selectClosestToIdeal = (candidates) => {
+      if (!candidates.length) return null;
+      return candidates.reduce((best, img) => {
+        if (!best) return img;
+        const bestDelta = Math.abs((best.width ?? IDEAL_TRACK_THUMB_WIDTH) - IDEAL_TRACK_THUMB_WIDTH);
+        const imgDelta = Math.abs((img.width ?? IDEAL_TRACK_THUMB_WIDTH) - IDEAL_TRACK_THUMB_WIDTH);
+        return imgDelta < bestDelta ? img : best;
+      }, null);
+    };
+
+    const hiDpiCandidates = sorted.filter((img) => (img.width ?? 0) >= TRACK_THUMB_DISPLAY_WIDTH);
+    const candidate = selectClosestToIdeal(hiDpiCandidates) ?? selectClosestToIdeal(sorted);
+    if (candidate) return candidate.url;
   }
 
   // Width metadata missing: Spotify orders images largest -> smallest, so last is smallest.
