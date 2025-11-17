@@ -4,10 +4,15 @@
 const DEFAULT_ALLOWED_ORIGINS = Object.freeze([
   'http://localhost:5173',
   'https://playlist-notes.vercel.app',
+  'https://playlistnotes.app',
+  'https://www.playlistnotes.app',
 ]);
 
 // Allow all Vercel previews and the Vercel feedback overlay by default.
 const DEFAULT_ALLOWED_SUFFIXES = Object.freeze(['.vercel.app', '.vercel.live']);
+
+// Loopback hosts should always be allowed for local development, regardless of port.
+const LOOPBACK_HOSTNAMES = Object.freeze(['localhost', '::1']);
 
 /**
  * Parse a comma-separated env string into a trimmed string array.
@@ -66,6 +71,18 @@ function normalizeOrigin(origin) {
 }
 
 /**
+ * Checks whether a hostname points to a loopback interface.
+ * Includes localhost, IPv6 loopback, and the reserved 127.0.0.0/8 block.
+ * @param {string} hostname
+ * @returns {boolean}
+ */
+function isLoopbackHost(hostname) {
+  if (!hostname) return false;
+  if (LOOPBACK_HOSTNAMES.includes(hostname)) return true;
+  return hostname.startsWith('127.');
+}
+
+/**
  * Main allow check used by the token handler.
  * Rules:
  *  - If there's no Origin header, ALLOW (server-to-server or direct tab open).
@@ -84,6 +101,15 @@ export function isOriginAllowed(origin) {
 
   const norm = normalizeOrigin(origin);
   if (!norm) return false;
+
+  // Always allow local/loopback origins so `vite preview` (4173) and similar
+  // dev servers work without extra env configuration.
+  if (
+    (norm.protocol === 'http:' || norm.protocol === 'https:') &&
+    isLoopbackHost(norm.hostname)
+  ) {
+    return true;
+  }
 
   const allowedOrigins = getAllowedOrigins();
   if (allowedOrigins.includes(norm.origin)) {
