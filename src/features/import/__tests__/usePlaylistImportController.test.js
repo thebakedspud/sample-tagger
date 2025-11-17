@@ -9,6 +9,22 @@ const importInitialMock = vi.hoisted(() => vi.fn());
 const reimportMock = vi.hoisted(() => vi.fn());
 const loadMoreMock = vi.hoisted(() => vi.fn());
 const resetFlowMock = vi.hoisted(() => vi.fn());
+const primeUpstreamServicesMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+
+const createDeferred = () => {
+  /** @type {(value: any) => void} */
+  let resolve;
+  /** @type {(reason?: any) => void} */
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  if (!resolve || !reject) {
+    throw new Error('Deferred helpers not initialized');
+  }
+  return { promise, resolve, reject };
+};
 
 vi.mock('../detectProvider.js', () => ({
   default: detectProviderMock,
@@ -22,6 +38,7 @@ vi.mock('../usePlaylistImportFlow.js', () => ({
     reimport: reimportMock,
     loadMore: loadMoreMock,
     resetFlow: resetFlowMock,
+    primeUpstreamServices: primeUpstreamServicesMock,
   })),
   ImportFlowStatus: {
     IDLE: 'idle',
@@ -39,6 +56,24 @@ vi.mock('../../utils/focusById.js', () => ({
 vi.mock('../../utils/debug.js', () => ({
   DEBUG_FOCUS: false,
   debugFocus: vi.fn(),
+}));
+
+const cacheStore = vi.hoisted(() => ({
+  map: new Map(),
+}));
+
+const cacheApi = vi.hoisted(() => ({
+  cachedPlaylists: cacheStore.map,
+  isHydrating: false,
+  getCachedResult: vi.fn(),
+  rememberCachedResult: vi.fn(),
+  forgetCachedResult: vi.fn(),
+  clearCache: vi.fn(),
+}));
+
+vi.mock('../usePersistentPlaylistCache.js', () => ({
+  __esModule: true,
+  default: () => cacheApi,
 }));
 
 const createDeps = (overrides = {}) => {
@@ -102,6 +137,18 @@ let querySelectorSpy;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  cacheStore.map.clear();
+  cacheApi.getCachedResult.mockReset();
+  cacheApi.rememberCachedResult.mockReset();
+  cacheApi.forgetCachedResult.mockReset();
+  cacheApi.clearCache.mockReset();
+  cacheApi.getCachedResult.mockImplementation((key) =>
+    key ? cacheStore.map.get(key) ?? null : null,
+  );
+  cacheApi.rememberCachedResult.mockImplementation((key, payload) => {
+    if (!key) return;
+    cacheStore.map.set(key.trim(), payload);
+  });
   importFlowState.status = 'idle';
   importFlowState.loading = false;
   detectProviderMock.mockReturnValue('spotify');
@@ -109,6 +156,7 @@ beforeEach(() => {
   reimportMock.mockReset();
   loadMoreMock.mockReset();
   resetFlowMock.mockReset();
+  primeUpstreamServicesMock.mockClear();
   focusByIdMock.mockReset();
   rafSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
     if (typeof cb === 'function') {
@@ -323,5 +371,205 @@ describe('usePlaylistImportController', () => {
         expect.objectContaining({ coverUrl: 'stored.jpg' }),
       );
     });
+  });
+
+  it('hydrates cached playlist immediately while refreshing on subsequent imports', async () => {
+    const deps = createDeps();
+    const spotifyUrl = 'https://open.spotify.com/playlist/xyz';
+    const initialPayload = {
+      tracks: [{ id: 'track-1', title: 'Cached Track', artist: 'Artist A' }],
+      meta: {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: null,
+        hasMore: false,
+        sourceUrl: spotifyUrl,
+      },
+      title: 'Cached Playlist',
+      coverUrl: 'initial.jpg',
+    };
+    const refreshedPayload = {
+      tracks: [{ id: 'track-2', title: 'New Track', artist: 'Artist B' }],
+      meta: {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: null,
+        hasMore: false,
+        sourceUrl: spotifyUrl,
+      },
+      title: 'Refreshed Playlist',
+      coverUrl: 'updated.jpg',
+    };
+    importInitialMock.mockResolvedValueOnce({ ok: true, data: initialPayload });
+
+    const { result } = renderHook(() => usePlaylistImportController(deps));
+    await act(() => {
+      result.current.setImportUrl(spotifyUrl);
+    });
+    await act(async () => {
+      await result.current.handleImport();
+    });
+
+    deps.setPlaylistTitle.mockClear();
+    deps.announce.mockClear();
+    const deferred = createDeferred();
+    importInitialMock.mockImplementationOnce(() => deferred.promise);
+
+    await act(() => {
+      result.current.setImportUrl(spotifyUrl);
+    });
+
+    await act(async () => {
+      const pending = result.current.handleImport();
+      await Promise.resolve();
+      expect(deps.setPlaylistTitle).toHaveBeenCalledWith('Cached Playlist');
+      expect(deps.announce).toHaveBeenCalledWith(
+        expect.stringContaining('Showing saved playlist while refreshing'),
+      );
+      deferred.resolve({ ok: true, data: refreshedPayload });
+      await pending;
+    });
+
+    expect(result.current.isRefreshingCachedData).toBe(false);
+    expect(deps.setPlaylistTitle).toHaveBeenLastCalledWith('Refreshed Playlist');
+  });
+
+  it('reuses cached data when selecting a recent playlist while refreshing in the background', async () => {
+    const deps = createDeps();
+    const spotifyUrl = 'https://open.spotify.com/playlist/xyz';
+    const cachedPayload = {
+      tracks: [{ id: 'track-1', title: 'Cached Track', artist: 'Artist A' }],
+      meta: {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: null,
+        hasMore: false,
+        sourceUrl: spotifyUrl,
+      },
+      title: 'Cached Playlist',
+    };
+    const refreshedPayload = {
+      tracks: [{ id: 'track-2', title: 'New Track', artist: 'Artist B' }],
+      meta: {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: null,
+        hasMore: false,
+        sourceUrl: spotifyUrl,
+      },
+      title: 'Refreshed Playlist',
+    };
+    importInitialMock.mockResolvedValueOnce({ ok: true, data: cachedPayload });
+
+    const { result } = renderHook(() => usePlaylistImportController(deps));
+    await act(() => {
+      result.current.setImportUrl(spotifyUrl);
+    });
+    await act(async () => {
+      await result.current.handleImport();
+    });
+
+    deps.setPlaylistTitle.mockClear();
+    deps.announce.mockClear();
+    const deferred = createDeferred();
+    importInitialMock.mockImplementationOnce(() => deferred.promise);
+    const recent = {
+      id: 'recent-1',
+      sourceUrl: spotifyUrl,
+      provider: 'spotify',
+      title: 'Recent Playlist',
+      coverUrl: 'recent.jpg',
+    };
+
+    await act(async () => {
+      const pending = result.current.handleSelectRecent(recent);
+      await Promise.resolve();
+      expect(deps.setPlaylistTitle).toHaveBeenCalledWith('Cached Playlist');
+      expect(deps.announce).toHaveBeenCalledWith(
+        expect.stringContaining('Showing saved playlist while refreshing'),
+      );
+      deferred.resolve({ ok: true, data: refreshedPayload });
+      await pending;
+    });
+
+    expect(result.current.isRefreshingCachedData).toBe(false);
+    expect(deps.setPlaylistTitle).toHaveBeenLastCalledWith('Refreshed Playlist');
+  });
+
+  it('reuses cached data when reimporting while refreshing in the background', async () => {
+    const spotifyUrl = 'https://open.spotify.com/playlist/xyz';
+    const deps = createDeps({
+      lastImportUrl: spotifyUrl,
+      lastImportUrlRef: { current: spotifyUrl },
+    });
+    const cachedPayload = {
+      tracks: [{ id: 'track-1', title: 'Cached Track', artist: 'Artist A' }],
+      meta: {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: null,
+        hasMore: false,
+        sourceUrl: spotifyUrl,
+      },
+      title: 'Cached Playlist',
+    };
+    const refreshedPayload = {
+      tracks: [{ id: 'track-2', title: 'New Track', artist: 'Artist B' }],
+      meta: {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: null,
+        hasMore: false,
+        sourceUrl: spotifyUrl,
+      },
+      title: 'Refreshed Playlist',
+    };
+    importInitialMock.mockResolvedValueOnce({ ok: true, data: cachedPayload });
+
+    const { result } = renderHook(() => usePlaylistImportController(deps));
+    await act(() => {
+      result.current.setImportUrl(spotifyUrl);
+    });
+    await act(async () => {
+      await result.current.handleImport();
+    });
+
+    deps.setPlaylistTitle.mockClear();
+    deps.announce.mockClear();
+    const deferred = createDeferred();
+    reimportMock.mockImplementationOnce(() => deferred.promise);
+
+    await act(async () => {
+      const pending = result.current.handleReimport();
+      await Promise.resolve();
+      expect(deps.setPlaylistTitle).toHaveBeenCalledWith('Cached Playlist');
+      expect(deps.announce).toHaveBeenCalledWith(
+        expect.stringContaining('Showing saved playlist while refreshing'),
+      );
+      deferred.resolve({ ok: true, data: refreshedPayload });
+      await pending;
+    });
+
+    expect(result.current.isRefreshingCachedData).toBe(false);
+    expect(deps.setPlaylistTitle).toHaveBeenLastCalledWith('Refreshed Playlist');
+  });
+
+  it('primes upstream services once per session when a Spotify URL is entered', async () => {
+    const deps = createDeps();
+    const { result } = renderHook(() => usePlaylistImportController(deps));
+
+    await act(() => {
+      result.current.setImportUrl('https://open.spotify.com/playlist/abc1234567890123456789');
+    });
+
+    await waitFor(() => {
+      expect(primeUpstreamServicesMock).toHaveBeenCalledTimes(1);
+    });
+
+    await act(() => {
+      result.current.setImportUrl('https://open.spotify.com/playlist/another1234567890123456');
+    });
+
+    expect(primeUpstreamServicesMock).toHaveBeenCalledTimes(1);
   });
 });

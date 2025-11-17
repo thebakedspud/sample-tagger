@@ -11,14 +11,11 @@ import {
   clearPendingMigrationSnapshot,
   writeAutoBackupSnapshot,
   stashPendingMigrationSnapshot,
-  saveRecent,
-  upsertRecent,
 } from './utils/storage.js'
 import { normalizeTag } from './features/tags/tagUtils.js'
 import { STOCK_TAGS } from './features/tags/constants.js'
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from './features/tags/validation.js'
 import {
-  getNotes,
   normalizeNotesList,
   cloneNotesMap,
   normalizeTagList,
@@ -26,12 +23,15 @@ import {
   ensureNotesEntries,
   ensureTagsEntries,
   groupRemoteNotes,
+  getNoteBody,
 } from './utils/notesTagsData.js'
 import { bootstrapStorageState, EMPTY_IMPORT_META } from './utils/storageBootstrap.js'
-import { createRecentCandidate } from './features/recent/recentUtils.js'
+import { useRecentPlaylists } from './features/recent/useRecentPlaylists.js'
 
 /** @typedef {import('./features/import/adapters/types.js').ImportMeta} ImportMeta */
 /** @typedef {import('./features/import/adapters/types.js').ImportResult} ImportResult */
+/** @typedef {import('./features/import/usePlaylistImportController.js').BackgroundSyncStatus} BackgroundSyncStatus */
+/** @typedef {import('./features/import/usePlaylistImportController.js').BackgroundSyncState} BackgroundSyncState */
 import { focusById } from './utils/focusById.js'
 import './styles/tokens.css';
 import './styles/primitives.css';
@@ -53,30 +53,40 @@ import { getDeviceId, getAnonId } from './lib/deviceState.js'
 
 // NEW: Playlist state reducer + context provider
 import { playlistActions } from './features/playlist/actions.js'
-import { createNoteSnapshot, validateTag } from './features/playlist/helpers.js'
+import { validateTag } from './features/playlist/helpers.js'
 import { PlaylistStateProvider } from './features/playlist/PlaylistProvider.jsx'
 import {
   usePlaylistDispatch,
   usePlaylistTracks,
   usePlaylistNotesByTrack,
   usePlaylistTagsByTrack,
-  usePlaylistEditingState,
   usePlaylistDerived,
   usePlaylistSync,
 } from './features/playlist/usePlaylistContext.js'
+import { useNoteHandlers } from './features/notes/useNoteHandlers.js'
 import buildInitialPlaylistState from './features/playlist/buildInitialPlaylistState.js'
 
 /**
- * @typedef {'idle' | 'pending' | 'loading' | 'cooldown' | 'complete' | 'error'} BackgroundSyncStatus
- * @typedef {{ status: BackgroundSyncStatus, loaded: number, total: number|null, lastError: string|null, snapshotId?: string|null }} BackgroundSyncState
- */
-
-/**
  * Inner component that consumes playlist state from context
- * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: string, onAnonContextChange: Function }} props
+ * @param {{
+ *  persisted: any,
+ *  pendingMigrationSnapshot: any,
+ *  initialRecents: any,
+ *  persistedTracks: any,
+ *  initialScreen: string,
+ *  onAnonContextChange: Function,
+ *  initialSyncStatus: BackgroundSyncState
+ * }} props
  */
-function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persistedTracks, initialScreen, onAnonContextChange }) {
-  const [showMigrationNotice, setShowMigrationNotice] = useState(Boolean(pendingMigrationSnapshot))
+function AppInner({
+  persisted,
+  pendingMigrationSnapshot,
+  initialRecents,
+  persistedTracks,
+  initialScreen,
+  onAnonContextChange,
+  initialSyncStatus,
+}) {
   const migrationSnapshotRef = useRef(pendingMigrationSnapshot)
   
   // SIMPLE "ROUTING"
@@ -117,64 +127,27 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   const tracks = usePlaylistTracks()
   const notesByTrack = usePlaylistNotesByTrack()
   const tagsByTrack = usePlaylistTagsByTrack()
-  const editingState = usePlaylistEditingState()
   const { hasLocalNotes, allCustomTags } = usePlaylistDerived()
-  const { trackId: editingId, draft, error: editingError } = editingState
   const { syncTrackTags } = usePlaylistSync()
+  const noteCountForRecovery = useMemo(() => {
+    if (!notesByTrack) return 0
+    return Object.values(notesByTrack).reduce((count, notes) => {
+      if (!Array.isArray(notes)) return count
+      return count + notes.length
+    }, 0)
+  }, [notesByTrack])
   const tracksRef = useRef(tracks)
   const [skipPlaylistFocusManagement, setSkipPlaylistFocusManagement] = useState(false)
   const firstVisibleTrackIdRef = useRef(null)
   const [trackFocusContext, setTrackFocusContext] = useState({ reason: null, ts: 0 })
   const initialFocusAppliedRef = useRef(false)
-  const [recentPlaylists, setRecentPlaylists] = useState(() => initialRecents)
-  /** @type {import('react').MutableRefObject<typeof initialRecents>} */
-  const recentRef = useRef(recentPlaylists)
-  useEffect(() => {
-    recentRef.current = recentPlaylists
-  }, [recentPlaylists])
-
-  const [recentCardState, setRecentCardState] = useState(() => ({}))
-  const updateRecentCardState = useCallback((id, updater) => {
-    if (!id) return
-    setRecentCardState((prev) => {
-      const next = { ...prev }
-      if (typeof updater === 'function') {
-        const draft = updater(next[id] ?? {})
-        if (draft && Object.keys(draft).length > 0) {
-          next[id] = draft
-        } else {
-          delete next[id]
-        }
-      } else if (updater && Object.keys(updater).length > 0) {
-        next[id] = { ...(next[id] ?? {}), ...updater }
-      } else {
-        delete next[id]
-      }
-      return next
-    })
-  }, [])
-
-  const pushRecentPlaylist = useCallback((meta, options = {}) => {
-    const candidate = createRecentCandidate(meta, options)
-    if (!candidate) return
-    const next = upsertRecent(recentRef.current, candidate)
-    recentRef.current = next
-    setRecentPlaylists(next)
-    saveRecent(next)
-  }, [])
-
-  useEffect(() => {
-    setRecentCardState((prev) => {
-      const activeIds = new Set(recentPlaylists.map((item) => item.id))
-      const next = {}
-      Object.entries(prev).forEach(([id, state]) => {
-        if (activeIds.has(id)) {
-          next[id] = state
-        }
-      })
-      return next
-    })
-  }, [recentPlaylists])
+  const {
+    recentPlaylists,
+    recentCardState,
+    updateRecentCardState,
+    pushRecentPlaylist,
+  } = useRecentPlaylists(initialRecents)
+  const [refreshingRecentId, setRefreshingRecentId] = useState(null)
 
   const handleFirstVisibleTrackChange = useCallback((trackId) => {
     const prevTrackId = firstVisibleTrackIdRef.current
@@ -205,12 +178,13 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     showReimportSpinner,
     showLoadMoreSpinner,
     handleImport,
-    handleSelectRecent,
+    handleSelectRecent: handleSelectRecentInternal,
     handleReimport,
     handleLoadMore,
     cancelBackgroundPagination,
     backgroundSync,
     resetImportFlow,
+    isRefreshingCachedData,
   } = usePlaylistImportController({
     dispatch,
     announce,
@@ -239,13 +213,38 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     initialPersistedTrackCount: Array.isArray(persistedTracks) ? persistedTracks.length : 0,
   })
 
+  const isRefreshingCachedDataRef = useRef(isRefreshingCachedData)
+  useEffect(() => {
+    isRefreshingCachedDataRef.current = isRefreshingCachedData
+    if (!isRefreshingCachedData) {
+      setRefreshingRecentId(null)
+    }
+  }, [isRefreshingCachedData])
+
+  const handleSelectRecent = useCallback(
+    async (recent) => {
+      if (recent?.id) {
+        setRefreshingRecentId(recent.id)
+      } else {
+        setRefreshingRecentId(null)
+      }
+      try {
+        return await handleSelectRecentInternal(recent)
+      } finally {
+        if (!isRefreshingCachedDataRef.current) {
+          setRefreshingRecentId(null)
+        }
+      }
+    },
+    [handleSelectRecentInternal],
+  )
+
   // OLD: These state variables moved to playlistReducer
   // const [editingId, setEditingId] = useState(null)
   // const [draft, setDraft] = useState('')
   // const [error, setError] = useState(null)
 
   // Remember which button opened the editor
-  const editorInvokerRef = useRef(null)
   const notesByTrackRef = useRef(notesByTrack)
   const tagsByTrackRef = useRef(tagsByTrack)
   const backupFileInputRef = useRef(null)
@@ -275,6 +274,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     onUndo: (meta) => {
       if (!meta) return
       const { trackId, note, index, restoreFocusId, fallbackFocusId } = meta
+      if (!note) return
       
       // Restore note using reducer
       dispatch(playlistActions.restoreNote(trackId, note, index))
@@ -341,6 +341,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
       },
       [announce, resetImportFlow, dispatch, setImportMeta, setPlaylistTitle, setImportedAt, setLastImportUrl, setImportUrl, setScreen]
     ),
+    noteCountForRecovery,
   })
 
   // Update parent's anonContext when device recovery changes
@@ -353,6 +354,43 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     () => ({ deviceId, anonId }),
     [deviceId, anonId]
   )
+
+  const syncNote = useCallback(
+    async (trackId, body, timestampMs) => {
+      if (!anonContext?.deviceId) {
+        console.warn('[note save] missing device id, skipping sync')
+        return
+      }
+      const payload = { trackId, body }
+      if (typeof timestampMs === 'number' && Number.isFinite(timestampMs)) {
+        payload.timestampMs = timestampMs
+      }
+      const response = await apiFetch('/api/db/notes', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.error ?? 'Failed to save note')
+      }
+    },
+    [anonContext?.deviceId],
+  )
+
+  const {
+    editingId,
+    draft,
+    editingError,
+    onDraftChange,
+    onAddNote,
+    onSaveNote,
+    onCancelNote,
+    onDeleteNote,
+  } = useNoteHandlers({
+    announce,
+    scheduleInlineUndo,
+    syncNote,
+  })
 
   const handleOpenSpotifyLink = useCallback(() => {
     announce('Spotify linking is coming soon.')
@@ -368,10 +406,9 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
   useEffect(() => {
     const snapshot = migrationSnapshotRef.current
     if (!snapshot) return
-    if (!anonContext?.anonId || !anonContext?.deviceId) return
+    if (!anonContext?.deviceId) return
 
     let cancelled = false
-    setShowMigrationNotice(true)
     announce('Finishing upgrade in the background...')
 
     const runMigration = async () => {
@@ -390,7 +427,14 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
         /** @type {Map<string, Set<string>>} */
         const remoteNoteSets = new Map()
         Object.entries(remoteNoteMap).forEach(([trackId, noteList]) => {
-          remoteNoteSets.set(trackId, new Set(noteList))
+          const bodySet = new Set(
+            Array.isArray(noteList)
+              ? noteList
+                  .map((note) => getNoteBody(note))
+                  .filter(Boolean)
+              : []
+          )
+          remoteNoteSets.set(trackId, bodySet)
         })
 
         const combinedLocal = cloneNotesMap(snapshot.notesByTrack || {})
@@ -400,9 +444,13 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
             const id = track.id
             if (!id) return
             const existing = Array.isArray(combinedLocal[id]) ? [...combinedLocal[id]] : []
+            const seenBodies = new Set(existing.map((entry) => getNoteBody(entry)).filter(Boolean))
             const cleaned = normalizeNotesList(track.notes)
             cleaned.forEach((note) => {
-              if (!existing.includes(note)) existing.push(note)
+              const body = getNoteBody(note)
+              if (!body || seenBodies.has(body)) return
+              existing.push(note)
+              seenBodies.add(body)
             })
             if (existing.length > 0) {
               combinedLocal[id] = existing
@@ -415,7 +463,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
         Object.entries(combinedLocal).forEach(([trackId, notes]) => {
           const remoteSet = remoteNoteSets.get(trackId) ?? new Set()
           notes.forEach((note) => {
-            const clean = typeof note === 'string' ? note.trim() : ''
+            const clean = getNoteBody(note).trim()
             if (!clean) return
             if (!remoteSet.has(clean)) {
               uploads.push({ trackId, body: clean })
@@ -492,14 +540,13 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
           clearPendingMigrationSnapshot()
           migrationSnapshotRef.current = null
           console.info('[storage:migration] completed successfully')
-          setShowMigrationNotice(false)
           announce('Upgrade complete.')
         }
       } catch (err) {
         if (cancelled) return
         console.error('[storage:migration] failed', err)
         stashPendingMigrationSnapshot(snapshot)
-        setShowMigrationNotice(false)
+        announce('Upgrade failed. Your previous notes are still safe; please try again later.')
       }
     }
 
@@ -532,14 +579,6 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     })
   }, [playlistTitle, importedAt, lastImportUrl, tracks, importMeta, notesByTrack, tagsByTrack])
 
-  // Safety: close editor if its track disappears or changes
-  useEffect(() => {
-    if (editingId == null) return
-    if (!tracks.some(t => t.id === editingId)) {
-      dispatch(playlistActions.cancelNoteEdit())
-    }
-  }, [tracks, editingId, dispatch])
-
   // 🔐 Safety: if you somehow land on the playlist screen with zero tracks, bounce to landing
   useEffect(() => {
     if (screen === 'playlist' && tracks.length === 0) {
@@ -556,7 +595,6 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
 
   // ===== tiny extracted handlers =====
   function handleImportUrlChange(e) { setImportUrl(e.target.value); setImportError(null) }
-  const handleDraftChange = (value) => { dispatch(playlistActions.changeDraft(value)) }
 
   const handleBackupNotes = async () => {
     try {
@@ -708,8 +746,9 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
       const validation = validateTag(tag, existingTags, MAX_TAGS_PER_TRACK, MAX_TAG_LENGTH)
       
       if (!validation.valid) {
-        announce(validation.error || 'Invalid tag.')
-        return false
+        const errorMessage = validation.error || 'Invalid tag.'
+        announce(errorMessage)
+        return { success: false, error: errorMessage }
       }
       
       const normalized = validation.normalized
@@ -728,7 +767,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
           announce('Tag sync failed. Changes are saved locally.')
         })
       }
-      return true
+      return { success: true, tag: normalized }
     },
     [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks, dispatch],
   )
@@ -759,84 +798,6 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
     [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks, dispatch],
   )
 
-  const onAddNote = (trackId) => {
-    dispatch(playlistActions.startNoteEdit(trackId))
-    editorInvokerRef.current = document.getElementById(`add-note-btn-${trackId}`)
-    setTimeout(() => { focusById(`note-input-${trackId}`) }, 0)
-  }
-
-  const onSaveNote = async (trackId) => {
-    if (!draft.trim()) {
-      announce('Note not saved. The note is empty.')
-      dispatch(playlistActions.setEditingError('Note cannot be empty.'))
-      return
-    }
-    const trimmed = draft.trim()
-    // Create snapshot before optimistic update
-    const snapshot = createNoteSnapshot(notesByTrack, trackId)
-    
-    // Optimistic update
-    dispatch(playlistActions.saveNoteOptimistic(trackId, trimmed))
-    announce('Note added.')
-    editorInvokerRef.current?.focus()
-
-    if (!anonContext?.deviceId) {
-      console.warn('[note save] missing device id, skipping sync')
-      return
-    }
-
-    try {
-      const response = await apiFetch('/api/db/notes', {
-        method: 'POST',
-        body: JSON.stringify({ trackId, body: trimmed }),
-      })
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}))
-        throw new Error(payload?.error ?? 'Failed to save note')
-      }
-    } catch (err) {
-      console.error('[note save] error', err)
-      // Rollback on failure (atomic update)
-      dispatch(playlistActions.rollbackNoteSaveWithError(
-        trackId, 
-        snapshot.previousNotes, 
-        'Failed to save note. Restored previous notes.'
-      ))
-      announce('Note save failed. Restored previous note list.')
-    }
-  }
-
-  const onCancelNote = () => {
-    dispatch(playlistActions.cancelNoteEdit())
-    announce('Note cancelled.')
-    editorInvokerRef.current?.focus()
-  }
-
-  function makePendingId(trackId, index) {
-    return `${trackId}::${index}::${Date.now()}`
-  }
-
-  const onDeleteNote = (trackId, noteIndex) => {
-    const track = tracks.find(t => t.id === trackId)
-    const notes = getNotes(track)
-    const noteToDelete = notes[noteIndex]
-    if (noteToDelete == null) return
-
-    // Delete note
-    dispatch(playlistActions.deleteNote(trackId, noteIndex))
-
-    // Schedule undo
-    const id = makePendingId(trackId, noteIndex)
-    scheduleInlineUndo(id, {
-      trackId,
-      note: noteToDelete,
-      index: noteIndex,
-      restoreFocusId: `del-btn-${trackId}-${noteIndex}`,
-      fallbackFocusId: `add-note-btn-${trackId}`,
-    })
-    announce('Note deleted. Press Undo to restore')
-  }
-
   const hasPlaylist = Array.isArray(tracks) && tracks.length > 0
 
   // Helper to hide the mock prefix from SRs but keep it visible
@@ -845,26 +806,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
       {/* Screen reader announcements */}
       <LiveRegion message={announceMsg} />
 
-      {showMigrationNotice && (
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            position: 'fixed',
-            top: 16,
-            right: 16,
-            background: 'var(--surface, #0f1115)',
-            color: 'var(--fg, #ffffff)',
-            padding: '12px 16px',
-            borderRadius: 8,
-            boxShadow: '0 12px 32px rgba(0, 0, 0, 0.35)',
-            border: '1px solid var(--border, rgba(255, 255, 255, 0.16))',
-            zIndex: 30,
-          }}
-        >
-          Finishing upgrade in the background...
-        </div>
-      )}
+      {/* Migration notice now uses announcements only; no blocking UI */}
 
       <header style={{ maxWidth: 880, margin: '20px auto 0', padding: '0 16px' }}>
         <div
@@ -1004,6 +946,8 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
                   onSelect={handleSelectRecent}
                   cardState={recentCardState}
                   disabled={isAnyImportBusy}
+                  refreshingId={refreshingRecentId}
+                  isRefreshing={isRefreshingCachedData}
                 />
               </section>
             )}
@@ -1020,7 +964,7 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
                 pending={pending}
                 isPending={isPending}
                 editingState={{ editingId, draft, error: editingError }}
-                onDraftChange={handleDraftChange}
+                onDraftChange={onDraftChange}
                 onAddNote={onAddNote}
                 onSaveNote={onSaveNote}
                 onCancelNote={onCancelNote}
@@ -1043,11 +987,12 @@ function AppInner({ persisted, pendingMigrationSnapshot, initialRecents, persist
                   void handleLoadMore()
                 }}
                 announce={announce}
-                backgroundSync={backgroundSync}
-                skipFocusManagement={skipPlaylistFocusManagement}
-                focusContext={trackFocusContext}
-                onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
-              />
+              backgroundSync={backgroundSync}
+              initialSyncStatus={initialSyncStatus}
+              skipFocusManagement={skipPlaylistFocusManagement}
+              focusContext={trackFocusContext}
+              onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
+            />
             )}
           </>
         )}
@@ -1123,8 +1068,25 @@ function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRece
     anonId: getAnonId()
   }))
 
+  const [initialSyncStatus, setInitialSyncStatus] = useState(
+    /** @type {BackgroundSyncState} */ ({
+      status: 'idle',
+      lastError: null,
+      loaded: 0,
+      total: null,
+      snapshotId: null,
+    }),
+  )
+  const handleInitialSyncStatusChange = useCallback((status) => {
+    setInitialSyncStatus(status)
+  }, [])
+
   return (
-    <PlaylistStateProvider initialState={initialPlaylistStateWithData} anonContext={anonContext}>
+    <PlaylistStateProvider
+      initialState={initialPlaylistStateWithData}
+      anonContext={anonContext}
+      onInitialSyncStatusChange={handleInitialSyncStatusChange}
+    >
       <AppInner
         persisted={persisted}
         pendingMigrationSnapshot={pendingMigrationSnapshot}
@@ -1132,6 +1094,7 @@ function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRece
         persistedTracks={persistedTracks}
         initialScreen={initialScreen}
         onAnonContextChange={setAnonContext}
+        initialSyncStatus={initialSyncStatus}
       />
     </PlaylistStateProvider>
   )

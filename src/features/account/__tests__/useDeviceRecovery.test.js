@@ -1,7 +1,7 @@
 // src/features/account/__tests__/useDeviceRecovery.test.js
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest'
-import useDeviceRecovery from '../useDeviceRecovery.js'
+import useDeviceRecovery, { RECOVERY_PROMPT_NOTE_THRESHOLD } from '../useDeviceRecovery.js'
 
 // Mock dependencies - must be before imports due to hoisting
 vi.mock('../../../lib/apiClient.js', () => ({
@@ -67,7 +67,9 @@ describe('useDeviceRecovery', () => {
     deviceStateMocks.hasAcknowledgedRecovery.mockReturnValue(false)
     // @ts-ignore - Mock function type
     deviceStateMocks.ensureRecoveryCsrfToken.mockReturnValue('csrf-token-123')
+    // @ts-ignore
     deviceStateMocks.hasDeviceContext.mockReturnValue(false)
+    // @ts-ignore
     deviceStateMocks.subscribeDeviceContextStale.mockReturnValue(() => {})
 
     // Default apiFetch mock (suppresses bootstrap calls)
@@ -85,8 +87,15 @@ describe('useDeviceRecovery', () => {
   })
 
   async function renderDeviceRecovery(options = {}, { waitForBootstrap = true } = {}) {
-    const rendered = renderHook(() =>
-      useDeviceRecovery({ announce: announceMock, onAppReset: onAppResetMock, ...options })
+    const rendered = renderHook(
+      (props) => useDeviceRecovery(props),
+      {
+        initialProps: {
+          announce: announceMock,
+          onAppReset: onAppResetMock,
+          ...options,
+        },
+      }
     )
     if (waitForBootstrap) {
       await waitFor(() => expect(apiFetchMock).toHaveBeenCalled())
@@ -121,13 +130,16 @@ describe('useDeviceRecovery', () => {
       expect(deviceStateMocks.setAnonId).toHaveBeenCalledWith('anon-456')
       expect(deviceStateMocks.saveRecoveryCode).toHaveBeenCalledWith('AAAA-BBBB-CCCC-DDDD')
       expect(result.current.recoveryCode).toBe('AAAA-BBBB-CCCC-DDDD')
-      expect(result.current.showRecoveryModal).toBe(true)
+      expect(result.current.showRecoveryModal).toBe(false)
       expect(result.current.bootstrapError).toBe(null)
     })
 
     it('skips automatic bootstrap when device context already exists', async () => {
+      // @ts-ignore
       deviceStateMocks.getDeviceId.mockReturnValue('device-existing')
+      // @ts-ignore
       deviceStateMocks.getAnonId.mockReturnValue('anon-existing')
+      // @ts-ignore
       deviceStateMocks.hasDeviceContext.mockReturnValue(true)
 
       await renderDeviceRecovery({}, { waitForBootstrap: false })
@@ -137,9 +149,13 @@ describe('useDeviceRecovery', () => {
 
     it('re-runs bootstrap when a stale-device event fires', async () => {
       const listeners = []
+      // @ts-ignore
       deviceStateMocks.getDeviceId.mockReturnValue('device-existing')
+      // @ts-ignore
       deviceStateMocks.getAnonId.mockReturnValue('anon-existing')
+      // @ts-ignore
       deviceStateMocks.hasDeviceContext.mockReturnValue(true)
+      // @ts-ignore
       deviceStateMocks.subscribeDeviceContextStale.mockImplementation((cb) => {
         listeners.push(cb)
         return () => {}
@@ -224,10 +240,14 @@ describe('useDeviceRecovery', () => {
         json: async () => ({ anonId: 'test', recoveryCode: 'TEST-CODE-1234' }),
       })
 
-      const { result } = await renderDeviceRecovery()
+      const { result } = await renderDeviceRecovery({
+        noteCountForRecovery: RECOVERY_PROMPT_NOTE_THRESHOLD,
+      })
 
       expect(result.current.recoveryCode).toBe('TEST-CODE-1234')
-      expect(result.current.showRecoveryModal).toBe(true)
+      await waitFor(() => {
+        expect(result.current.showRecoveryModal).toBe(true)
+      })
 
       act(() => {
         result.current.acknowledgeRecoveryModal()
@@ -270,6 +290,45 @@ describe('useDeviceRecovery', () => {
       expect(announceMock).toHaveBeenCalledWith(
         'Recovery code ready. Choose how you want to back it up.'
       )
+    })
+
+    it('auto-opens exactly once after the note threshold is crossed', async () => {
+      const rendered = await renderDeviceRecovery({ noteCountForRecovery: 0 })
+      const { result, rerender } = rendered
+
+      await waitFor(() => {
+        expect(result.current.recoveryCode).toBe('TEST-CODE')
+      })
+      expect(result.current.showRecoveryModal).toBe(false)
+
+      const rerenderWithCount = (count) =>
+        rerender({
+          announce: announceMock,
+          onAppReset: onAppResetMock,
+          noteCountForRecovery: count,
+        })
+
+      act(() => {
+        rerenderWithCount(RECOVERY_PROMPT_NOTE_THRESHOLD - 1)
+      })
+      expect(result.current.showRecoveryModal).toBe(false)
+
+      act(() => {
+        rerenderWithCount(RECOVERY_PROMPT_NOTE_THRESHOLD)
+      })
+      await waitFor(() => {
+        expect(result.current.showRecoveryModal).toBe(true)
+      })
+
+      act(() => {
+        result.current.acknowledgeRecoveryModal()
+      })
+      expect(result.current.showRecoveryModal).toBe(false)
+
+      act(() => {
+        rerenderWithCount(RECOVERY_PROMPT_NOTE_THRESHOLD + 5)
+      })
+      expect(result.current.showRecoveryModal).toBe(false)
     })
   })
 

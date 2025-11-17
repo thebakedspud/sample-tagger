@@ -57,4 +57,28 @@ describe('RecoveryModal', () => {
     await userEvent.click(screen.getByRole('button', { name: /I saved the code/i }));
     expect(onAck).toHaveBeenCalled();
   });
+
+  it('shows inline error when confirming without acknowledgement', async () => {
+    const onAck = vi.fn();
+    render(<RecoveryModal open code="FFFFF-GGGGG-HHHHH-IIIII" onAcknowledge={onAck} />);
+
+    const checkbox = screen.getByLabelText(
+      /I understand that losing this code means losing access/i,
+    );
+    const confirmButton = screen.getByRole('button', { name: /I saved the code/i });
+
+    await userEvent.click(confirmButton);
+    expect(onAck).not.toHaveBeenCalled();
+    expect(checkbox).toHaveAttribute('aria-invalid', 'true');
+    const error = screen.getByText(/Please confirm before continuing./i);
+    expect(error).toBeVisible();
+    expect(checkbox).toHaveAttribute('aria-describedby', error.id);
+
+    await userEvent.click(checkbox);
+    expect(checkbox).not.toHaveAttribute('aria-invalid');
+    expect(screen.queryByText(/Please confirm before continuing./i)).not.toBeInTheDocument();
+
+    await userEvent.click(confirmButton);
+    expect(onAck).toHaveBeenCalledTimes(1);
+  });
 });

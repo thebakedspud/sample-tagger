@@ -132,6 +132,7 @@ beforeEach(async () => {
       track_id: 'track-9',
       body: 'hi',
       tags: ['drill'],
+      timestamp_ms: null,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
     },
@@ -145,6 +146,7 @@ beforeEach(async () => {
       track_id: 'track-9',
       body: 'hi',
       tags: ['chill'],
+      timestamp_ms: 64000,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:01Z',
     },
@@ -169,6 +171,7 @@ describe('api/db/notes handler', () => {
           track_id: 'track-7',
           body: 'hello',
           tags: ['trap', '808'],
+          timestamp_ms: 92500,
           created_at: '2024-01-02T00:00:00Z',
           updated_at: '2024-01-02T00:00:01Z',
         },
@@ -195,6 +198,7 @@ describe('api/db/notes handler', () => {
           trackId: 'track-7',
           body: 'hello',
           tags: ['808', 'trap'],
+          timestampMs: 92500,
           createdAt: '2024-01-02T00:00:00Z',
           updatedAt: '2024-01-02T00:00:01Z',
         },
@@ -239,6 +243,7 @@ describe('api/db/notes handler', () => {
         trackId: 'track-9',
         body: 'hi',
         tags: ['drill'],
+        timestampMs: null,
         createdAt: '2024-01-01T00:00:00Z',
         updatedAt: '2024-01-01T00:00:00Z',
       },
@@ -250,10 +255,67 @@ describe('api/db/notes handler', () => {
     );
   });
 
+  it('persists timestamp when provided on POST', async () => {
+    getAnonContextMock.mockResolvedValueOnce({ anonId: 'anon-1' });
+    notesSelectQueue.push({ data: null, error: null });
+    notesInsertResponse = {
+      data: {
+        id: 'note-2',
+        track_id: 'track-9',
+        body: 'hi',
+        tags: [],
+        timestamp_ms: 123456,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      },
+      error: null,
+    };
+
+    const req = createMockReq({
+      method: 'POST',
+      headers: { 'x-device-id': 'device-1' },
+      body: { trackId: 'track-9', body: 'hi', timestampMs: 123456.9 },
+    });
+    const res = createMockRes();
+
+    await handler(req, res);
+
+    expect(notesInsertPayload.timestamp_ms).toBe(123456);
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.body).toEqual({
+      note: {
+        id: 'note-2',
+        trackId: 'track-9',
+        body: 'hi',
+        tags: [],
+        timestampMs: 123456,
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:00Z',
+      },
+    });
+  });
+
+  it('rejects invalid timestamp payload', async () => {
+    getAnonContextMock.mockResolvedValueOnce({ anonId: 'anon-1' });
+    notesSelectQueue.push({ data: null, error: null });
+
+    const req = createMockReq({
+      method: 'POST',
+      headers: { 'x-device-id': 'device-1' },
+      body: { trackId: 'track-9', body: 'test', timestampMs: 'abc' },
+    });
+    const res = createMockRes();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.body?.error).toMatch(/timestamp/i);
+  });
+
   it('updates tags for existing note when only tags payload is provided', async () => {
     getAnonContextMock.mockResolvedValueOnce({ anonId: 'anon-1' });
     notesSelectQueue.push({
-      data: { id: 'note-1', body: 'hi', tags: ['lofi'] },
+      data: { id: 'note-1', body: 'hi', tags: ['lofi'], timestamp_ms: null },
       error: null,
     });
 
@@ -278,8 +340,52 @@ describe('api/db/notes handler', () => {
         trackId: 'track-9',
         body: 'hi',
         tags: ['chill'],
+        timestampMs: 64000,
         createdAt: '2024-01-01T00:00:00Z',
         updatedAt: '2024-01-01T00:00:01Z',
+      },
+    });
+  });
+
+  it('updates timestamp when payload includes timestampMs', async () => {
+    getAnonContextMock.mockResolvedValueOnce({ anonId: 'anon-1' });
+    notesSelectQueue.push({
+      data: { id: 'note-1', body: 'hi', tags: [], timestamp_ms: null },
+      error: null,
+    });
+    notesUpdateResponse = {
+      data: {
+        id: 'note-1',
+        track_id: 'track-9',
+        body: 'updated',
+        tags: [],
+        timestamp_ms: 55555,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:05Z',
+      },
+      error: null,
+    };
+
+    const req = createMockReq({
+      method: 'POST',
+      headers: { 'x-device-id': 'device-1' },
+      body: { trackId: 'track-9', body: 'updated', timestampMs: 55555.2 },
+    });
+    const res = createMockRes();
+
+    await handler(req, res);
+
+    expect(notesUpdatePayload).toMatchObject({ timestamp_ms: 55555 });
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.body).toEqual({
+      note: {
+        id: 'note-1',
+        trackId: 'track-9',
+        body: 'updated',
+        tags: [],
+        timestampMs: 55555,
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:05Z',
       },
     });
   });

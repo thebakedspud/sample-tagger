@@ -8,7 +8,7 @@ import { getTagSuggestions, normalizeTag } from './tagUtils.js';
  * @property {string[]} [stockTags]
  * @property {string[]} [customTags]
  * @property {string[]} [existingTags]
- * @property {(tag: string) => boolean | void} [onAdd]
+ * @property {(tag: string) => boolean | { success?: boolean } | void} [onAdd]
  * @property {() => void} [onCancel]
  * @property {string} [placeholder]
  * @property {boolean} [autoFocus]
@@ -21,7 +21,7 @@ import { getTagSuggestions, normalizeTag } from './tagUtils.js';
  *   stockTags?: string[];
  *   customTags?: string[];
  *   existingTags?: string[];
- *   onAdd?: (tag: string) => boolean | void;
+ *   onAdd?: (tag: string) => boolean | { success?: boolean } | void;
  *   onCancel?: () => void;
  *   placeholder?: string;
  *   autoFocus?: boolean;
@@ -42,6 +42,7 @@ function TagInputInner(props, ref) {
     placeholder = 'Add tag',
     autoFocus = false,
     className = '',
+    ...restProps
   } = safeProps
   const inputId = useId();
   const listboxId = `${inputId}-listbox`;
@@ -101,14 +102,27 @@ function TagInputInner(props, ref) {
   const handleAdd = (rawTag) => {
     const normalized = normalizeTag(rawTag);
     if (!normalized) return;
-    const added = onAdd ? onAdd(normalized) : true;
-    if (added !== false) {
+    const result = onAdd ? onAdd(normalized) : true;
+    let succeeded = result !== false;
+    if (typeof result === 'object' && result !== null) {
+      succeeded = result.success !== false;
+    }
+    if (succeeded) {
       setQuery('');
       setHighlightIndex(-1);
     }
     requestAnimationFrame(() => {
       inputRef.current?.focus();
     });
+  };
+
+  const handleContainerKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setQuery('');
+      setHighlightIndex(-1);
+      if (onCancel) onCancel();
+    }
   };
 
   const handleKeyDown = (event) => {
@@ -139,12 +153,6 @@ function TagInputInner(props, ref) {
       }
       return;
     }
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      setQuery('');
-      setHighlightIndex(-1);
-      if (onCancel) onCancel();
-    }
   };
 
   const activeOptionId =
@@ -153,8 +161,12 @@ function TagInputInner(props, ref) {
       : undefined;
 
   return (
-    <div className={`tag-input ${className}`.trim()}>
+    <div
+      className={`tag-input ${className}`.trim()}
+      onKeyDown={handleContainerKeyDown}
+    >
       <input
+        {...restProps}
         ref={mergedRef}
         id={inputId}
         type="text"
@@ -187,6 +199,7 @@ function TagInputInner(props, ref) {
         <ul
           id={listboxId}
           role="listbox"
+          tabIndex={-1}
           className="tag-input__suggestions"
         >
           {suggestions.map((tag, index) => (

@@ -21,8 +21,20 @@ jobs:
       - run: npm ci
       - run: npm run lint -- --max-warnings=0
 
-  audit:
+  typecheck:
     needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run check:tsc
+
+  audit:
+    needs: typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +46,7 @@ jobs:
       - run: npm audit --production
 
   test:
-    needs: [lint, audit]
+    needs: [typecheck, audit]
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]

@@ -9,8 +9,114 @@
  * @module utils/notesTagsData
  */
 
+// @ts-check
+
 import { normalizeTag } from '../features/tags/tagUtils.js'
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from '../features/tags/validation.js'
+
+/**
+ * @typedef {Object} NoteEntry
+ * @property {string} body
+ * @property {number} createdAt
+ * @property {number | null | undefined} [timestampMs]
+ */
+
+/** @typedef {Record<string, NoteEntry[]>} NotesByTrack */
+/** @typedef {Record<string, NoteEntry[] | string[]>} NotesInput */
+
+const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value)
+
+function coerceCreatedAt(value, fallback) {
+  if (isFiniteNumber(value)) return Math.trunc(value)
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value)
+    if (!Number.isNaN(parsed)) {
+      return Math.trunc(parsed)
+    }
+  }
+  return fallback
+}
+
+function coerceTimestampMs(value) {
+  if (isFiniteNumber(value)) return Math.trunc(value)
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return Math.trunc(parsed)
+  }
+  return undefined
+}
+
+/**
+ * @param {any} value
+ * @param {number} fallbackTs
+ * @returns {NoteEntry | null}
+ */
+function normalizeNoteEntry(value, fallbackTs) {
+  if (typeof value === 'string') {
+    const body = value.trim()
+    if (!body) return null
+    return {
+      body,
+      createdAt: fallbackTs,
+    }
+  }
+  if (value && typeof value === 'object') {
+    const candidate = /** @type {Partial<NoteEntry> & Record<string, unknown>} */ (value)
+    const rawBody = typeof candidate.body === 'string' ? candidate.body : ''
+    const body = rawBody.trim()
+    if (!body) return null
+    const createdAt = coerceCreatedAt(
+      /** @type {number | string | null | undefined} */ (
+        candidate.createdAt ?? candidate.created_at
+      ),
+      fallbackTs,
+    )
+    const timestampMs = coerceTimestampMs(
+      /** @type {number | string | null | undefined} */ (
+        candidate.timestampMs ?? candidate.timestamp_ms
+      ),
+    )
+    /** @type {NoteEntry} */
+    const entry = {
+      body,
+      createdAt,
+    }
+    if (timestampMs != null) {
+      entry.timestampMs = timestampMs
+    }
+    return entry
+  }
+  return null
+}
+
+/**
+ * Returns the textual body of a note entry (legacy strings supported)
+ * @param {NoteEntry | string | undefined | null} note
+ * @returns {string}
+ */
+export function getNoteBody(note) {
+  if (typeof note === 'string') return note
+  if (note && typeof note === 'object' && typeof note.body === 'string') {
+    return note.body
+  }
+  return ''
+}
+
+/**
+ * Create a shallow clone of a note entry, normalizing legacy values
+ * @param {NoteEntry | string} note
+ * @returns {NoteEntry | null}
+ */
+export function cloneNoteEntry(note) {
+  const fallback = Date.now()
+  const normalized = normalizeNoteEntry(note, fallback)
+  if (!normalized) return null
+  return {
+    body: normalized.body,
+    createdAt: normalized.createdAt,
+    ...(normalized.timestampMs != null ? { timestampMs: normalized.timestampMs } : {}),
+  }
+}
 
 // ===== SECTION 1: Foundation Utilities =====
 
@@ -31,10 +137,10 @@ export function hasOwn(map, key) {
  * Returns empty array if notes property is missing or invalid
  *
  * @param {object} t - Track object
- * @returns {string[]} Notes array (empty if missing or invalid)
+ * @returns {NoteEntry[]} Notes array (empty if missing or invalid)
  */
 export function getNotes(t) {
-  return Array.isArray(t?.notes) ? t.notes : [];
+  return normalizeNotesList(t?.notes);
 }
 
 // ===== SECTION 2: Notes Normalization =====
@@ -44,17 +150,21 @@ export function getNotes(t) {
  * Filters out non-string values and empty/whitespace-only notes
  *
  * @param {any} value - Raw notes value (expected to be array)
- * @returns {string[]} Cleaned notes array with trimmed strings
+ * @returns {NoteEntry[]} Cleaned notes array with normalized entries
  */
 export function normalizeNotesList(value) {
   if (!Array.isArray(value)) return [];
-  /** @type {string[]} */
+  /** @type {NoteEntry[]} */
   const out = [];
   value.forEach((note) => {
-    if (typeof note !== 'string') return;
-    const trimmed = note.trim();
-    if (!trimmed) return;
-    out.push(trimmed);
+    const normalized = normalizeNoteEntry(note, Date.now());
+    if (normalized) {
+      out.push({
+        body: normalized.body,
+        createdAt: normalized.createdAt,
+        ...(normalized.timestampMs != null ? { timestampMs: normalized.timestampMs } : {}),
+      });
+    }
   });
   return out;
 }
@@ -64,9 +174,10 @@ export function normalizeNotesList(value) {
  * Creates new object with null prototype and validates all entries
  * Skips tracks with empty notes arrays
  *
- * @param {Record<string, string[]>} source - Source notes map
- * @returns {Record<string, string[]>} Cloned and normalized map
+ * @param {NotesInput} source - Source notes map
+ * @returns {NotesByTrack} Cloned and normalized map
  */
+/** @type {(source: Record<string, NoteEntry[] | string[]>) => NotesByTrack} */
 export function cloneNotesMap(source) {
   const out = Object.create(null);
   if (!source || typeof source !== 'object') return out;
@@ -144,7 +255,7 @@ export function cloneTagsMap(source) {
  * Used during app initialization to reconstruct notes map from localStorage
  *
  * @param {object} state - Persisted state object (from localStorage)
- * @returns {Record<string, string[]>} Initial notes map with all notes from state
+ * @returns {NotesByTrack} Initial notes map with all notes from state
  */
 export function createInitialNotesMap(state) {
   const fromState = cloneNotesMap(state?.notesByTrack);
@@ -193,10 +304,11 @@ export function createInitialTagsMap(state) {
  * Adds empty arrays for tracks missing from the map
  * Used to maintain referential consistency between tracks and notes
  *
- * @param {Record<string, string[]>} baseMap - Base notes map
+ * @param {NotesInput} baseMap - Base notes map
  * @param {object[]} tracks - Track list
- * @returns {Record<string, string[]>} Updated notes map with entries for all tracks
+ * @returns {NotesByTrack} Updated notes map with entries for all tracks
  */
+/** @type {(baseMap: Record<string, NoteEntry[] | string[]>, tracks: object[]) => NotesByTrack} */
 export function ensureNotesEntries(baseMap, tracks) {
   const next = cloneNotesMap(baseMap);
   if (!Array.isArray(tracks)) return next;
@@ -238,7 +350,7 @@ export function ensureTagsEntries(baseMap, tracks) {
  * Groups multiple notes for the same track into arrays
  *
  * @param {object[]} rows - API response rows (from /api/db/notes GET)
- * @returns {{ notes: Record<string, string[]>, tags: Record<string, string[]> }} Parsed notes and tags maps
+ * @returns {{ notes: NotesByTrack, tags: Record<string, string[]> }} Parsed notes and tags maps
  *
  * @example
  * const rows = [
@@ -260,8 +372,18 @@ export function groupRemoteNotes(rows) {
     if (!trackId) return;
     const body = typeof row.body === 'string' ? row.body.trim() : '';
     if (body) {
-      if (!Array.isArray(noteMap[trackId])) noteMap[trackId] = [];
-      noteMap[trackId].push(body);
+      const note = normalizeNoteEntry(
+        {
+          body,
+          createdAt: row.createdAt ?? row.created_at,
+          timestampMs: row.timestampMs ?? row.timestamp_ms,
+        },
+        Date.now(),
+      )
+      if (note) {
+        if (!Array.isArray(noteMap[trackId])) noteMap[trackId] = [];
+        noteMap[trackId].push(note);
+      }
     }
     if ('tags' in row) {
       const cleaned = normalizeTagList(row.tags);
@@ -276,16 +398,17 @@ export function groupRemoteNotes(rows) {
  * Remote notes only replace local notes if local entry is empty or missing
  * Preserves existing local notes to avoid data loss
  *
- * @param {Record<string, string[]>} localMap - Local notes map
- * @param {Record<string, string[]>} remoteMap - Remote notes map from API
- * @returns {Record<string, string[]>} Merged notes map (local takes precedence if non-empty)
+ * @param {Record<string, NoteEntry[] | string[]>} localMap - Local notes map
+ * @param {Record<string, NoteEntry[] | string[]>} remoteMap - Remote notes map from API
+ * @returns {NotesByTrack} Merged notes map (local takes precedence if non-empty)
  */
 export function mergeRemoteNotes(localMap, remoteMap) {
   const merged = cloneNotesMap(localMap);
   Object.entries(remoteMap).forEach(([trackId, remoteNotes]) => {
-    if (!Array.isArray(remoteNotes) || remoteNotes.length === 0) return;
+    const cleaned = normalizeNotesList(remoteNotes);
+    if (cleaned.length === 0) return;
     if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
-      merged[trackId] = [...remoteNotes];
+      merged[trackId] = cleaned;
     }
   });
   return merged;
@@ -314,16 +437,17 @@ export function mergeRemoteTags(localMap, remoteMap) {
  * Creates new map with updated/deleted entry for the track
  * Removes entry entirely if notes array becomes empty
  *
- * @param {Record<string, string[]>} baseMap - Base notes map
+ * @param {Record<string, NoteEntry[] | string[]>} baseMap - Base notes map
  * @param {string} trackId - Track ID to update
- * @param {string[]} nextNotes - New notes array for the track
- * @returns {Record<string, string[]>} Updated notes map (new object)
+ * @param {(NoteEntry | string)[]} nextNotes - New notes array for the track
+ * @returns {NotesByTrack} Updated notes map (new object)
  */
 export function updateNotesMap(baseMap, trackId, nextNotes) {
   const map = cloneNotesMap(baseMap);
   if (!trackId) return map;
-  if (Array.isArray(nextNotes) && nextNotes.length > 0) {
-    map[trackId] = [...nextNotes];
+  const cleaned = normalizeNotesList(nextNotes);
+  if (cleaned.length > 0) {
+    map[trackId] = cleaned;
   } else if (hasOwn(map, trackId)) {
     delete map[trackId];
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import SearchFilterBar from '../SearchFilterBar.jsx'
 import { SEARCH_SCOPE, SORT_DIRECTION, SORT_KEY } from '../filterTracks.js'
@@ -41,12 +41,15 @@ describe('SearchFilterBar segmented scope control', () => {
     expect(scopeButtons[0]).toHaveFocus()
 
     await userEvent.keyboard('{ArrowRight}')
+    await waitFor(() => expect(scopeButtons[1]).toHaveFocus())
     expect(onScopeChange).toHaveBeenLastCalledWith(SEARCH_SCOPE.TRACK)
 
     await userEvent.keyboard('{ArrowRight}')
+    await waitFor(() => expect(scopeButtons[2]).toHaveFocus())
     expect(onScopeChange).toHaveBeenLastCalledWith(SEARCH_SCOPE.NOTES)
 
     await userEvent.keyboard('{Home}')
+    await waitFor(() => expect(scopeButtons[0]).toHaveFocus())
     expect(onScopeChange).toHaveBeenLastCalledWith(SEARCH_SCOPE.BOTH)
   })
 

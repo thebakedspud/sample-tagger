@@ -386,6 +386,8 @@
   background: rgba(15, 17, 21, 0.95);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
   z-index: 20;
+  max-height: 7.5rem; /* Approx 5 items */
+  overflow-y: auto;
 }
 
 .tag-input__option {

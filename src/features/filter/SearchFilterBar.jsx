@@ -1,7 +1,8 @@
 // src/features/filter/SearchFilterBar.jsx
 // UI for search, scope selection, sort menu, tag filters, and clear action.
 
-import { useMemo, useCallback, useRef } from 'react';
+import { memo, useMemo, useCallback, useRef } from 'react';
+import { focusElement } from '../../utils/focusById.js';
 import {
   SEARCH_SCOPE,
   SORT_KEY,
@@ -54,7 +55,7 @@ const SORT_OPTIONS = [
  * @param {number} props.totalCount
  * @param {import('react').RefObject<HTMLInputElement>} props.searchInputRef
  */
-export default function SearchFilterBar({
+function SearchFilterBar({
   query,
   onQueryChange,
   scope,
@@ -82,7 +83,7 @@ export default function SearchFilterBar({
   const requestScopeFocus = useCallback((value) => {
     const node = scopeRefs.current.get(value);
     if (node) {
-      node.focus();
+      focusElement(node);
     }
   }, []);
 
@@ -106,7 +107,10 @@ export default function SearchFilterBar({
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault();
-        searchInputRef?.current?.focus();
+        const searchInput = searchInputRef?.current;
+        if (searchInput) {
+          focusElement(searchInput);
+        }
       }
     },
     [query, onQueryChange, searchInputRef],
@@ -168,11 +172,22 @@ export default function SearchFilterBar({
     [onToggleTag],
   );
 
+  const handleTagKeyDown = useCallback(
+    (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        onToggleTag(event.currentTarget.value);
+      }
+    },
+    [onToggleTag],
+  );
+
   const sortLabel = useMemo(() => describeSort(sort), [sort]);
 
   return (
     <section
       aria-label="Track filters"
+      data-filter-bar="true"
       style={{
         background: 'var(--card)',
         border: '1px solid var(--border)',
@@ -187,7 +202,10 @@ export default function SearchFilterBar({
       onKeyDown={(event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
           event.preventDefault();
-          searchInputRef?.current?.focus();
+          const searchInput = searchInputRef?.current;
+          if (searchInput) {
+            focusElement(searchInput);
+          }
         }
       }}
     >
@@ -332,6 +350,7 @@ export default function SearchFilterBar({
                     value={tag}
                     checked={selectedTags.includes(tag)}
                     onChange={handleTagChange}
+                    onKeyDown={handleTagKeyDown}
                   />
                   <span>{tag}</span>
                 </label>
@@ -373,3 +392,5 @@ export default function SearchFilterBar({
     </section>
   );
 }
+
+export default memo(SearchFilterBar);

@@ -67,7 +67,7 @@ export function normalizeTimestamp(value) {
  * - Data restoration from backups
  *
  * @param {Array<object>} trackList - New tracks to enrich
- * @param {Record<string, string[]>} notesMap - Map of trackId to notes array
+ * @param {Record<string, import('./notesTagsData.js').NoteEntry[]>} notesMap - Map of trackId to notes array
  * @param {Record<string, string[]>} tagsMap - Map of trackId to tags array
  * @param {Array<object>} [previousTracks=[]] - Previous track state for metadata preservation
  * @param {object} [options={}] - Enrichment options
@@ -165,7 +165,9 @@ export function attachNotesToTracks(trackList, notesMap, tagsMap, previousTracks
     const key = typeof id === 'string' || typeof id === 'number' ? String(id) : null;
     const prev = key ? prevMap.get(key) : null;
     const mappedNotes =
-      key && hasOwn(safeMap, key) ? [...safeMap[key]] : normalizeNotesList(track.notes);
+      key && hasOwn(safeMap, key)
+        ? normalizeNotesList(safeMap[key])
+        : normalizeNotesList(track.notes);
     const mappedTags =
       key && hasOwn(safeTags, key) ? [...safeTags[key]] : normalizeTagList(track.tags);
 

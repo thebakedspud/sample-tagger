@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useId } from 'react';
+import { focusElement } from '../utils/focusById.js';
 
 /** @type {import('react').CSSProperties} */
 const overlayStyle = {
@@ -45,13 +46,16 @@ export default function RecoveryModal({
 }) {
   const [ackChecked, setAckChecked] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [ackError, setAckError] = useState(false);
   const confirmRef = useRef(null);
+  const ackErrorMessageId = useId();
 
   useEffect(() => {
     if (open) {
       setAckChecked(false);
       setFeedback('');
-      confirmRef.current?.focus({ preventScroll: true });
+      setAckError(false);
+      focusElement(confirmRef.current, { preventScroll: true });
     }
   }, [open, code]);
 
@@ -97,8 +101,20 @@ export default function RecoveryModal({
 
   const handleSubmit = (event) => {
     event.preventDefault();
-    if (!ackChecked || !code) return;
+    if (!ackChecked || !code) {
+      setAckError(true);
+      return;
+    }
+    setAckError(false);
     onAcknowledge?.();
+  };
+
+  const handleCheckboxChange = (event) => {
+    const nextChecked = event.target.checked;
+    setAckChecked(nextChecked);
+    if (nextChecked && ackError) {
+      setAckError(false);
+    }
   };
 
   return (
@@ -144,18 +160,35 @@ export default function RecoveryModal({
             <input
               type="checkbox"
               checked={ackChecked}
-              onChange={(event) => setAckChecked(event.target.checked)}
+              onChange={handleCheckboxChange}
+              aria-invalid={ackError ? 'true' : undefined}
+              aria-describedby={ackError ? ackErrorMessageId : undefined}
             />
-            <span>
+            <span
+              style={{
+                color: ackError ? 'var(--danger, #ff6b6b)' : undefined,
+              }}
+            >
               I understand that losing this code means losing access to all my notes forever.
             </span>
           </label>
+          {ackError && (
+            <p
+              id={ackErrorMessageId}
+              style={{
+                color: 'var(--danger, #ff6b6b)',
+                margin: '6px 0 0 28px',
+                fontSize: '0.95rem',
+              }}
+            >
+              Please confirm before continuing.
+            </p>
+          )}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
             <button
               ref={confirmRef}
               type="submit"
               className="btn primary"
-              disabled={!ackChecked}
             >
               I saved the code
             </button>

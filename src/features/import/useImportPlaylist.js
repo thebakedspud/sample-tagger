@@ -2,7 +2,7 @@
 // Provides a single entry point for importing playlists from any provider.
 
 // @ts-check
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import detectProvider from './detectProvider.js';
 import * as spotifyAdapter from './adapters/spotifyAdapter.js';
 import * as youtubeAdapter from './adapters/youtubeAdapter.js';
@@ -191,7 +191,8 @@ function computeProgress(list, total) {
  *   importBusyKind: string | null,
  *   errorCode: import('./adapters/types.js').AdapterErrorCode | null,
  *   total: number | null,
- *   progress: { imported: number, total: number } | null
+ *   progress: { imported: number, total: number } | null,
+ *   primeProviders: () => Promise<void>
  * }}
  */
 export default function useImportPlaylist() {
@@ -573,7 +574,7 @@ export default function useImportPlaylist() {
     }
   }
 
-  function reset() {
+function reset() {
     controllerRef.current?.abort();
     controllerRef.current = null;
     requestIdRef.current += 1;
@@ -586,6 +587,25 @@ export default function useImportPlaylist() {
     setTotal(null);
   }
 
+  const primeProviders = useCallback(async () => {
+    const adapters = Object.values(ADAPTER_REGISTRY);
+    await Promise.allSettled(
+      adapters.map((adapter) => {
+        const adapterAny = /** @type {any} */ (adapter);
+        const primeFn = adapterAny && typeof adapterAny.prime === 'function' ? adapterAny.prime : null;
+        if (!primeFn) return Promise.resolve();
+        try {
+          return primeFn();
+        } catch (err) {
+          if (isDev()) {
+            console.debug('[import] prime:adapter-error', { err });
+          }
+          return Promise.resolve();
+        }
+      }),
+    );
+  }, []);
+
   return {
     importPlaylist,
     importNext,
@@ -597,5 +617,6 @@ export default function useImportPlaylist() {
     errorCode,
     total,
     progress: computeProgress(tracks, total),
+    primeProviders,
   };
 }

@@ -3,6 +3,18 @@
 import { describe, it, expect } from 'vitest'
 import buildInitialPlaylistState from '../buildInitialPlaylistState.js'
 import { initialPlaylistState } from '../playlistReducer.js'
+import { noteBodies } from '../../../test-utils/noteHelpers.js'
+
+const notesMapBodies = (map = {}) =>
+  Object.fromEntries(
+    Object.entries(map).map(([id, notes]) => [id, noteBodies(notes)]),
+  )
+
+const tracksWithNoteBodies = (tracks = []) =>
+  tracks.map((track) => ({
+    ...track,
+    notes: noteBodies(track.notes),
+  }))
 
 describe('buildInitialPlaylistState', () => {
   it('builds hydrated playlist state when persisted data is available', () => {
@@ -57,7 +69,7 @@ describe('buildInitialPlaylistState', () => {
     const result = buildInitialPlaylistState(bootstrapState)
 
     expect(result.bootstrapState).toBe(bootstrapState)
-    expect(result.initialNotesMap).toEqual({
+    expect(notesMapBodies(result.initialNotesMap)).toEqual({
       'track-1': ['stored note'],
       'track-3': ['dangling note'],
     });
@@ -68,7 +80,12 @@ describe('buildInitialPlaylistState', () => {
       'track-3': ['metal'],
     });
     expect(result.initialPlaylistStateWithData).not.toBe(initialPlaylistState);
-    expect(result.initialPlaylistStateWithData).toEqual({
+    const simplifiedState = {
+      ...result.initialPlaylistStateWithData,
+      tracks: tracksWithNoteBodies(result.initialPlaylistStateWithData.tracks),
+      notesByTrack: notesMapBodies(result.initialPlaylistStateWithData.notesByTrack),
+    }
+    expect(simplifiedState).toEqual({
       ...initialPlaylistState,
       tracks: [
         {
@@ -133,9 +150,14 @@ describe('buildInitialPlaylistState', () => {
     const result = buildInitialPlaylistState(bootstrapState)
 
     expect(result.bootstrapState).toBe(bootstrapState)
-    expect(result.initialNotesMap).toEqual({})
+    expect(notesMapBodies(result.initialNotesMap)).toEqual({})
     expect(result.initialTagsMap).toEqual({})
-    expect(result.initialPlaylistStateWithData).toEqual({
+    const simplifiedFallback = {
+      ...result.initialPlaylistStateWithData,
+      tracks: tracksWithNoteBodies(result.initialPlaylistStateWithData.tracks),
+      notesByTrack: notesMapBodies(result.initialPlaylistStateWithData.notesByTrack),
+    }
+    expect(simplifiedFallback).toEqual({
       ...initialPlaylistState,
       tracks: [
         {

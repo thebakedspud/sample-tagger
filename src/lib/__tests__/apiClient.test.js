@@ -25,11 +25,13 @@ describe('apiFetch', () => {
   })
 
   it('injects device id and content-type headers when needed', async () => {
+    // @ts-expect-error - Mock function has mockReturnValue method
     getDeviceId.mockReturnValue('device-1')
 
     await apiFetch('/api/test', { method: 'POST', body: JSON.stringify({ hello: 'world' }) })
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    // @ts-expect-error - Mock function has mock.calls property
     const [, init] = globalThis.fetch.mock.calls[0]
     expect(init.headers.get('x-device-id')).toBe('device-1')
     expect(init.headers.get('Accept')).toBe('application/json')
@@ -37,8 +39,10 @@ describe('apiFetch', () => {
   })
 
   it('preserves existing content-type headers and updates device id from response header', async () => {
+    // @ts-expect-error - Mock function has mockReturnValue method
     getDeviceId.mockReturnValue(null)
     const responseHeaders = new Headers({ 'x-device-id': 'new-device' })
+    // @ts-expect-error - Mock function has mockResolvedValueOnce method
     globalThis.fetch.mockResolvedValueOnce({
       ok: true,
       headers: responseHeaders,
@@ -50,6 +54,7 @@ describe('apiFetch', () => {
       body: 'payload',
     })
 
+    // @ts-expect-error - Mock function has mock.calls property
     const [, init] = globalThis.fetch.mock.calls[0]
     expect(init.headers.get('Content-Type')).toBe('application/custom')
     expect(init.headers.get('x-device-id')).toBeNull()
@@ -57,8 +62,10 @@ describe('apiFetch', () => {
   })
 
   it('does not call setDeviceId when header matches existing value', async () => {
+    // @ts-expect-error - Mock function has mockReturnValue method
     getDeviceId.mockReturnValue('device-123')
     const responseHeaders = new Headers({ 'x-device-id': 'device-123' })
+    // @ts-expect-error - Mock function has mockResolvedValueOnce method
     globalThis.fetch.mockResolvedValueOnce({
       ok: true,
       headers: responseHeaders,

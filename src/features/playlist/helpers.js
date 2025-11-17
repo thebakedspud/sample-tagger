@@ -7,10 +7,12 @@
 
 import { normalizeTag } from '../tags/tagUtils.js'
 import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from '../tags/validation.js'
+/** @typedef {import('../../utils/notesTagsData.js').NoteEntry} NoteEntry */
+import { cloneNoteEntry, normalizeNotesList } from '../../utils/notesTagsData.js'
 
 /**
  * Check if any notes or tags exist across all tracks
- * @param {Record<string, string[]>} notesByTrack
+ * @param {Record<string, NoteEntry[]>} notesByTrack
  * @param {Record<string, string[]>} tagsByTrack
  * @returns {boolean}
  */
@@ -75,15 +77,19 @@ export function validateTag(tag, existingTags = [], maxTags = MAX_TAGS_PER_TRACK
 
 /**
  * Create rollback snapshot for note operations
- * @param {Record<string, string[]>} notesByTrack
+ * @param {Record<string, NoteEntry[]>} notesByTrack
  * @param {string} trackId
- * @returns {{ trackId: string, previousNotes: string[] }}
+ * @returns {{ trackId: string, previousNotes: import('../../utils/notesTagsData.js').NoteEntry[] }}
  */
 export function createNoteSnapshot(notesByTrack, trackId) {
   const notes = notesByTrack[trackId]
   return {
     trackId,
-    previousNotes: Array.isArray(notes) ? [...notes] : []
+    previousNotes: Array.isArray(notes)
+      ? notes
+          .map(cloneNoteEntry)
+          .filter((entry) => Boolean(entry))
+      : []
   }
 }
 
@@ -104,13 +110,12 @@ export function createTagSnapshot(tagsByTrack, trackId) {
 /**
  * Attach notes and tags to a track object
  * @param {Object} track
- * @param {Record<string, string[]>} notesByTrack
+ * @param {Record<string, NoteEntry[]>} notesByTrack
  * @param {Record<string, string[]>} tagsByTrack
  * @returns {Object}
  */
 export function attachNotesToTrack(track, notesByTrack, tagsByTrack) {
-  const notes = notesByTrack[track.id] || []
+  const notes = normalizeNotesList(notesByTrack[track.id] || [])
   const tags = tagsByTrack[track.id] || []
   return { ...track, notes, tags }
 }
-

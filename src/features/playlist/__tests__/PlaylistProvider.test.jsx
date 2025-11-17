@@ -5,6 +5,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { PlaylistStateProvider } from '../PlaylistProvider.jsx'
 import { usePlaylistState, usePlaylistDispatch, usePlaylistSync } from '../usePlaylistContext.js'
 import { initialPlaylistState } from '../playlistReducer.js'
+import { noteBodies } from '../../../test-utils/noteHelpers.js'
 
 // Mock dependencies
 vi.mock('../../../lib/apiClient.js', () => ({
@@ -39,9 +40,20 @@ const mockedGroupRemoteNotes = vi.mocked(groupRemoteNotes)
 const mockedCreateTagSyncScheduler = vi.mocked(createTagSyncScheduler)
 const mockedNotifyDeviceContextStale = vi.mocked(notifyDeviceContextStale)
 
+const makeResolvedResponse = (overrides = {}) => ({
+  ok: true,
+  json: vi.fn().mockResolvedValue({}),
+  ...overrides,
+})
+
+const getTagQueueKey = (deviceId) => `sta:pending-tag-sync:${deviceId}`
+
 describe('PlaylistProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.clear()
+    }
     
     // Set up default mock implementations
     const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
@@ -128,7 +140,7 @@ describe('PlaylistProvider', () => {
   })
 
   describe('Remote Sync Effect', () => {
-    it('fetches notes/tags when anonId is available', async () => {
+    it('fetches notes/tags when deviceId is available and local data exists', async () => {
       const mockNotes = [{ trackId: 't1', body: 'note1', tags: ['tag1'] }]
       const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
         ok: true,
@@ -136,7 +148,130 @@ describe('PlaylistProvider', () => {
       }))
       mockedApiFetch.mockResolvedValue(mockResponse)
       mockedGroupRemoteNotes.mockReturnValue({ notes: { t1: ['note1'] }, tags: { t1: ['tag1'] } })
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
 
+      function TestChild() {
+        return <div>Test</div>
+      }
+
+      render(
+        <PlaylistStateProvider 
+          initialState={stateWithLocalData} 
+          anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
+        >
+          <TestChild />
+        </PlaylistStateProvider>
+      )
+
+      await waitFor(() => {
+        expect(mockedApiFetch).toHaveBeenCalledWith(
+          '/api/db/notes',
+          expect.objectContaining({ signal: expect.any(AbortSignal) })
+        )
+      })
+    })
+
+    it('does not fetch when deviceId is null', async () => {
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
+
+      function TestChild() {
+        return <div>Test</div>
+      }
+
+      render(
+        <PlaylistStateProvider 
+          initialState={stateWithLocalData} 
+          anonContext={{ deviceId: null, anonId: null }}
+        >
+          <TestChild />
+        </PlaylistStateProvider>
+      )
+
+      // Wait a bit to ensure no fetch happens
+      await new Promise(resolve => setTimeout(resolve, 50))
+      
+      expect(mockedApiFetch).not.toHaveBeenCalled()
+    })
+
+    it('clears the sync timeout after a successful fetch', async () => {
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
+      const onStatusChange = vi.fn()
+      const mockResponse = makeResolvedResponse({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ notes: [] }),
+      })
+      mockedApiFetch.mockResolvedValue(mockResponse)
+
+      const originalSetTimeout = globalThis.setTimeout
+      const originalClearTimeout = globalThis.clearTimeout
+      const timeoutHandle = 9999
+      let capturedTimeoutCallback = null
+
+      const setTimeoutSpy = vi
+        .spyOn(globalThis, 'setTimeout')
+        .mockImplementation((callback, delay, ...args) => {
+          if (typeof delay === 'number' && delay >= 30000) {
+            capturedTimeoutCallback = () => callback(...args)
+            return timeoutHandle
+          }
+          return originalSetTimeout(callback, delay, ...args)
+        })
+
+      const clearTimeoutSpy = vi
+        .spyOn(globalThis, 'clearTimeout')
+        .mockImplementation((handle) => {
+          if (handle === timeoutHandle) {
+            return
+          }
+          return originalClearTimeout(handle)
+        })
+
+      function TestChild() {
+        return <div>Test</div>
+      }
+
+      try {
+        render(
+          <PlaylistStateProvider
+            initialState={stateWithLocalData}
+            anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
+            onInitialSyncStatusChange={onStatusChange}
+          >
+            <TestChild />
+          </PlaylistStateProvider>,
+        )
+
+        await waitFor(() =>
+          expect(onStatusChange).toHaveBeenCalledWith(
+            expect.objectContaining({ status: 'complete', lastError: null }),
+          ),
+        )
+
+        expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 30000)
+        expect(clearTimeoutSpy).toHaveBeenCalledWith(timeoutHandle)
+        expect(capturedTimeoutCallback).toBeInstanceOf(Function)
+      } finally {
+        setTimeoutSpy.mockRestore()
+        clearTimeoutSpy.mockRestore()
+      }
+    })
+    it('skips fetch when there are no local tracks', async () => {
       function TestChild() {
         return <div>Test</div>
       }
@@ -145,25 +280,6 @@ describe('PlaylistProvider', () => {
         <PlaylistStateProvider 
           initialState={initialPlaylistState} 
           anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
-        >
-          <TestChild />
-        </PlaylistStateProvider>
-      )
-
-      await waitFor(() => {
-        expect(mockedApiFetch).toHaveBeenCalledWith('/api/db/notes')
-      })
-    })
-
-    it('does not fetch when anonId is null', async () => {
-      function TestChild() {
-        return <div>Test</div>
-      }
-
-      render(
-        <PlaylistStateProvider 
-          initialState={initialPlaylistState} 
-          anonContext={{ deviceId: 'device-1', anonId: null }}
         >
           <TestChild />
         </PlaylistStateProvider>
@@ -198,7 +314,8 @@ describe('PlaylistProvider', () => {
 
       function TestChild() {
         const state = usePlaylistState()
-        return <div data-testid="notes">{state.notesByTrack.t1?.join(',') || 'empty'}</div>
+        const bodies = noteBodies(state.notesByTrack.t1)
+        return <div data-testid="notes">{bodies.length > 0 ? bodies.join(',') : 'empty'}</div>
       }
 
       render(
@@ -218,6 +335,12 @@ describe('PlaylistProvider', () => {
     it('handles fetch errors gracefully', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       mockedApiFetch.mockRejectedValue(new Error('Network error'))
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
 
       function TestChild() {
         return <div>Test</div>
@@ -225,7 +348,7 @@ describe('PlaylistProvider', () => {
 
       render(
         <PlaylistStateProvider 
-          initialState={initialPlaylistState} 
+          initialState={stateWithLocalData} 
           anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
         >
           <TestChild />
@@ -246,6 +369,12 @@ describe('PlaylistProvider', () => {
         json: vi.fn().mockResolvedValue({ error: 'Server error' })
       }))
       mockedApiFetch.mockResolvedValue(mockResponse)
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
 
       function TestChild() {
         return <div>Test</div>
@@ -253,7 +382,7 @@ describe('PlaylistProvider', () => {
 
       render(
         <PlaylistStateProvider 
-          initialState={initialPlaylistState} 
+          initialState={stateWithLocalData} 
           anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
         >
           <TestChild />
@@ -274,10 +403,16 @@ describe('PlaylistProvider', () => {
         json: vi.fn().mockResolvedValue({ error: 'unauthorized' })
       }))
       mockedApiFetch.mockResolvedValue(authResponse)
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
 
       render(
         <PlaylistStateProvider 
-          initialState={initialPlaylistState} 
+          initialState={stateWithLocalData} 
           anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
         >
           <div>Test</div>
@@ -289,6 +424,171 @@ describe('PlaylistProvider', () => {
           source: 'notes-sync',
           status: 401
         })
+      })
+    })
+
+    it('aborts in-flight sync when deviceId changes', async () => {
+      const stateWithLocalData = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1', title: 'Track 1', notes: [], tags: [] }],
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+      }
+
+      const abortError = Object.assign(new Error('Aborted'), { name: 'AbortError' })
+      let abortTriggered = false
+
+      mockedApiFetch.mockImplementationOnce((_url, init = {}) => {
+        const { signal } = init
+        return new Promise((_, reject) => {
+          signal?.addEventListener('abort', () => {
+            abortTriggered = true
+            reject(abortError)
+          })
+        })
+      })
+
+      const { rerender } = render(
+        <PlaylistStateProvider 
+          initialState={stateWithLocalData} 
+          anonContext={{ deviceId: 'device-1', anonId: 'anon-1' }}
+        >
+          <div>Test</div>
+        </PlaylistStateProvider>
+      )
+
+      await waitFor(() => {
+        expect(mockedApiFetch).toHaveBeenCalledTimes(1)
+      })
+
+      rerender(
+        <PlaylistStateProvider 
+          initialState={stateWithLocalData} 
+          anonContext={{ deviceId: 'device-2', anonId: 'anon-1' }}
+        >
+          <div>Test</div>
+        </PlaylistStateProvider>
+      )
+
+      await waitFor(() => {
+        expect(abortTriggered).toBe(true)
+      })
+
+      await waitFor(() => {
+        expect(mockedApiFetch).toHaveBeenCalledTimes(2)
+      })
+    })
+  })
+
+  describe('Persistent Tag Queue', () => {
+    it('persists tag updates until sync succeeds', async () => {
+      const storageKey = getTagQueueKey('device-1')
+      mockedCreateTagSyncScheduler.mockReturnValue(null)
+
+      const postResponse = /** @type {Response} */ (/** @type {unknown} */ (makeResolvedResponse()))
+      mockedApiFetch.mockResolvedValue(postResponse)
+
+      function TestChild() {
+        const { syncTrackTags } = usePlaylistSync()
+        return (
+          <button onClick={() => syncTrackTags('t1', ['tag1'])}>
+            Sync
+          </button>
+        )
+      }
+
+      render(
+        <PlaylistStateProvider 
+          initialState={initialPlaylistState} 
+          anonContext={{ deviceId: 'device-1', anonId: null }}
+        >
+          <TestChild />
+        </PlaylistStateProvider>
+      )
+
+      const button = screen.getByText('Sync')
+      button.click()
+
+      const rawQueue = window.localStorage.getItem(storageKey)
+      expect(rawQueue).toContain('"trackId":"t1"')
+
+      await waitFor(() => {
+        expect(window.localStorage.getItem(storageKey)).toBeNull()
+      })
+    })
+
+    it('retains pending entries when sync fails', async () => {
+      const storageKey = getTagQueueKey('device-1')
+      mockedCreateTagSyncScheduler.mockReturnValue(null)
+      mockedApiFetch.mockRejectedValue(new Error('offline'))
+
+      function TestChild() {
+        const { syncTrackTags } = usePlaylistSync()
+        const handleSync = () => {
+          syncTrackTags('t1', ['offline']).catch(() => {})
+        }
+        return <button onClick={handleSync}>Sync</button>
+      }
+
+      render(
+        <PlaylistStateProvider 
+          initialState={initialPlaylistState} 
+          anonContext={{ deviceId: 'device-1', anonId: null }}
+        >
+          <TestChild />
+        </PlaylistStateProvider>
+      )
+
+      const button = screen.getByText('Sync')
+      button.click()
+
+      await waitFor(() => {
+        expect(window.localStorage.getItem(storageKey)).toContain('"trackId":"t1"')
+      })
+    })
+
+    it('flushes persisted queue on mount', async () => {
+      const storageKey = getTagQueueKey('device-1')
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify([{ trackId: 't1', tags: ['pending'], updatedAt: Date.now() }]),
+      )
+
+      mockedApiFetch.mockImplementation((url, init = {}) => {
+        if (init?.method === 'POST') {
+          return Promise.resolve(
+            /** @type {Response} */ (/** @type {unknown} */ (makeResolvedResponse())),
+          )
+        }
+        return Promise.resolve(
+          /** @type {Response} */ (/** @type {unknown} */ ({
+            ok: true,
+            json: vi.fn().mockResolvedValue({ notes: [] }),
+          })),
+        )
+      })
+
+      render(
+        <PlaylistStateProvider 
+          initialState={initialPlaylistState} 
+          anonContext={{ deviceId: 'device-1', anonId: null }}
+        >
+          <div>Test</div>
+        </PlaylistStateProvider>
+      )
+
+      await waitFor(() => {
+        expect(mockedApiFetch).toHaveBeenCalledWith(
+          '/api/db/notes',
+          expect.objectContaining({
+            method: 'POST',
+            body: JSON.stringify({ trackId: 't1', tags: ['pending'] }),
+          }),
+        )
+      })
+
+      await waitFor(() => {
+        expect(window.localStorage.getItem(storageKey)).toBeNull()
       })
     })
   })

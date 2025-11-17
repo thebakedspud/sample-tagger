@@ -1,13 +1,14 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TrackCard from '../TrackCard.jsx'
+import { makeNote } from '../../../test-utils/noteHelpers.js'
 
 const defaultTrack = {
   id: 'track-1',
   title: 'Track One',
   artist: 'Artist A',
-  notes: ['first note'],
+  notes: [makeNote('first note')],
   tags: ['rock', 'jazz'],
 }
 
@@ -15,9 +16,11 @@ function renderTrackCard(overrides = {}) {
   const props = {
     track: { ...defaultTrack, ...overrides.track },
     index: 0,
-    pending: overrides.pending ?? new Map(),
+    placeholders: overrides.placeholders ?? [],
     isPending: overrides.isPending ?? (() => false),
-    editingState: overrides.editingState ?? { editingId: null, draft: '', error: null },
+    isEditing: overrides.isEditing ?? false,
+    editingDraft: overrides.editingDraft ?? '',
+    editingError: overrides.editingError ?? null,
     onDraftChange: overrides.onDraftChange ?? vi.fn(),
     onAddNote: overrides.onAddNote ?? vi.fn(),
     onSaveNote: overrides.onSaveNote ?? vi.fn(),
@@ -42,7 +45,9 @@ describe('TrackCard', () => {
   const originalCancelRaf = window.cancelAnimationFrame
 
   beforeEach(() => {
+    // @ts-expect-error - setTimeout returns Timeout in Node, number in browser
     window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 0)
+    // clearTimeout accepts Timeout in Node, number in browser
     window.cancelAnimationFrame = (id) => clearTimeout(id)
   })
 
@@ -65,8 +70,12 @@ describe('TrackCard', () => {
 
   it('calls onCancelNote when cancel button pressed during editing', async () => {
     const onCancelNote = vi.fn()
-    const editingState = { editingId: 'track-1', draft: 'draft text', error: null }
-    const { user } = renderTrackCard({ onCancelNote, editingState })
+    const { user } = renderTrackCard({
+      onCancelNote,
+      isEditing: true,
+      editingDraft: 'draft text',
+      editingError: null,
+    })
 
     const cancelButton = await screen.findByRole('button', { name: 'Cancel' })
     await user.click(cancelButton)
@@ -77,19 +86,16 @@ describe('TrackCard', () => {
   it('routes undo action through onUndo when placeholder button clicked', async () => {
     const onUndo = vi.fn()
     const pendingId = 'pending-1'
-    const pendingMap = new Map([
-      [
-        pendingId,
-        {
-          trackId: 'track-1',
-          index: 0,
-          restoreFocusId: 'restore-1',
-          fallbackFocusId: 'fallback-1',
-        },
-      ],
-    ])
-    const isPending = (id) => pendingMap.has(id)
-    const { user } = renderTrackCard({ onUndo, pending: pendingMap, isPending })
+    const placeholders = [
+      {
+        pid: pendingId,
+        index: 0,
+        restoreFocusId: 'restore-1',
+        fallbackFocusId: 'fallback-1',
+      },
+    ]
+    const isPending = (id) => id === pendingId
+    const { user } = renderTrackCard({ onUndo, placeholders, isPending })
 
     const undoButton = await screen.findByRole('button', { name: 'Undo' })
     await user.click(undoButton)
@@ -97,7 +103,7 @@ describe('TrackCard', () => {
     expect(onUndo).toHaveBeenCalledWith(pendingId)
   })
 
-  it('supports keyboard navigation between tag chips and add button', () => {
+  it('supports keyboard navigation between tag chips and add button', async () => {
     renderTrackCard({
       track: { ...defaultTrack, tags: ['rock', 'jazz'] },
     })
@@ -109,13 +115,13 @@ describe('TrackCard', () => {
 
     firstChip.focus()
     fireEvent.keyDown(firstChip, { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(secondChip)
+    await waitFor(() => expect(secondChip).toHaveFocus())
 
     fireEvent.keyDown(secondChip, { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(addButton)
+    await waitFor(() => expect(addButton).toHaveFocus())
 
     fireEvent.keyDown(addButton, { key: 'ArrowLeft' })
-    expect(document.activeElement).toBe(secondChip)
+    await waitFor(() => expect(secondChip).toHaveFocus())
   })
 
   it('omits date label when track has an invalid added date', () => {
@@ -124,5 +130,52 @@ describe('TrackCard', () => {
     })
 
     expect(screen.queryByText(/Added/i)).not.toBeInTheDocument()
+  })
+
+  it('shows inline error feedback when adding a tag fails', async () => {
+    const errorMessage = 'Tags must be 24 characters or fewer.'
+    const onAddTag = vi.fn().mockReturnValue({ success: false, error: errorMessage })
+    const { user } = renderTrackCard({ onAddTag })
+
+    await user.click(screen.getByRole('button', { name: /\+ add tag/i }))
+    const input = screen.getByPlaceholderText(/add tag/i)
+    await user.type(input, 'a brand new tag{Enter}')
+
+    expect(onAddTag).toHaveBeenCalledWith('track-1', 'a brand new tag')
+    expect(screen.getByText(errorMessage)).toBeInTheDocument()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+  })
+
+  it('passes timestamp input to save handler', async () => {
+    const onSaveNote = vi.fn()
+    const { user } = renderTrackCard({
+      isEditing: true,
+      editingDraft: 'draft text',
+      onSaveNote,
+    })
+
+    const timestampInput = await screen.findByLabelText(/Timestamp \(optional\)/i)
+    await user.type(timestampInput, '1:23')
+    const saveButton = screen.getByRole('button', { name: /save note/i })
+    await user.click(saveButton)
+
+    expect(onSaveNote).toHaveBeenCalledWith('track-1', '1:23')
+  })
+
+  it('shows error when timestamp invalid and doesn’t save', async () => {
+    const onSaveNote = vi.fn()
+    const { user } = renderTrackCard({
+      isEditing: true,
+      editingDraft: 'draft text',
+      onSaveNote,
+    })
+
+    const timestampInput = await screen.findByLabelText(/Timestamp \(optional\)/i)
+    await user.type(timestampInput, 'abc')
+    const saveButton = screen.getByRole('button', { name: /save note/i })
+    await user.click(saveButton)
+
+    expect(onSaveNote).not.toHaveBeenCalled()
+    expect(screen.getByText(/Invalid timestamp format/i)).toBeInTheDocument()
   })
 })

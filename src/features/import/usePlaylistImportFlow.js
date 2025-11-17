@@ -24,6 +24,7 @@ import { extractErrorCode, CODES } from './adapters/types.js'
  * @property {(url: string, options?: ReimportOptions) => Promise<ImportResult>} reimport
  * @property {(options?: LoadMoreOptions) => Promise<ImportResult>} loadMore
  * @property {() => void} resetFlow
+ * @property {() => Promise<void>} primeUpstreamServices
  */
 
 /**
@@ -193,7 +194,12 @@ function buildMeta(res, fallback = {}) {
  * @returns {ImportFlowApi}
  */
 export default function usePlaylistImportFlow() {
-  const { importPlaylist, importNext, loading, reset: resetImportSession } = useImportPlaylist()
+  const { importPlaylist, importNext, loading, reset: resetImportSession, primeProviders } = useImportPlaylist()
+
+  const primeUpstreamServices = useCallback(async () => {
+    if (typeof primeProviders !== 'function') return
+    await primeProviders()
+  }, [primeProviders])
   const [status, setStatus] = useState(/** @type {ImportStatus} */ (ImportFlowStatus.IDLE))
 
   // Give TS a precise tuple type for the error state without importing React types into runtime.
@@ -488,5 +494,6 @@ export default function usePlaylistImportFlow() {
     reimport,
     loadMore,
     resetFlow,
+    primeUpstreamServices,
   }
 }

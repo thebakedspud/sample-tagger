@@ -61,11 +61,22 @@ function describeRecency(importedAt, lastUsedAt) {
   }
 }
 
+/**
+ * @param {object} props
+ * @param {Array<any>} props.items - Array of recent playlist items
+ * @param {(item: any) => Promise<any>} props.onSelect - Callback when a playlist is selected
+ * @param {Record<string, any>} [props.cardState] - State for individual playlist cards (loading, error)
+ * @param {boolean} [props.disabled] - Whether all cards are disabled
+ * @param {string|null} [props.refreshingId] - ID of the playlist currently being refreshed
+ * @param {boolean} [props.isRefreshing] - Whether a refresh operation is in progress
+ */
 export default function RecentPlaylists({
   items,
   onSelect,
   cardState = {},
   disabled = false,
+  refreshingId = null,
+  isRefreshing = false,
 }) {
   const buttonsRef = useRef(new Map())
 
@@ -102,6 +113,9 @@ export default function RecentPlaylists({
           const state = cardState[item.id] ?? {}
           const isLoading = Boolean(state.loading)
           const error = typeof state.error === 'string' ? state.error : null
+          const isRefreshingCard = Boolean(
+            isRefreshing && refreshingId && refreshingId === item.id,
+          )
           const disableCard = disabled || isLoading
           const recency = describeRecency(item.importedAt, item.lastUsedAt)
           const providerLabel = resolveProvider(item.provider)
@@ -129,7 +143,7 @@ export default function RecentPlaylists({
                 onClick={() => handleSelect(item)}
                 className="recent-card__button"
                 disabled={disableCard}
-                aria-busy={isLoading ? 'true' : 'false'}
+                aria-busy={isLoading || isRefreshingCard ? 'true' : 'false'}
                 aria-describedby={ariaDescribedBy}
                 aria-label={`Load playlist "${displayTitle}" from ${providerLabel}${
                   totalLabel ? `, ${totalLabel}` : ''
@@ -168,6 +182,11 @@ export default function RecentPlaylists({
                   ) : null}
                   {isLoading ? (
                     <span className="recent-card__loading">Loading...</span>
+                  ) : null}
+                  {isRefreshingCard ? (
+                    <span className="recent-card__refresh" aria-live="polite">
+                      Refreshing latest data…
+                    </span>
                   ) : null}
                 </div>
               </button>

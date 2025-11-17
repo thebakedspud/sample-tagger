@@ -7,8 +7,26 @@ import { ensureNotesEntries, ensureTagsEntries } from '../../utils/notesTagsData
 import { EMPTY_IMPORT_META } from '../../utils/storageBootstrap.js';
 import { normalizeTimestamp } from '../../utils/trackProcessing.js';
 import { playlistActions } from '../playlist/actions.js';
-import { focusById } from '../../utils/focusById.js';
+import { focusById, focusElement } from '../../utils/focusById.js';
 import { debugFocus } from '../../utils/debug.js';
+import usePersistentPlaylistCache from './usePersistentPlaylistCache.js';
+
+const REFRESHING_FROM_CACHE_ANNOUNCEMENT = 'Showing saved playlist while refreshing the latest data.';
+
+function normalizeSourceKey(raw) {
+  if (typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  return trimmed;
+}
+
+function computePayloadTotal(payload) {
+  if (!payload) return null;
+  if (typeof payload.total === 'number' && Number.isFinite(payload.total)) {
+    return payload.total;
+  }
+  const tracks = Array.isArray(payload.tracks) ? payload.tracks : [];
+  return tracks.length;
+}
 
 /**
  * @typedef {import('./adapters/types.js').ImportMeta} ImportMeta
@@ -21,7 +39,7 @@ import { debugFocus } from '../../utils/debug.js';
  * @property {Function} announce
  * @property {any[]} tracks
  * @property {import('react').MutableRefObject<any[]>} tracksRef
- * @property {Record<string, string[]>} notesByTrack
+ * @property {import('../../utils/notesTagsData.js').NotesByTrack} notesByTrack
  * @property {Record<string, string[]>} tagsByTrack
  * @property {Function} setScreen
  * @property {Function} pushRecentPlaylist
@@ -69,6 +87,8 @@ import { debugFocus } from '../../utils/debug.js';
  * @property {BackgroundSyncState} backgroundSync
  * @property {() => void} resetImportFlow
  * @property {'idle' | 'importing' | 'reimporting' | 'loadingMore'} importStatus
+ * @property {() => Promise<void>} primeUpstreamServices
+ * @property {boolean} isRefreshingCachedData
  */
 
 /**
@@ -141,6 +161,11 @@ export default function usePlaylistImportController({
     [initialImportMeta],
   );
 
+  const {
+    getCachedResult,
+    rememberCachedResult,
+  } = usePersistentPlaylistCache();
+
   const [importUrl, setImportUrl] = useState('');
   const providerChip = useMemo(() => detectProvider(importUrl || ''), [importUrl]);
   const [importError, setImportError] = useState(null);
@@ -154,6 +179,22 @@ export default function usePlaylistImportController({
   const [backgroundSync, setBackgroundSync] = useState(() =>
     resolveInitialBackgroundState(baseImportMeta, initialPersistedTrackCount),
   );
+  const [isRefreshingCachedData, setIsRefreshingCachedData] = useState(false);
+
+  const rememberResultInCache = useCallback(
+    (sourceUrl, payload) => {
+      if (!payload) return;
+      const incomingKey = normalizeSourceKey(sourceUrl ?? '');
+      const metaKey = normalizeSourceKey(payload?.meta?.sourceUrl ?? '');
+      if (incomingKey) {
+        rememberCachedResult(incomingKey, payload);
+      }
+      if (metaKey && metaKey !== incomingKey) {
+        rememberCachedResult(metaKey, payload);
+      }
+    },
+    [rememberCachedResult],
+  );
 
   const {
     status: importStatus,
@@ -162,7 +203,10 @@ export default function usePlaylistImportController({
     reimport: reimportPlaylist,
     loadMore: loadMoreTracks,
     resetFlow: resetImportFlow,
+    primeUpstreamServices,
   } = usePlaylistImportFlow();
+
+  const hasPrimedUpstreamRef = useRef(false);
 
   const msgFromCode = useCallback(
     (code) =>
@@ -181,6 +225,17 @@ export default function usePlaylistImportController({
   const pagerResumeTimerRef = useRef(null);
   const pagerRequestIdRef = useRef(0);
   const startBackgroundPaginationRef = useRef(() => {});
+
+  const focusImportInput = useCallback(() => {
+    const node = importInputRef?.current;
+    if (!node || typeof node.focus !== 'function') return;
+    requestAnimationFrame(() => {
+      node.focus();
+      if (typeof node.select === 'function') {
+        node.select();
+      }
+    });
+  }, [importInputRef]);
 
   const getPagerKey = useCallback((meta) => {
     if (!meta || typeof meta !== 'object') return null;
@@ -229,6 +284,23 @@ export default function usePlaylistImportController({
     },
     [],
   );
+  /**
+   * @param {any} payload
+   * @param {{
+   *   sourceUrl?: string,
+   *   announceMessage?: string,
+   *   fallbackTitle?: string,
+   *   focusBehavior?: 'first-track' | 'heading' | 'default-heading',
+   *   recents?: {
+   *     importedAt?: number | string | Date | null,
+   *     total?: number | null,
+   *     coverUrl?: string | null,
+   *     lastUsedAt?: number | null,
+   *     pinned?: boolean
+   *   } | null,
+   *   updateLastImportUrl?: boolean
+   * }} [options]
+   */
   const applyImportResult = useCallback(
     (payload, options = {}) => {
       const {
@@ -306,7 +378,7 @@ export default function usePlaylistImportController({
               resolvedTargetId: node.id,
               ...metaInfo,
             });
-            node.focus();
+            focusElement(node);
             return true;
           }
           debugFocus('app:init-import:target-missing', {
@@ -343,7 +415,7 @@ export default function usePlaylistImportController({
               reportedTrackId: targetId,
               resolvedTargetId: firstAddNoteBtn.id,
             });
-            firstAddNoteBtn.focus();
+            focusElement(firstAddNoteBtn);
             initialFocusAppliedRef.current = true;
           } else {
             debugFocus('app:init-import:fallback-heading', {
@@ -409,6 +481,9 @@ export default function usePlaylistImportController({
         snapshotId: meta?.snapshotId ?? null,
       });
 
+      const cacheSource = sourceUrl ?? meta?.sourceUrl ?? '';
+      rememberResultInCache(cacheSource, payload);
+
       return { trackCount, title: resolvedTitle };
     },
     [
@@ -421,6 +496,7 @@ export default function usePlaylistImportController({
       markTrackFocusContext,
       notesByTrack,
       pushRecentPlaylist,
+      rememberResultInCache,
       setImportedAt,
       setImportMeta,
       setLastImportUrl,
@@ -430,6 +506,50 @@ export default function usePlaylistImportController({
       tagsByTrack,
       tracksRef,
     ],
+  );
+  /**
+   * @param {string} sourceUrl
+   * @param {{
+   *   announceMessage?: string,
+   *   focusBehavior?: 'first-track' | 'heading' | 'default-heading',
+   *   recents?: {
+   *     coverUrl?: string | null,
+   *     pinned?: boolean,
+   *     lastUsedAt?: number | null
+   *   } | null
+   * }} [options]
+  */
+  const hydrateFromCache = useCallback(
+    (sourceUrl, options = {}) => {
+      const resolvedSource = normalizeSourceKey(sourceUrl ?? '');
+      const payload = resolvedSource ? getCachedResult(resolvedSource) : null;
+      if (!payload) {
+        return null;
+      }
+      const total = computePayloadTotal(payload);
+      const { recents: recentsOverrides, announceMessage: announceOverride, focusBehavior: focusOverride } =
+        options || {};
+      const shouldSkipRecents = recentsOverrides === null;
+      const mergedRecents = shouldSkipRecents
+        ? null
+        : {
+            importedAt: payload?.importedAt ?? null,
+            total,
+            coverUrl: payload?.coverUrl ?? recentsOverrides?.coverUrl ?? null,
+            lastUsedAt: recentsOverrides?.lastUsedAt ?? Date.now(),
+            pinned: recentsOverrides?.pinned,
+          };
+
+      applyImportResult(payload, {
+        sourceUrl: resolvedSource || sourceUrl || '',
+        announceMessage: announceOverride ?? REFRESHING_FROM_CACHE_ANNOUNCEMENT,
+        ...(focusOverride ? { focusBehavior: focusOverride } : {}),
+        recents: mergedRecents,
+      });
+
+      return { data: payload };
+    },
+    [applyImportResult, getCachedResult],
   );
   const handleImportSubmit = useCallback(
     async (event) => {
@@ -442,8 +562,7 @@ export default function usePlaylistImportController({
         const msg = 'Paste a playlist URL to import.';
         setImportError(msg);
         announce('Import failed. URL missing.');
-        importInputRef.current?.focus();
-        importInputRef.current?.select();
+        focusImportInput();
         console.log('[import error]', { code: 'URL_MISSING', raw: null });
         return;
       }
@@ -452,13 +571,17 @@ export default function usePlaylistImportController({
         const msg = msgFromCode(CODES.ERR_UNSUPPORTED_URL);
         setImportError(msg);
         announce('Import failed. Unsupported URL.');
-        importInputRef.current?.focus();
-        importInputRef.current?.select();
+        focusImportInput();
         console.log('[import error]', { code: CODES.ERR_UNSUPPORTED_URL, raw: null });
         return;
       }
 
       announce('Import started.');
+      const cachedEntry = hydrateFromCache(trimmedUrl);
+      const hydratedFromCache = Boolean(cachedEntry);
+      if (hydratedFromCache) {
+        setIsRefreshingCachedData(true);
+      }
       try {
         const result = await importInitial(trimmedUrl, {
           providerHint: providerChip,
@@ -473,8 +596,7 @@ export default function usePlaylistImportController({
           console.log('[import error]', { code, raw: result.error });
           setImportError(msg);
           announce('Import failed. ' + msg);
-          importInputRef.current?.focus();
-          importInputRef.current?.select();
+          focusImportInput();
           return;
         }
 
@@ -498,21 +620,37 @@ export default function usePlaylistImportController({
         console.log('[import error]', { code, raw: err });
         setImportError(msg);
         announce('Import failed. ' + msg);
-        importInputRef.current?.focus();
-        importInputRef.current?.select();
+        focusImportInput();
+      } finally {
+        if (hydratedFromCache) {
+          setIsRefreshingCachedData(false);
+        }
       }
     },
     [
       announce,
       applyImportResult,
       cancelBackgroundPagination,
+      hydrateFromCache,
+      focusImportInput,
       importInitial,
-      importInputRef,
       importUrl,
+      setIsRefreshingCachedData,
       msgFromCode,
       providerChip,
     ],
   );
+  useEffect(() => {
+    if (hasPrimedUpstreamRef.current) return;
+    const trimmedUrl = typeof importUrl === 'string' ? importUrl.trim() : '';
+    if (!trimmedUrl) return;
+    if (providerChip !== 'spotify') return;
+    if (typeof primeUpstreamServices !== 'function') return;
+    hasPrimedUpstreamRef.current = true;
+    Promise.resolve(primeUpstreamServices()).catch(() => {
+      // Best-effort warmup; failures are intentionally ignored.
+    });
+  }, [importUrl, providerChip, primeUpstreamServices]);
   const handleSelectRecent = useCallback(
     async (recent) => {
       if (!recent || !recent.id) {
@@ -539,6 +677,19 @@ export default function usePlaylistImportController({
       setImportError(null);
       updateRecentCardState(recent.id, { loading: true, error: null });
       announce(`Loading playlist ${recent.title ? `"${recent.title}"` : ''}.`);
+      const cachedEntry = hydrateFromCache(trimmedUrl, {
+        focusBehavior: 'heading',
+        announceMessage: REFRESHING_FROM_CACHE_ANNOUNCEMENT,
+        recents: {
+          coverUrl: recent.coverUrl ?? null,
+          pinned: Boolean(recent.pinned),
+          lastUsedAt: Date.now(),
+        },
+      });
+      const hydratedFromCache = Boolean(cachedEntry);
+      if (hydratedFromCache) {
+        setIsRefreshingCachedData(true);
+      }
 
       try {
         const result = await importInitial(trimmedUrl, {
@@ -590,16 +741,22 @@ export default function usePlaylistImportController({
         setImportError(msg);
         announce(msg);
         return { ok: false, error: msg };
+      } finally {
+        if (hydratedFromCache) {
+          setIsRefreshingCachedData(false);
+        }
       }
     },
     [
       announce,
       applyImportResult,
       cancelBackgroundPagination,
+      hydrateFromCache,
       importInitial,
       importStatus,
       msgFromCode,
       setImportError,
+      setIsRefreshingCachedData,
       setImportUrl,
       updateRecentCardState,
     ],
@@ -609,6 +766,15 @@ export default function usePlaylistImportController({
     cancelBackgroundPagination({ resetHistory: true });
     const wasActive = document.activeElement === reimportBtnRef.current;
     setImportError(null);
+    const cachedEntry = hydrateFromCache(lastImportUrl, {
+      focusBehavior: 'heading',
+      announceMessage: REFRESHING_FROM_CACHE_ANNOUNCEMENT,
+      recents: null,
+    });
+    const hydratedFromCache = Boolean(cachedEntry);
+    if (hydratedFromCache) {
+      setIsRefreshingCachedData(true);
+    }
     announce('Re-importing playlist.');
     try {
       const result = await reimportPlaylist(lastImportUrl, {
@@ -625,7 +791,7 @@ export default function usePlaylistImportController({
         console.log('[reimport error]', { code, raw: result.error });
         setImportError(msg);
         announce(msg);
-        if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus());
+        if (wasActive) focusElement(reimportBtnRef.current);
         return;
       }
 
@@ -648,7 +814,7 @@ export default function usePlaylistImportController({
         },
         updateLastImportUrl: false,
       });
-      if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus());
+      if (wasActive) focusElement(reimportBtnRef.current);
     } catch (err) {
       if (err?.name === 'AbortError') {
         return;
@@ -658,15 +824,21 @@ export default function usePlaylistImportController({
       console.log('[reimport error]', { code, raw: err });
       setImportError(msg);
       announce(msg);
-      if (wasActive) requestAnimationFrame(() => reimportBtnRef.current?.focus());
+      if (wasActive) focusElement(reimportBtnRef.current);
+    } finally {
+      if (hydratedFromCache) {
+        setIsRefreshingCachedData(false);
+      }
     }
   }, [
     announce,
     applyImportResult,
     cancelBackgroundPagination,
+    hydrateFromCache,
     importMeta,
     lastImportUrl,
     playlistTitle,
+    setIsRefreshingCachedData,
     msgFromCode,
     reimportBtnRef,
     reimportPlaylist,
@@ -713,7 +885,7 @@ export default function usePlaylistImportController({
                 debugFocus('app:load-more:manual-fallback', {
                   added: result.added,
                 });
-                loadMoreBtnRef.current?.focus();
+                focusElement(loadMoreBtnRef.current);
               });
             }
             announce(`${result.added} more tracks loaded.`);
@@ -1116,5 +1288,7 @@ export default function usePlaylistImportController({
     backgroundSync,
     resetImportFlow,
     importStatus,
+    primeUpstreamServices,
+    isRefreshingCachedData,
   };
 }

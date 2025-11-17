@@ -73,6 +73,32 @@ function normalizeTagsInput(value) {
   return out;
 }
 
+function normalizeTimestampPayload(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      throw new Error('timestampMs must be a finite number');
+    }
+    if (parsed < 0) {
+      throw new Error('timestampMs must be zero or greater');
+    }
+    return Math.trunc(parsed);
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new Error('timestampMs must be a finite number');
+    }
+    if (value < 0) {
+      throw new Error('timestampMs must be zero or greater');
+    }
+    return Math.trunc(value);
+  }
+  throw new Error('timestampMs must be numeric');
+}
+
 export default async function handler(req, res) {
   withCors(res);
 
@@ -105,7 +131,7 @@ export default async function handler(req, res) {
 
       let query = supabaseAdmin
         .from('notes')
-        .select('id, track_id, body, tags, created_at, updated_at')
+        .select('id, track_id, body, tags, timestamp_ms, created_at, updated_at')
         .eq('anon_id', anonContext.anonId)
         .order('created_at', { ascending: true });
 
@@ -123,13 +149,15 @@ export default async function handler(req, res) {
 
       await touchLastActive(supabaseAdmin, anonContext.anonId, deviceId);
 
-      return res.status(200).json({
+        return res.status(200).json({
         notes:
           data?.map((row) => ({
             id: row.id,
             trackId: row.track_id,
             body: row.body,
             tags: Array.isArray(row.tags) ? [...row.tags].sort() : [],
+            timestampMs:
+              typeof row.timestamp_ms === 'number' ? row.timestamp_ms : null,
             createdAt: row.created_at,
             updatedAt: row.updated_at,
           })) ?? [],
@@ -148,6 +176,25 @@ export default async function handler(req, res) {
           : typeof parsed?.trackId === 'string'
             ? parsed.trackId
             : '';
+      const timestampProvided =
+        parsed != null &&
+        (Object.prototype.hasOwnProperty.call(parsed, 'timestampMs') ||
+          Object.prototype.hasOwnProperty.call(parsed, 'timestamp_ms'));
+      let normalizedTimestamp;
+      if (timestampProvided) {
+        try {
+          normalizedTimestamp = normalizeTimestampPayload(
+            parsed?.timestampMs ?? parsed?.timestamp_ms ?? null,
+          );
+        } catch (err) {
+          return res.status(400).json({
+            error:
+              err instanceof Error
+                ? err.message
+                : 'Invalid timestampMs value',
+          });
+        }
+      }
       const hasBodyField = typeof parsed?.body === 'string';
       const noteBody = hasBodyField ? parsed.body.trim() : '';
       const tagsProvided = Array.isArray(parsed?.tags);
@@ -206,11 +253,15 @@ export default async function handler(req, res) {
           tags: normalizedTags ?? [],
           last_active: nowIso,
         };
+        if (timestampProvided) {
+          insertPayload.timestamp_ms =
+            normalizedTimestamp == null ? null : normalizedTimestamp;
+        }
 
         const { data, error } = await supabaseAdmin
           .from('notes')
           .insert(insertPayload)
-          .select('id, track_id, body, tags, created_at, updated_at')
+          .select('id, track_id, body, tags, timestamp_ms, created_at, updated_at')
           .single();
 
         if (error) {
@@ -229,6 +280,8 @@ export default async function handler(req, res) {
             trackId: data.track_id,
             body: data.body,
             tags: Array.isArray(data.tags) ? data.tags : [],
+            timestampMs:
+              typeof data.timestamp_ms === 'number' ? data.timestamp_ms : null,
             createdAt: data.created_at,
             updatedAt: data.updated_at,
           },
@@ -255,12 +308,16 @@ export default async function handler(req, res) {
       if (tagsProvided) {
         updatePayload.tags = normalizedTags ?? [];
       }
+      if (timestampProvided) {
+        updatePayload.timestamp_ms =
+          normalizedTimestamp == null ? null : normalizedTimestamp;
+      }
 
       const { data, error } = await supabaseAdmin
         .from('notes')
         .update(updatePayload)
         .eq('id', existingRow.id)
-        .select('id, track_id, body, tags, created_at, updated_at')
+        .select('id, track_id, body, tags, timestamp_ms, created_at, updated_at')
         .single();
 
       if (error) {
@@ -279,6 +336,8 @@ export default async function handler(req, res) {
           trackId: data.track_id,
           body: data.body,
           tags: Array.isArray(data.tags) ? [...data.tags].sort() : [],
+          timestampMs:
+            typeof data.timestamp_ms === 'number' ? data.timestamp_ms : null,
           createdAt: data.created_at,
           updatedAt: data.updated_at,
         },

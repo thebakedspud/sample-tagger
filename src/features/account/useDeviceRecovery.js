@@ -19,6 +19,13 @@ import {
 } from '../../lib/deviceState.js'
 
 /**
+ * Minimum number of notes a user must create before we automatically
+ * surface the recovery modal. Keeps the prompt from appearing before
+ * new devices have meaningfully engaged with the app.
+ */
+export const RECOVERY_PROMPT_NOTE_THRESHOLD = 3
+
+/**
  * @typedef {Object} AppResetPayload
  * @property {'restore' | 'logout' | 'clear'} reason - Why reset was triggered
  * @property {string} [announcement] - Optional accessibility announcement
@@ -38,15 +45,13 @@ import {
  * @param {Object} options
  * @param {Function} options.announce - Accessibility announcement callback
  * @param {(payload: AppResetPayload) => void | Promise<void>} options.onAppReset - App state reset callback
+ * @param {number} [options.noteCountForRecovery=0] - Current count of notes created on this device (used to gate auto prompts)
  * @returns {Object} Device recovery state and handlers
  */
-export default function useDeviceRecovery({ announce, onAppReset }) {
+export default function useDeviceRecovery({ announce, onAppReset, noteCountForRecovery = 0 }) {
   // Initialize state from localStorage
   const initialRecoveryCode = getStoredRecoveryCode()
   const initialRecoveryMeta = getRecoveryAcknowledgement()
-  const initialRecoveryAcknowledged = initialRecoveryCode
-    ? hasAcknowledgedRecovery(initialRecoveryCode)
-    : false
 
   // Identity state
   const [anonContext, setAnonContext] = useState(() => ({
@@ -64,9 +69,7 @@ export default function useDeviceRecovery({ announce, onAppReset }) {
   })
 
   // UI state
-  const [showRecoveryModal, setShowRecoveryModal] = useState(
-    Boolean(initialRecoveryCode) && !initialRecoveryAcknowledged
-  )
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false)
 
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
   const [showBackupReminder, setShowBackupReminder] = useState(false)
@@ -79,8 +82,15 @@ export default function useDeviceRecovery({ announce, onAppReset }) {
   const [recoveryRotationError, setRecoveryRotationError] = useState(null)
   const [recoveryCsrfToken, setRecoveryCsrfToken] = useState(() => ensureRecoveryCsrfToken())
 
+  const normalizedNoteCount =
+    typeof noteCountForRecovery === 'number' && Number.isFinite(noteCountForRecovery)
+      ? Math.max(0, Math.trunc(noteCountForRecovery))
+      : 0
+  const meetsRecoveryPromptThreshold = normalizedNoteCount >= RECOVERY_PROMPT_NOTE_THRESHOLD
+
   // Refs
   const recoveryCopyButtonRef = useRef(null)
+  const autoPromptTriggeredRef = useRef(false)
 
   // ===== Bootstrap Handler =====
   const bootstrapDevice = useCallback(async (allowRetry = true) => {
@@ -128,7 +138,6 @@ export default function useDeviceRecovery({ announce, onAppReset }) {
           setShowRecoveryModal(false)
         } else {
           setRecoveryAckMeta(null)
-          setShowRecoveryModal(true)
         }
       }
 
@@ -158,6 +167,7 @@ export default function useDeviceRecovery({ announce, onAppReset }) {
 
   const openRecoveryModal = useCallback(() => {
     if (!recoveryCode) return
+    autoPromptTriggeredRef.current = true
     setShowRecoveryModal(true)
     announce('Recovery code ready. Choose how you want to back it up.')
   }, [announce, recoveryCode])
@@ -244,6 +254,7 @@ export default function useDeviceRecovery({ announce, onAppReset }) {
         setRecoveryAckMeta(null)
         setShowRecoveryModal(true)
         setShowBackupReminder(true)
+        autoPromptTriggeredRef.current = true
         announce('Recovery code regenerated. You must save this new code.')
 
         // Focus copy button after modal opens
@@ -380,6 +391,22 @@ export default function useDeviceRecovery({ announce, onAppReset }) {
     const token = ensureRecoveryCsrfToken()
     setRecoveryCsrfToken(token)
   }, [])
+
+  // Reset auto prompt tracker when the recovery code changes (new code needs a fresh prompt)
+  useEffect(() => {
+    autoPromptTriggeredRef.current = false
+  }, [recoveryCode])
+
+  // Auto-open recovery modal once the note threshold is crossed (first-time devices only)
+  useEffect(() => {
+    if (!recoveryCode) return
+    if (recoveryAckMeta) return
+    if (!meetsRecoveryPromptThreshold) return
+    if (autoPromptTriggeredRef.current) return
+    autoPromptTriggeredRef.current = true
+    if (showRecoveryModal) return
+    setShowRecoveryModal(true)
+  }, [meetsRecoveryPromptThreshold, recoveryCode, recoveryAckMeta, showRecoveryModal])
 
   // ===== Return API =====
   return {

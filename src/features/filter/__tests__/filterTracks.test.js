@@ -7,6 +7,7 @@ import {
   filterTracks,
   sortTracks,
 } from '../filterTracks.js'
+import { makeNote } from '../../../test-utils/noteHelpers.js'
 
 const MOCK_TRACKS = [
   {
@@ -14,7 +15,7 @@ const MOCK_TRACKS = [
     title: 'Blue Monk',
     artist: 'Thelonious Monk',
     album: 'Genius of Modern Music',
-    notes: ['Swing feel, open solo section'],
+    notes: [makeNote('Swing feel, open solo section')],
     tags: ['jazz', 'swing'],
     dateAdded: '2024-01-05T12:00:00Z',
     importedAt: '2024-01-06T09:00:00Z',
@@ -25,7 +26,7 @@ const MOCK_TRACKS = [
     title: 'Giant Steps',
     artist: 'John Coltrane',
     album: 'Giant Steps',
-    notes: ['Practice at 120 BPM', 'Focus on changes'],
+    notes: [makeNote('Practice at 120 BPM'), makeNote('Focus on changes')],
     tags: ['jazz', 'practice'],
     dateAdded: '2024-02-01T08:30:00Z',
     importedAt: '2024-02-01T09:00:00Z',
@@ -36,7 +37,7 @@ const MOCK_TRACKS = [
     title: 'Night Poem',
     artist: 'Nils Frahm',
     album: 'All Melody',
-    notes: ['Note: consider for meditation playlist'],
+    notes: [makeNote('Note: consider for meditation playlist')],
     tags: ['ambient'],
     dateAdded: '2023-12-12T07:00:00Z',
     importedAt: '2024-02-15T10:00:00Z',
@@ -120,7 +121,7 @@ describe('filterTracks', () => {
         id: 't-5',
         title: 'Águas de Março',
         artist: 'Elis Regina',
-        notes: ['Classic bossa nova'],
+        notes: [makeNote('Classic bossa nova')],
         tags: ['bossa'],
         dateAdded: '2024-03-02T09:00:00Z',
         importedAt: '2024-03-03T09:00:00Z',

@@ -1,6 +1,8 @@
 // src/features/filter/filterTracks.js
 // Pure utilities for indexing, filtering, and sorting track lists.
 
+import { getNoteBody } from '../../utils/notesTagsData.js'
+
 const COLLATOR = new Intl.Collator(undefined, {
   sensitivity: 'base',
   numeric: true,
@@ -63,7 +65,12 @@ export function buildIndexEntry(track) {
   ]
     .filter(Boolean)
     .join(' ');
-  const notesText = Array.isArray(track?.notes) ? track.notes.join(' ') : '';
+  const notesText = Array.isArray(track?.notes)
+    ? track.notes
+        .map((note) => getNoteBody(note))
+        .filter(Boolean)
+        .join(' ')
+    : '';
   return {
     id,
     trackText: toSearchable(trackText),

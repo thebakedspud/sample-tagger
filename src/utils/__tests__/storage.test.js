@@ -12,6 +12,7 @@ import {
   setFontPreference,
   upsertRecent,
 } from '../storage.js';
+import { noteBodies } from '../../test-utils/noteHelpers.js';
 
 /** @typedef {import('../storage.js').RecentPlaylist} RecentPlaylist */
 /** @typedef {import('../storage.js').ImportMeta} ImportMeta */
@@ -122,12 +123,12 @@ describe('storage cursors', () => {
     });
 
     const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v6'));
-    expect(parsed.notesByTrack['sp:track:1']).toEqual(['First note']);
-    expect(parsed.notesByTrack['sp:track:2']).toEqual(['Second note']);
+    expect(noteBodies(parsed.notesByTrack['sp:track:1'])).toEqual(['First note']);
+    expect(noteBodies(parsed.notesByTrack['sp:track:2'])).toEqual(['Second note']);
 
     const restored = loadAppState();
-    expect(restored?.notesByTrack['sp:track:1']).toEqual(['First note']);
-    expect(restored?.notesByTrack['sp:track:2']).toEqual(['Second note']);
+    expect(noteBodies(restored?.notesByTrack['sp:track:1'])).toEqual(['First note']);
+    expect(noteBodies(restored?.notesByTrack['sp:track:2'])).toEqual(['Second note']);
     expect(Array.isArray(restored?.tracks)).toBe(true);
   });
 
@@ -241,7 +242,7 @@ describe('track persistence', () => {
     expect(restored?.tracks?.[0]?.thumbnailUrl).toBe('https://example.com/thumb.jpg');
     expect(restored?.tracks?.[0]?.sourceUrl).toBe('https://example.com/track');
     expect(restored?.tracks?.[0]?.durationMs).toBe(123456);
-    expect(restored?.tracks?.[0]?.notes).toEqual(['Great intro']);
+    expect(noteBodies(restored?.tracks?.[0]?.notes)).toEqual(['Great intro']);
   });
 });
 

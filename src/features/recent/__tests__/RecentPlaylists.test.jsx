@@ -91,4 +91,34 @@ describe('RecentPlaylists', () => {
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(actionableButton).toHaveFocus()
   })
+
+  it('shows refreshing indicator when a cached refresh is running', () => {
+    const items = [
+      {
+        id: 'spotify:xyz',
+        provider: 'spotify',
+        playlistId: 'xyz',
+        title: 'Chill Hits',
+        sourceUrl: 'https://example.com/chill',
+        importedAt: Date.now(),
+        lastUsedAt: Date.now(),
+        total: 10,
+      },
+    ]
+
+    render(
+      <RecentPlaylists
+        items={items}
+        onSelect={vi.fn()}
+        refreshingId="spotify:xyz"
+        isRefreshing
+      />,
+    )
+
+    expect(screen.getByText('Refreshing latest data…')).toBeInTheDocument()
+    const button = screen.getByRole('button', {
+      name: 'Load playlist "Chill Hits" from Spotify, 10 tracks',
+    })
+    expect(button).toHaveAttribute('aria-busy', 'true')
+  })
 })

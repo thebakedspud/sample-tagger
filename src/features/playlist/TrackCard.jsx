@@ -1,8 +1,34 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, memo, useEffect, useMemo, useRef, useState } from 'react'
 import NoteList from './NoteList.jsx'
 import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
 import ErrorMessage from '../../components/ErrorMessage.jsx'
+import { focusElement } from '../../utils/focusById.js'
+import { parseTimestampInput } from './noteTimestamps.js'
+
+/**
+ * @typedef {object} TrackCardProps
+ * @property {{ id: string|number, title: string, artist: string, notes: import('../../utils/notesTagsData.js').NoteEntry[], tags?: string[], dateAdded?: string, thumbnailUrl?: string }} track
+ * @property {number} index
+ * @property {Array<{ pid: string, index: number, restoreFocusId?: string, fallbackFocusId?: string }>} [placeholders]
+ * @property {(id: string) => boolean} isPending
+ * @property {boolean} isEditing
+ * @property {string} editingDraft
+ * @property {string|null} editingError
+ * @property {(value: string) => void} onDraftChange
+ * @property {(trackId: string|number) => void} onAddNote
+ * @property {(trackId: string|number, timestamp?: string) => void} onSaveNote
+ * @property {() => void} onCancelNote
+ * @property {(trackId: string|number, noteIndex: number) => void} onDeleteNote
+ * @property {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string, tag?: string }} onAddTag
+ * @property {(trackId: string|number, tag: string) => void} onRemoveTag
+ * @property {string[]} stockTags
+ * @property {string[]} customTags
+ * @property {(pendingId: string) => void} onUndo
+ * @property {(pendingId: string) => void} onDismissUndo
+ * @property {(tag: string) => void} [onFilterTag]
+ * @property {import('react').CSSProperties} [style]
+ */
 
 /**
  * @param {object} props
@@ -10,7 +36,7 @@ import ErrorMessage from '../../components/ErrorMessage.jsx'
  *   id: string|number,
  *   title: string,
  *   artist: string,
- *   notes: string[],
+ *   notes: import('../../utils/notesTagsData.js').NoteEntry[],
  *   tags?: string[],
  *   dateAdded?: string,
  *   thumbnailUrl?: string,
@@ -20,61 +46,58 @@ import ErrorMessage from '../../components/ErrorMessage.jsx'
  *   provider?: string
  * }} props.track
  * @param {number} props.index
- * @param {Map<string, any>} props.pending
+ * @param {Array<{ pid: string, index: number, restoreFocusId?: string, fallbackFocusId?: string }>} [props.placeholders]
  * @param {(id: string) => boolean} props.isPending
- * @param {{ editingId: string|number|null, draft: string, error: string|null }} props.editingState
+ * @param {boolean} props.isEditing
+ * @param {string} props.editingDraft
+ * @param {string|null} props.editingError
  * @param {(value: string) => void} props.onDraftChange
  * @param {(trackId: string|number) => void} props.onAddNote
- * @param {(trackId: string|number) => void} props.onSaveNote
+ * @param {(trackId: string|number, timestamp?: string) => void} props.onSaveNote
  * @param {() => void} props.onCancelNote
  * @param {(trackId: string|number, noteIndex: number) => void} props.onDeleteNote
- * @param {(trackId: string|number, tag: string) => boolean} props.onAddTag
+ * @param {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string, tag?: string }} props.onAddTag
  * @param {(trackId: string|number, tag: string) => void} props.onRemoveTag
  * @param {string[]} props.stockTags
  * @param {string[]} props.customTags
  * @param {(pendingId: string) => void} props.onUndo
  * @param {(pendingId: string) => void} props.onDismissUndo
  * @param {(tag: string) => void} [props.onFilterTag]
+ * @param {import('react').CSSProperties} [props.style]
  */
-export default function TrackCard({
-  track,
-  index,
-  pending,
-  isPending,
-  editingState,
-  onDraftChange,
-  onAddNote,
-  onSaveNote,
-  onCancelNote,
-  onDeleteNote,
-  onAddTag,
-  onRemoveTag,
-  stockTags = [],
-  customTags = [],
-  onUndo,
-  onDismissUndo,
-  onFilterTag,
-}) {
+const TrackCardComponent = forwardRef(function TrackCard(
+  /** @type {TrackCardProps} */
+  {
+    track,
+    index,
+    placeholders = [],
+    isPending,
+    isEditing,
+    editingDraft,
+    editingError,
+    onDraftChange,
+    onAddNote,
+    onSaveNote,
+    onCancelNote,
+    onDeleteNote,
+    onAddTag,
+    onRemoveTag,
+    stockTags = [],
+    customTags = [],
+    onUndo,
+    onDismissUndo,
+    onFilterTag,
+    style,
+  },
+  /** @type {import('react').ForwardedRef<HTMLLIElement>} */ ref,
+) {
   const noteArr = Array.isArray(track.notes) ? track.notes : []
   const tags = useMemo(
     () => (Array.isArray(track.tags) ? track.tags : []),
     [track.tags],
   )
-  const { editingId, draft, error } = editingState
-  const isEditing = editingId === track.id
-
-  const placeholders = []
-  for (const [pid, meta] of pending.entries()) {
-    if (meta.trackId === track.id) {
-      placeholders.push({
-        pid,
-        index: meta.index,
-        restoreFocusId: meta.restoreFocusId,
-        fallbackFocusId: meta.fallbackFocusId,
-      })
-    }
-  }
-  placeholders.sort((a, b) => a.index - b.index)
+  const draft = isEditing ? editingDraft : ''
+  const error = isEditing ? editingError : null
 
   const noteBadge =
     noteArr.length > 0 ? (
@@ -107,6 +130,9 @@ export default function TrackCard({
 
   const [addingTag, setAddingTag] = useState(false)
   const [pendingFocus, setPendingFocus] = useState(null)
+  const [tagError, setTagError] = useState(null)
+  const [timestampInput, setTimestampInput] = useState('')
+  const [timestampError, setTimestampError] = useState('')
   const addTagBtnRef = useRef(null)
   const tagInputRef = useRef(null)
   const chipRefs = useRef(new Map())
@@ -123,7 +149,7 @@ export default function TrackCard({
     if (typeof pendingFocus === 'string') {
       const node = map.get(pendingFocus)
       if (node) {
-        node.focus()
+        focusElement(node)
         setPendingFocus(null)
         return
       }
@@ -136,15 +162,38 @@ export default function TrackCard({
         const fallbackTag = tags[targetIndex]
         const node = fallbackTag ? map.get(fallbackTag) : null
         if (node) {
-          node.focus()
+          focusElement(node)
           setPendingFocus(null)
           return
         }
       }
-      addTagBtnRef.current?.focus()
+      focusElement(addTagBtnRef.current)
       setPendingFocus(null)
     }
   }, [tags, pendingFocus])
+
+  useEffect(() => {
+    if (!isEditing) {
+      setTimestampInput('')
+      setTimestampError('')
+    }
+  }, [isEditing])
+
+  const handleTimestampChange = (value) => {
+    setTimestampInput(value)
+    if (timestampError) {
+      setTimestampError('')
+    }
+  }
+
+  const handleSaveWithTimestamp = () => {
+    if (timestampInput.trim() && parseTimestampInput(timestampInput) == null) {
+      setTimestampError('Invalid timestamp format')
+      return
+    }
+    setTimestampError('')
+    onSaveNote(track.id, timestampInput)
+  }
 
   const registerChipRef = (tag) => (node) => {
     const map = chipRefs.current
@@ -160,36 +209,50 @@ export default function TrackCard({
     const tag = tags[targetIndex]
     if (!tag) {
       if (addingTag) {
-        tagInputRef.current?.focus()
+        focusElement(tagInputRef.current)
       } else {
-        addTagBtnRef.current?.focus()
+        focusElement(addTagBtnRef.current)
       }
       return
     }
     const node = chipRefs.current.get(tag)
-    if (node) node.focus()
+    if (node) focusElement(node)
   }
 
   const startAddTag = () => {
     setAddingTag(true)
     setPendingFocus(null)
+    setTagError(null)
     requestAnimationFrame(() => tagInputRef.current?.focus())
   }
 
   const cancelAddTag = () => {
     setAddingTag(false)
     setPendingFocus(null)
+    setTagError(null)
     requestAnimationFrame(() => addTagBtnRef.current?.focus())
   }
 
   const submitTag = (value) => {
     if (!onAddTag) return false
-    const added = onAddTag(track.id, value)
-    if (added) {
+    const addResult = onAddTag(track.id, value)
+    const success =
+      typeof addResult === 'object' && addResult !== null
+        ? addResult.success !== false
+        : Boolean(addResult)
+    if (success) {
+      const focusTag =
+        typeof addResult === 'object' && addResult?.tag ? addResult.tag : value
       setAddingTag(false)
-      setPendingFocus(value)
+      setPendingFocus(focusTag)
+      setTagError(null)
+      return true
     }
-    return added
+    const message =
+      (typeof addResult === 'object' && addResult !== null && addResult.error) ||
+      'Unable to add tag.'
+    setTagError(message)
+    return false
   }
 
   const removeTag = (value, index) => {
@@ -198,22 +261,24 @@ export default function TrackCard({
     setPendingFocus({ index })
   }
 
+  const tagErrorId = `tag-error-${track.id}`
+
   const handleChipKeyDown = (event, chipIndex) => {
     if (event.key === 'ArrowRight') {
       event.preventDefault()
       if (chipIndex < tags.length - 1) {
         focusChipByIndex(chipIndex + 1)
       } else if (addingTag) {
-        tagInputRef.current?.focus()
+        focusElement(tagInputRef.current)
       } else {
-        addTagBtnRef.current?.focus()
+        focusElement(addTagBtnRef.current)
       }
     } else if (event.key === 'ArrowLeft') {
       event.preventDefault()
       if (chipIndex > 0) {
         focusChipByIndex(chipIndex - 1)
       } else {
-        addTagBtnRef.current?.focus()
+        focusElement(addTagBtnRef.current)
       }
     }
   }
@@ -233,6 +298,7 @@ export default function TrackCard({
 
   return (
     <li
+      ref={ref}
       id={`track-${track.id}`}
       data-track-id={track.id}
       tabIndex={-1}
@@ -243,6 +309,8 @@ export default function TrackCard({
         borderRadius: 8,
         padding: 12,
         marginBottom: 12,
+        listStyle: 'none',
+        ...(style || {}),
       }}
     >
       <div
@@ -339,6 +407,8 @@ export default function TrackCard({
             onAdd={submitTag}
             onCancel={cancelAddTag}
             autoFocus
+            aria-invalid={tagError ? 'true' : undefined}
+            aria-describedby={tagError ? tagErrorId : undefined}
           />
         ) : (
           <button
@@ -352,6 +422,9 @@ export default function TrackCard({
           </button>
         )}
       </div>
+      <ErrorMessage id={tagErrorId} className="tag-row__error">
+        {tagError}
+      </ErrorMessage>
 
       <NoteList
         trackId={track.id}
@@ -384,11 +457,45 @@ export default function TrackCard({
               color: 'var(--fg)',
             }}
           />
+          <div style={{ marginTop: 8 }}>
+            <label
+              htmlFor={`note-ts-${track.id}`}
+              style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: 4 }}
+            >
+              Timestamp (optional)
+            </label>
+            <input
+              id={`note-ts-${track.id}`}
+              placeholder="1:23"
+              value={timestampInput}
+              onChange={(event) => handleTimestampChange(event.target.value)}
+              style={{
+                width: '100%',
+                padding: 8,
+                borderRadius: 6,
+                border: '1px solid var(--border)',
+                background: 'var(--card)',
+                color: 'var(--fg)',
+              }}
+            />
+            <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: 'var(--muted)' }}>
+              Format: mm:ss or hh:mm:ss
+            </p>
+            {timestampError && (
+              <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: '#d9534f' }}>
+                {timestampError}
+              </p>
+            )}
+          </div>
           <ErrorMessage id={`note-error-${track.id}`}>
             {error}
           </ErrorMessage>
           <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-            <button type="button" className="btn primary" onClick={() => onSaveNote(track.id)}>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={handleSaveWithTimestamp}
+            >
               Save note
             </button>
             <button type="button" className="btn" onClick={onCancelNote}>
@@ -399,4 +506,8 @@ export default function TrackCard({
       )}
     </li>
   )
-}
+})
+
+const TrackCard = memo(TrackCardComponent)
+
+export default TrackCard
