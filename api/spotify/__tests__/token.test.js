@@ -221,6 +221,70 @@ describe('api/spotify/token', () => {
     __resetRateLimitStateForTests();
   });
 
+  it('allows loopback origins even if the port is not explicitly allowlisted', async () => {
+    const payload = {
+      access_token: 'token-loopback',
+      token_type: 'Bearer',
+      expires_in: 3600,
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      createResponse(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    global.fetch = fetchMock;
+
+    const {
+      default: handler,
+      __resetTokenCacheForTests,
+      __resetRateLimitStateForTests,
+    } = await loadHandler();
+
+    const res = createRes();
+    await handler(createReq({ origin: 'http://localhost:4173' }), res);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(200);
+    expect(res.getHeader('access-control-allow-origin')).toBe('http://localhost:4173');
+
+    __resetTokenCacheForTests();
+    __resetRateLimitStateForTests();
+  });
+
+  it('allows the production playlistnotes.app domain', async () => {
+    const payload = {
+      access_token: 'token-prod',
+      token_type: 'Bearer',
+      expires_in: 3600,
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      createResponse(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    global.fetch = fetchMock;
+
+    const {
+      default: handler,
+      __resetTokenCacheForTests,
+      __resetRateLimitStateForTests,
+    } = await loadHandler();
+
+    const res = createRes();
+    await handler(createReq({ origin: 'https://playlistnotes.app' }), res);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(200);
+    expect(res.getHeader('access-control-allow-origin')).toBe('https://playlistnotes.app');
+
+    __resetTokenCacheForTests();
+    __resetRateLimitStateForTests();
+  });
+
   it('dedupes concurrent requests while fetching a fresh token', async () => {
     const payload = {
       access_token: 'token-concurrent',
