@@ -25,7 +25,7 @@ import { parseTimestampInput } from '../playlist/noteTimestamps.js'
  * @typedef {object} UseNoteHandlersOptions
  * @property {(message: string) => void} [announce]
  * @property {(pendingId: string, meta: PendingUndoMeta) => void} [scheduleInlineUndo]
- * @property {(trackId: string, body: string) => Promise<void>} [syncNote]
+ * @property {(trackId: string, body: string, timestampMs?: number | null) => Promise<void>} [syncNote]
  */
 
 const noop = () => {}
@@ -100,8 +100,10 @@ export function useNoteHandlers(options = {}) {
       const snapshot = createNoteSnapshot(notesByTrack, trackId)
       const parsedTimestamp = parseTimestampInput(timestampInput)
       const extra = {}
+      let timestampMsForSync
       if (typeof parsedTimestamp === 'number') {
         extra.timestampMs = parsedTimestamp
+        timestampMsForSync = parsedTimestamp
       }
       dispatch(playlistActions.saveNoteOptimistic(trackId, currentDraft, extra))
       announceFn('Note added.')
@@ -110,7 +112,7 @@ export function useNoteHandlers(options = {}) {
       if (!syncNoteFn) return
 
       try {
-        await syncNoteFn(trackId, currentDraft)
+        await syncNoteFn(trackId, currentDraft, timestampMsForSync)
       } catch (err) {
         console.error('[note save] error', err)
         dispatch(

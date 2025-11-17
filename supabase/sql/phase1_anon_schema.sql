@@ -91,6 +91,9 @@ $$;
 alter table public.notes
   add column if not exists last_active timestamptz not null default timezone('utc', now());
 
+alter table public.notes
+  add column if not exists timestamp_ms bigint;
+
 -- SAFETY: ensure track_id is text so non-uuid provider IDs are allowed
 alter table public.notes drop constraint if exists notes_track_id_fkey;
 

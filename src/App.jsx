@@ -356,14 +356,18 @@ function AppInner({
   )
 
   const syncNote = useCallback(
-    async (trackId, body) => {
+    async (trackId, body, timestampMs) => {
       if (!anonContext?.deviceId) {
         console.warn('[note save] missing device id, skipping sync')
         return
       }
+      const payload = { trackId, body }
+      if (typeof timestampMs === 'number' && Number.isFinite(timestampMs)) {
+        payload.timestampMs = timestampMs
+      }
       const response = await apiFetch('/api/db/notes', {
         method: 'POST',
-        body: JSON.stringify({ trackId, body }),
+        body: JSON.stringify(payload),
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}))

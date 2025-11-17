@@ -373,7 +373,11 @@ export function groupRemoteNotes(rows) {
     const body = typeof row.body === 'string' ? row.body.trim() : '';
     if (body) {
       const note = normalizeNoteEntry(
-        { body, createdAt: row.createdAt ?? row.created_at },
+        {
+          body,
+          createdAt: row.createdAt ?? row.created_at,
+          timestampMs: row.timestampMs ?? row.timestamp_ms,
+        },
         Date.now(),
       )
       if (note) {
