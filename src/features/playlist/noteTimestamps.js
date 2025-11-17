@@ -40,6 +40,7 @@ export function parseTimestampInput(value) {
   if (numbers.some((num) => Number.isNaN(num) || num < 0)) return null
   const [hours, minutes, seconds] =
     segments.length === 3 ? numbers : [0, numbers[0], numbers[1]]
+  if (minutes >= 60 || seconds >= 60) return null
   const totalSeconds = hours * 3600 + minutes * 60 + seconds
   return totalSeconds * 1000
 }

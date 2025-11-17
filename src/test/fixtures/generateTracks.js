@@ -5,15 +5,37 @@
  * @param {boolean} [options.withNotes]
  * @param {boolean} [options.withTags]
  * @param {number} [options.startIndex]
+ * @param {boolean} [options.withLegacyNotes] - Emit legacy string notes instead of NoteEntry[]
  */
 export function generateTracks(count, options = {}) {
-  const { withNotes = false, withTags = false, startIndex = 0 } = options
+  const {
+    withNotes = false,
+    withTags = false,
+    startIndex = 0,
+    withLegacyNotes = false,
+  } = options
+  const baseTimestamp = Date.UTC(2024, 0, 1)
+  const minuteMs = 60 * 1000
   const total = Math.max(count, 0)
   return Array.from({ length: total }, (_, offset) => {
     const idx = startIndex + offset
     const id = `track-${idx}`
     const tags = withTags ? [`tag-${idx % 10}`, `tag-${(idx + 3) % 10}`] : []
-    const notes = withNotes ? [`Note for track ${idx}`] : []
+    let notes = []
+    if (withNotes) {
+      if (withLegacyNotes) {
+        notes = [`Note for track ${idx}`]
+      } else {
+        const createdAt = baseTimestamp - idx * minuteMs
+        notes = [
+          {
+            body: `Note for track ${idx}`,
+            createdAt,
+            timestampMs: createdAt,
+          },
+        ]
+      }
+    }
 
     return {
       id,
@@ -21,7 +43,7 @@ export function generateTracks(count, options = {}) {
       artist: `Artist ${idx % 25}`,
       notes,
       tags,
-      dateAdded: new Date(Date.now() - idx * 1000 * 60).toISOString(),
+      dateAdded: new Date(baseTimestamp - idx * minuteMs).toISOString(),
     }
   })
 }

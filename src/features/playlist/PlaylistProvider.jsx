@@ -200,8 +200,8 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
           clearTimer()
           return
         }
+        clearTimer()
         if (!response.ok) {
-          clearTimer()
           if (response.status === 401 || response.status === 403 || response.status === 404) {
             notifyDeviceContextStale({ source: 'notes-sync', status: response.status })
           }

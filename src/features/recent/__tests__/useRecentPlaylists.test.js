@@ -1,4 +1,4 @@
-import { renderHook, act, waitFor } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useRecentPlaylists } from '../useRecentPlaylists.js'
 
@@ -92,9 +92,9 @@ describe('useRecentPlaylists', () => {
 
     const { result } = renderHook(() => useRecentPlaylists(initial))
 
-    await act(async () => {})
-
-    expect(result.current.recentPlaylists[0].title).toBe('Original')
+    await waitFor(() => {
+      expect(result.current.recentPlaylists[0].title).toBe('Original')
+    })
     expect(saveRecentMock).not.toHaveBeenCalled()
   })
 })
