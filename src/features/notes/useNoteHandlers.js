@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { focusById, focusElement } from '../../utils/focusById.js'
 import { playlistActions } from '../playlist/actions.js'
 import { createNoteSnapshot } from '../playlist/helpers.js'
+import { markFeatureDiscovered } from '../../utils/storage.js'
 import {
   usePlaylistDispatch,
   usePlaylistEditingState,
@@ -26,6 +27,7 @@ import { extractTimestamp } from '../playlist/noteTimestamps.js'
  * @property {(message: string) => void} [announce]
  * @property {(pendingId: string, meta: PendingUndoMeta) => void} [scheduleInlineUndo]
  * @property {(trackId: string, body: string, timestampMs?: number | null) => Promise<void>} [syncNote]
+ * @property {() => void} [onTimestampDiscovered]
  */
 
 const noop = () => {}
@@ -35,7 +37,7 @@ const noop = () => {}
  * @param {UseNoteHandlersOptions} options
  */
 export function useNoteHandlers(options = {}) {
-  const { announce, scheduleInlineUndo, syncNote } = /** @type {UseNoteHandlersOptions} */ (options || {})
+  const { announce, scheduleInlineUndo, syncNote, onTimestampDiscovered } = /** @type {UseNoteHandlersOptions} */ (options || {})
   const dispatch = usePlaylistDispatch()
   const editingState = usePlaylistEditingState()
   const notesByTrack = usePlaylistNotesByTrack()
@@ -53,6 +55,10 @@ export function useNoteHandlers(options = {}) {
   const syncNoteFn = useMemo(
     () => (typeof syncNote === 'function' ? syncNote : null),
     [syncNote],
+  )
+  const timestampDiscoveredFn = useMemo(
+    () => (typeof onTimestampDiscovered === 'function' ? onTimestampDiscovered : noop),
+    [onTimestampDiscovered],
   )
 
   const editingId = editingState?.trackId ?? null
@@ -107,6 +113,11 @@ export function useNoteHandlers(options = {}) {
           extra.timestampEndMs = timestamp.endMs
         }
         timestampMsForSync = timestamp.startMs
+        // We mark timestamp as "discovered" once a local note has a parsed timestamp.
+        // This is intentionally optimistic; even if remote sync fails, the user has already
+        // seen the feature work in the UI.
+        markFeatureDiscovered('timestamp')
+        timestampDiscoveredFn()
       }
       dispatch(playlistActions.saveNoteOptimistic(trackId, currentDraft, extra))
       announceFn('Note added.')
@@ -128,7 +139,7 @@ export function useNoteHandlers(options = {}) {
         announceFn('Note save failed. Restored previous note list.')
       }
     },
-    [announceFn, dispatch, draft, notesByTrack, syncNoteFn],
+    [announceFn, dispatch, draft, notesByTrack, syncNoteFn, timestampDiscoveredFn],
   )
 
   const onCancelNote = useCallback(() => {

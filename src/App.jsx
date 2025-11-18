@@ -164,6 +164,12 @@ function AppInner({
 
   const reimportBtnRef = useRef(null)
   const loadMoreBtnRef = useRef(null)
+  const [hasDiscoveredTimestamp, setHasDiscoveredTimestamp] = useState(
+    Boolean(persisted?.uiPrefs?.discovered?.timestamp),
+  )
+  const handleTimestampDiscovered = useCallback(() => {
+    setHasDiscoveredTimestamp(true)
+  }, [])
 
   const {
     importUrl,
@@ -390,6 +396,7 @@ function AppInner({
     announce,
     scheduleInlineUndo,
     syncNote,
+    onTimestampDiscovered: handleTimestampDiscovered,
   })
 
   const handleOpenSpotifyLink = useCallback(() => {
@@ -990,6 +997,7 @@ function AppInner({
               skipFocusManagement={skipPlaylistFocusManagement}
               focusContext={trackFocusContext}
               onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
+              hasDiscoveredTimestamp={hasDiscoveredTimestamp}
             />
             )}
           </>

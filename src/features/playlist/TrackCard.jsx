@@ -2,11 +2,11 @@ import {
   forwardRef,
   memo,
   useCallback,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useId,
 } from 'react'
 import NoteList from './NoteList.jsx'
 import TagChip from '../tags/TagChip.jsx'
@@ -15,6 +15,7 @@ import ErrorMessage from '../../components/ErrorMessage.jsx'
 import { focusElement } from '../../utils/focusById.js'
 
 const FOCUS_ADD_TAG_BUTTON = Symbol('focus-add-tag-button')
+const TIMESTAMP_HINT_TEXT = 'Tip: Type “:30” or “1:05” to timestamp a moment in your note.'
 
 /**
  * @typedef {object} TrackCardProps
@@ -38,6 +39,7 @@ const FOCUS_ADD_TAG_BUTTON = Symbol('focus-add-tag-button')
  * @property {(pendingId: string) => void} onDismissUndo
  * @property {(tag: string) => void} [onFilterTag]
  * @property {import('react').CSSProperties} [style]
+ * @property {boolean} hasDiscoveredTimestamp
  */
 
 /**
@@ -98,6 +100,7 @@ const TrackCardComponent = forwardRef(function TrackCard(
     onDismissUndo,
     onFilterTag,
     style,
+    hasDiscoveredTimestamp,
   },
   /** @type {import('react').ForwardedRef<HTMLLIElement>} */ ref,
 ) {
@@ -144,6 +147,23 @@ const TrackCardComponent = forwardRef(function TrackCard(
   const addTagBtnRef = useRef(null)
   const tagInputRef = useRef(null)
   const chipRefs = useRef(new Map())
+  const timestampHintUniqueId = useId()
+  const timestampHintId = useMemo(() => {
+    if (track?.id !== undefined && track?.id !== null) {
+      return `note-timestamp-hint-${track.id}`
+    }
+    return `note-timestamp-hint-${String(timestampHintUniqueId).replace(/[:]/g, '-')}`
+  }, [timestampHintUniqueId, track?.id])
+  const noteErrorId = `note-error-${track.id}`
+
+  const trimmedDraft = draft.trim()
+  const showTimestampHint = isEditing && !hasDiscoveredTimestamp && trimmedDraft === ''
+  const textareaDescribedBy = useMemo(() => {
+    const ids = []
+    if (showTimestampHint) ids.push(timestampHintId)
+    if (error) ids.push(noteErrorId)
+    return ids.length > 0 ? ids.join(' ') : undefined
+  }, [showTimestampHint, error, noteErrorId, timestampHintId])
 
   const focusAddTagButton = useCallback(() => {
     const node = addTagBtnRef.current
@@ -441,7 +461,8 @@ const TrackCardComponent = forwardRef(function TrackCard(
             id={`note-input-${track.id}`}
             rows={3}
             value={draft}
-            aria-describedby={error ? `note-error-${track.id}` : undefined}
+            placeholder={showTimestampHint ? TIMESTAMP_HINT_TEXT : undefined}
+            aria-describedby={textareaDescribedBy}
             onChange={(event) => onDraftChange(event.target.value)}
             style={{
               width: '100%',
@@ -452,7 +473,12 @@ const TrackCardComponent = forwardRef(function TrackCard(
               color: 'var(--fg)',
             }}
           />
-          <ErrorMessage id={`note-error-${track.id}`}>
+          {showTimestampHint && (
+            <p id={timestampHintId} className="sr-only">
+              You can add a timestamp by typing colon followed by seconds, such as colon-three-zero, or a full time like one-colon-zero-five.
+            </p>
+          )}
+          <ErrorMessage id={noteErrorId}>
             {error}
           </ErrorMessage>
           <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
@@ -476,3 +502,4 @@ const TrackCardComponent = forwardRef(function TrackCard(
 const TrackCard = memo(TrackCardComponent)
 
 export default TrackCard
+

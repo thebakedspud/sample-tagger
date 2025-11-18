@@ -43,7 +43,7 @@ vi.mock('../utils/storage.js', () => {
     notesByTrack: {},
     tagsByTrack: {},
     recentPlaylists: [],
-    uiPrefs: { font: 'default' },
+    uiPrefs: { font: 'default', discovered: { timestamp: false } },
   })
   return {
     loadAppState: vi.fn(() => createPersistedState()),
@@ -58,6 +58,8 @@ vi.mock('../utils/storage.js', () => {
     upsertRecent: vi.fn((list = [], item) => [...list, item]),
     getFontPreference: vi.fn(() => 'default'),
     setFontPreference: vi.fn(() => 'default'),
+    hasDiscoveredFeature: vi.fn(() => false),
+    markFeatureDiscovered: vi.fn(),
   }
 })
 

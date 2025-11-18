@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TrackCard from '../TrackCard.jsx'
 import { makeNote } from '../../../test-utils/noteHelpers.js'
@@ -33,6 +33,7 @@ function renderTrackCard(overrides = {}) {
     stockTags: overrides.stockTags ?? [],
     customTags: overrides.customTags ?? [],
     onFilterTag: overrides.onFilterTag ?? vi.fn(),
+    hasDiscoveredTimestamp: overrides.hasDiscoveredTimestamp ?? true,
   }
 
   const user = userEvent.setup()
@@ -159,4 +160,43 @@ describe('TrackCard', () => {
 
     expect(onSaveNote).toHaveBeenCalledWith('track-1')
   })
+
+  it('shows timestamp hint placeholder before discovery', async () => {
+    renderTrackCard({
+      isEditing: true,
+      editingDraft: '',
+      hasDiscoveredTimestamp: false,
+    })
+
+    const textarea = await screen.findByLabelText(/note text/i)
+    expect(textarea).toHaveAttribute(
+      'placeholder',
+      'Tip: Type “:30” or “1:05” to timestamp a moment in your note.',
+    )
+    expect(textarea).toHaveAttribute('aria-describedby', 'note-timestamp-hint-track-1')
+    const srHint = screen.getByText(/You can add a timestamp by typing colon/i)
+    expect(srHint).toHaveClass('sr-only')
+  })
+
+  it('hides timestamp hint once discovery completes or draft has text', async () => {
+    renderTrackCard({
+      isEditing: true,
+      editingDraft: '',
+      hasDiscoveredTimestamp: true,
+    })
+    const textarea = await screen.findByLabelText(/note text/i)
+    expect(textarea).not.toHaveAttribute('placeholder', expect.stringContaining('Tip'))
+    expect(textarea).not.toHaveAttribute('aria-describedby', expect.stringContaining('note-timestamp-hint'))
+
+    cleanup()
+
+    renderTrackCard({
+      isEditing: true,
+      editingDraft: 'Already typing',
+      hasDiscoveredTimestamp: false,
+    })
+    const secondTextarea = await screen.findByLabelText(/note text/i)
+    expect(secondTextarea).not.toHaveAttribute('placeholder', expect.stringContaining('Tip'))
+  })
+
 })

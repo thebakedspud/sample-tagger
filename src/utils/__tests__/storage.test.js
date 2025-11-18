@@ -10,6 +10,8 @@ import {
   saveRecent,
   getFontPreference,
   setFontPreference,
+  hasDiscoveredFeature,
+  markFeatureDiscovered,
   upsertRecent,
 } from '../storage.js';
 import { noteBodies } from '../../test-utils/noteHelpers.js';
@@ -268,6 +270,52 @@ describe('tag helpers', () => {
     removeTag('track-1', '808');
     expect(getTags('track-1')).toEqual([]);
     expect(listAllCustomTags()).toEqual([]);
+  });
+});
+
+describe('ui discovery prefs', () => {
+  beforeEach(() => {
+    globalThis.localStorage = /** @type {Storage} */ (new MemoryStorage());
+  });
+
+  it('seeds timestamp discovery when notes already include timestamps', () => {
+    const existing = {
+      version: 6,
+      theme: 'dark',
+      playlistTitle: 'Seed Test',
+      importedAt: null,
+      lastImportUrl: '',
+      tracks: [],
+      importMeta: {},
+      notesByTrack: {
+        'track-1': [
+          { body: 'note', createdAt: Date.now(), timestampMs: 45000 },
+        ],
+      },
+      tagsByTrack: {},
+      recentPlaylists: [],
+      uiPrefs: { font: 'default' },
+    };
+    globalThis.localStorage.setItem('sta:v6', JSON.stringify(existing));
+
+    const restored = loadAppState();
+    expect(restored?.uiPrefs.discovered?.timestamp).toBe(true);
+  });
+
+  it('marks timestamp discovery via helper', () => {
+    saveAppState({
+      theme: 'dark',
+      playlistTitle: 'Helper Test',
+      tracks: [],
+      importMeta: {},
+      lastImportUrl: '',
+      importedAt: null,
+    });
+    expect(hasDiscoveredFeature('timestamp')).toBe(false);
+    markFeatureDiscovered('timestamp');
+    expect(hasDiscoveredFeature('timestamp')).toBe(true);
+    const stored = loadAppState();
+    expect(stored?.uiPrefs.discovered?.timestamp).toBe(true);
   });
 });
 
