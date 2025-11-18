@@ -1,10 +1,21 @@
-import { forwardRef, memo, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useId,
+} from 'react'
 import NoteList from './NoteList.jsx'
 import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
 import ErrorMessage from '../../components/ErrorMessage.jsx'
 import { focusElement } from '../../utils/focusById.js'
-import { parseTimestampInput } from './noteTimestamps.js'
+
+const FOCUS_ADD_TAG_BUTTON = Symbol('focus-add-tag-button')
+const TIMESTAMP_HINT_TEXT = 'Tip: Type “:30” or “1:05” to timestamp a moment in your note.'
 
 /**
  * @typedef {object} TrackCardProps
@@ -17,7 +28,7 @@ import { parseTimestampInput } from './noteTimestamps.js'
  * @property {string|null} editingError
  * @property {(value: string) => void} onDraftChange
  * @property {(trackId: string|number) => void} onAddNote
- * @property {(trackId: string|number, timestamp?: string) => void} onSaveNote
+ * @property {(trackId: string|number) => void} onSaveNote
  * @property {() => void} onCancelNote
  * @property {(trackId: string|number, noteIndex: number) => void} onDeleteNote
  * @property {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string, tag?: string }} onAddTag
@@ -28,6 +39,7 @@ import { parseTimestampInput } from './noteTimestamps.js'
  * @property {(pendingId: string) => void} onDismissUndo
  * @property {(tag: string) => void} [onFilterTag]
  * @property {import('react').CSSProperties} [style]
+ * @property {boolean} hasDiscoveredTimestamp
  */
 
 /**
@@ -53,7 +65,7 @@ import { parseTimestampInput } from './noteTimestamps.js'
  * @param {string|null} props.editingError
  * @param {(value: string) => void} props.onDraftChange
  * @param {(trackId: string|number) => void} props.onAddNote
- * @param {(trackId: string|number, timestamp?: string) => void} props.onSaveNote
+ * @param {(trackId: string|number) => void} props.onSaveNote
  * @param {() => void} props.onCancelNote
  * @param {(trackId: string|number, noteIndex: number) => void} props.onDeleteNote
  * @param {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string, tag?: string }} props.onAddTag
@@ -88,6 +100,7 @@ const TrackCardComponent = forwardRef(function TrackCard(
     onDismissUndo,
     onFilterTag,
     style,
+    hasDiscoveredTimestamp,
   },
   /** @type {import('react').ForwardedRef<HTMLLIElement>} */ ref,
 ) {
@@ -131,13 +144,35 @@ const TrackCardComponent = forwardRef(function TrackCard(
   const [addingTag, setAddingTag] = useState(false)
   const [pendingFocus, setPendingFocus] = useState(null)
   const [tagError, setTagError] = useState(null)
-  const [timestampInput, setTimestampInput] = useState('')
-  const [timestampError, setTimestampError] = useState('')
   const addTagBtnRef = useRef(null)
   const tagInputRef = useRef(null)
   const chipRefs = useRef(new Map())
+  const timestampHintUniqueId = useId()
+  const timestampHintId = useMemo(() => {
+    if (track?.id !== undefined && track?.id !== null) {
+      return `note-timestamp-hint-${track.id}`
+    }
+    return `note-timestamp-hint-${String(timestampHintUniqueId).replace(/[:]/g, '-')}`
+  }, [timestampHintUniqueId, track?.id])
+  const noteErrorId = `note-error-${track.id}`
 
-  useEffect(() => {
+  const trimmedDraft = draft.trim()
+  const showTimestampHint = isEditing && !hasDiscoveredTimestamp && trimmedDraft === ''
+  const textareaDescribedBy = useMemo(() => {
+    const ids = []
+    if (showTimestampHint) ids.push(timestampHintId)
+    if (error) ids.push(noteErrorId)
+    return ids.length > 0 ? ids.join(' ') : undefined
+  }, [showTimestampHint, error, noteErrorId, timestampHintId])
+
+  const focusAddTagButton = useCallback(() => {
+    const node = addTagBtnRef.current
+    if (!node || typeof node.focus !== 'function') return
+    node.focus()
+    focusElement(node) // schedule fallback to preserve historical behaviour
+  }, [])
+
+  useLayoutEffect(() => {
     const map = chipRefs.current
     if (!map) return
     Array.from(map.keys()).forEach((key) => {
@@ -146,6 +181,11 @@ const TrackCardComponent = forwardRef(function TrackCard(
       }
     })
     if (!pendingFocus) return
+    if (pendingFocus === FOCUS_ADD_TAG_BUTTON) {
+      focusAddTagButton()
+      setPendingFocus(null)
+      return
+    }
     if (typeof pendingFocus === 'string') {
       const node = map.get(pendingFocus)
       if (node) {
@@ -170,30 +210,7 @@ const TrackCardComponent = forwardRef(function TrackCard(
       focusElement(addTagBtnRef.current)
       setPendingFocus(null)
     }
-  }, [tags, pendingFocus])
-
-  useEffect(() => {
-    if (!isEditing) {
-      setTimestampInput('')
-      setTimestampError('')
-    }
-  }, [isEditing])
-
-  const handleTimestampChange = (value) => {
-    setTimestampInput(value)
-    if (timestampError) {
-      setTimestampError('')
-    }
-  }
-
-  const handleSaveWithTimestamp = () => {
-    if (timestampInput.trim() && parseTimestampInput(timestampInput) == null) {
-      setTimestampError('Invalid timestamp format')
-      return
-    }
-    setTimestampError('')
-    onSaveNote(track.id, timestampInput)
-  }
+  }, [tags, pendingFocus, focusAddTagButton])
 
   const registerChipRef = (tag) => (node) => {
     const map = chipRefs.current
@@ -241,10 +258,8 @@ const TrackCardComponent = forwardRef(function TrackCard(
         ? addResult.success !== false
         : Boolean(addResult)
     if (success) {
-      const focusTag =
-        typeof addResult === 'object' && addResult?.tag ? addResult.tag : value
       setAddingTag(false)
-      setPendingFocus(focusTag)
+      setPendingFocus(FOCUS_ADD_TAG_BUTTON)
       setTagError(null)
       return true
     }
@@ -446,7 +461,8 @@ const TrackCardComponent = forwardRef(function TrackCard(
             id={`note-input-${track.id}`}
             rows={3}
             value={draft}
-            aria-describedby={error ? `note-error-${track.id}` : undefined}
+            placeholder={showTimestampHint ? TIMESTAMP_HINT_TEXT : undefined}
+            aria-describedby={textareaDescribedBy}
             onChange={(event) => onDraftChange(event.target.value)}
             style={{
               width: '100%',
@@ -457,44 +473,19 @@ const TrackCardComponent = forwardRef(function TrackCard(
               color: 'var(--fg)',
             }}
           />
-          <div style={{ marginTop: 8 }}>
-            <label
-              htmlFor={`note-ts-${track.id}`}
-              style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: 4 }}
-            >
-              Timestamp (optional)
-            </label>
-            <input
-              id={`note-ts-${track.id}`}
-              placeholder="1:23"
-              value={timestampInput}
-              onChange={(event) => handleTimestampChange(event.target.value)}
-              style={{
-                width: '100%',
-                padding: 8,
-                borderRadius: 6,
-                border: '1px solid var(--border)',
-                background: 'var(--card)',
-                color: 'var(--fg)',
-              }}
-            />
-            <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: 'var(--muted)' }}>
-              Format: mm:ss or hh:mm:ss
+          {showTimestampHint && (
+            <p id={timestampHintId} className="sr-only">
+              You can add a timestamp by typing colon followed by seconds, such as colon-three-zero, or a full time like one-colon-zero-five.
             </p>
-            {timestampError && (
-              <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: '#d9534f' }}>
-                {timestampError}
-              </p>
-            )}
-          </div>
-          <ErrorMessage id={`note-error-${track.id}`}>
+          )}
+          <ErrorMessage id={noteErrorId}>
             {error}
           </ErrorMessage>
           <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
             <button
               type="button"
               className="btn primary"
-              onClick={handleSaveWithTimestamp}
+              onClick={() => onSaveNote(track.id)}
             >
               Save note
             </button>
@@ -511,3 +502,4 @@ const TrackCardComponent = forwardRef(function TrackCard(
 const TrackCard = memo(TrackCardComponent)
 
 export default TrackCard
+

@@ -64,7 +64,7 @@ function resolveVirtualizationPreference(trackCount) {
  * @param {{ editingId: string|number|null, draft: string, error: string|null }} props.editingState
  * @param {(value: string) => void} props.onDraftChange
  * @param {(trackId: string|number) => void} props.onAddNote
- * @param {(trackId: string|number, timestamp?: string) => void} props.onSaveNote
+ * @param {(trackId: string|number) => void} props.onSaveNote
  * @param {() => void} props.onCancelNote
  * @param {(trackId: string|number, noteIndex: number) => void} props.onDeleteNote
  * @param {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string }} props.onAddTag
@@ -84,6 +84,7 @@ function resolveVirtualizationPreference(trackCount) {
  * @param {BackgroundSyncState} [props.initialSyncStatus]
  * @param {BackgroundSyncState} [props.backgroundSync]
  * @param {{ reason: string|null, ts: number }} [props.focusContext]
+ * @param {boolean} props.hasDiscoveredTimestamp
  * @param {boolean} [props.skipFocusManagement] - When true, the filter-aware focus management
  *   effect will not run. This is a one-shot guard used during initial imports to prevent
  *   PlaylistView from interfering with App's focus handoff. Consumers are responsible for
@@ -125,6 +126,7 @@ export default function PlaylistView({
   stockTags,
   customTags,
   announce,
+  hasDiscoveredTimestamp,
   backgroundSync = DEFAULT_BACKGROUND_SYNC,
   focusContext,
   skipFocusManagement = false,
@@ -438,6 +440,7 @@ export default function PlaylistView({
           onDismissUndo={onDismissUndo}
           onFilterTag={handleFilterTag}
           style={options.style}
+          hasDiscoveredTimestamp={hasDiscoveredTimestamp}
         />
       )
     },
@@ -456,6 +459,7 @@ export default function PlaylistView({
       onSaveNote,
       onUndo,
       pendingByTrack,
+      hasDiscoveredTimestamp,
       stockTags,
     ],
   )

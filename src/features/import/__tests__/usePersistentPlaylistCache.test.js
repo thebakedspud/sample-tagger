@@ -19,9 +19,6 @@ describe('usePersistentPlaylistCache', () => {
   beforeEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
-    mockLoad.mockReset()
-    mockPersist.mockReset()
-    mockSortAndTrim.mockReset()
     mockLoad.mockReturnValue([])
     mockSortAndTrim.mockImplementation((entries) => entries)
   })

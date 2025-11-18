@@ -481,11 +481,12 @@ export default function usePlaylistImportFlow() {
    *  - status:      'idle' | 'importing' | 'reimporting' | 'loadingMore'
    *  - errorCode:   adapter/provider error code or null
    *  - loading:     boolean passthrough from underlying adapter hook
-   *  - importInitial(url, opts?): Promise<ImportResult>
-   *  - reimport(url, opts?):      Promise<ImportResult>
-   *  - loadMore(opts?):           Promise<ImportResult>
-   *  - resetFlow():               cancels in-flight work, clears error/status
-   */
+  *  - importInitial(url, opts?): Promise<ImportResult>
+  *  - reimport(url, opts?):      Promise<ImportResult>
+  *  - loadMore(opts?):           Promise<ImportResult>
+  *  - resetFlow():               cancels in-flight work, clears error/status
+   *  - primeUpstreamServices():  warms up providers/server before import
+  */
   return {
     status,
     errorCode,

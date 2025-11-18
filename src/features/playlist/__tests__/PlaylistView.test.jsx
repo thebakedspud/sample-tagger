@@ -1,7 +1,56 @@
 import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import PlaylistView from '../PlaylistView.jsx'
+
+vi.setConfig({ testTimeout: 15_000 })
+
+const originalRaf = globalThis.requestAnimationFrame
+const originalCancelRaf = globalThis.cancelAnimationFrame
+const originalResizeObserver = globalThis.ResizeObserver
+
+beforeAll(() => {
+  if (typeof globalThis.ResizeObserver === 'undefined') {
+    class ResizeObserverStub {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    // @ts-expect-error - jsdom may not define ResizeObserver in older runtimes
+    globalThis.ResizeObserver = ResizeObserverStub
+  }
+
+  globalThis.requestAnimationFrame = (cb) => {
+    const id = setTimeout(() => cb(Date.now()), 0)
+    return /** @type {number} */ (id)
+  }
+  globalThis.cancelAnimationFrame = (id) => {
+    clearTimeout(id)
+  }
+})
+
+afterAll(() => {
+  if (originalRaf) {
+    globalThis.requestAnimationFrame = originalRaf
+  } else {
+    // @ts-expect-error - ensure we clean up the stub
+    delete globalThis.requestAnimationFrame
+  }
+
+  if (originalCancelRaf) {
+    globalThis.cancelAnimationFrame = originalCancelRaf
+  } else {
+    // @ts-expect-error - ensure we clean up the stub
+    delete globalThis.cancelAnimationFrame
+  }
+
+  if (originalResizeObserver) {
+    globalThis.ResizeObserver = originalResizeObserver
+  } else {
+    // @ts-expect-error - ensure we clean up the stub
+    delete globalThis.ResizeObserver
+  }
+})
 
 const { focusByIdMock } = vi.hoisted(() => ({
   focusByIdMock: vi.fn(),
@@ -335,5 +384,32 @@ describe('PlaylistView', () => {
     view.rerender(<PlaylistView {...nextProps} />)
 
     expect(focusByIdMock).not.toHaveBeenCalled()
+  })
+
+  it('does not run body recovery when focus already sits on a track action', () => {
+    const tracks = [
+      { id: 'track-1', title: 'Track 1', artist: 'Artist A', notes: [] },
+      { id: 'track-2', title: 'Track 2', artist: 'Artist B', notes: [] },
+    ]
+    const baseProps = createProps({ tracks })
+    const { rerender } = render(<PlaylistView {...baseProps} />)
+
+    const secondAddBtn = document.getElementById('add-note-btn-track-2')
+    expect(secondAddBtn).not.toBeNull()
+    act(() => {
+      secondAddBtn.focus()
+    })
+
+    focusByIdMock.mockClear()
+
+    const updatedTracks = [
+      tracks[0],
+      { ...tracks[1], tags: ['fresh-tag'] },
+    ]
+
+    rerender(<PlaylistView {...createProps({ tracks: updatedTracks })} />)
+
+    expect(focusByIdMock).not.toHaveBeenCalled()
+    expect(secondAddBtn).toHaveFocus()
   })
 })

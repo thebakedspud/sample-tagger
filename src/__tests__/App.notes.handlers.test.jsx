@@ -43,7 +43,7 @@ vi.mock('../utils/storage.js', () => {
     notesByTrack: {},
     tagsByTrack: {},
     recentPlaylists: [],
-    uiPrefs: { font: 'default' },
+    uiPrefs: { font: 'default', discovered: { timestamp: false } },
   })
   return {
     loadAppState: vi.fn(() => createPersistedState()),
@@ -58,6 +58,8 @@ vi.mock('../utils/storage.js', () => {
     upsertRecent: vi.fn((list = [], item) => [...list, item]),
     getFontPreference: vi.fn(() => 'default'),
     setFontPreference: vi.fn(() => 'default'),
+    hasDiscoveredFeature: vi.fn(() => false),
+    markFeatureDiscovered: vi.fn(),
   }
 })
 
@@ -204,5 +206,39 @@ describe('App Notes Handlers - Integration Tests', () => {
         body: 'This is my test note'
       }),
     })
+  })
+
+  it('extracts inline timestamps on save', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Track One')).toBeInTheDocument()
+    })
+
+    const addNoteBtn = screen.getAllByRole('button', { name: /add note/i })[0]
+    await user.click(addNoteBtn)
+
+    const noteInput = await screen.findByLabelText(/note text/i)
+    await user.type(noteInput, ':45 snare pops')
+
+    const saveBtn = screen.getByRole('button', { name: /save note/i })
+    await user.click(saveBtn)
+
+    await waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith(
+        '/api/db/notes',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            trackId: 't1',
+            body: 'snare pops',
+            timestampMs: 45_000
+          }),
+        }),
+      )
+    })
+
+    expect(await screen.findByText(/\[0:45]/)).toBeInTheDocument()
   })
 })

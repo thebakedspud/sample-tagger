@@ -3,13 +3,14 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { focusById, focusElement } from '../../utils/focusById.js'
 import { playlistActions } from '../playlist/actions.js'
 import { createNoteSnapshot } from '../playlist/helpers.js'
+import { markFeatureDiscovered } from '../../utils/storage.js'
 import {
   usePlaylistDispatch,
   usePlaylistEditingState,
   usePlaylistNotesByTrack,
   usePlaylistTracks,
 } from '../playlist/usePlaylistContext.js'
-import { parseTimestampInput } from '../playlist/noteTimestamps.js'
+import { extractTimestamp } from '../playlist/noteTimestamps.js'
 /** @typedef {import('../../utils/notesTagsData.js').NoteEntry} NoteEntry */
 
 /**
@@ -26,6 +27,7 @@ import { parseTimestampInput } from '../playlist/noteTimestamps.js'
  * @property {(message: string) => void} [announce]
  * @property {(pendingId: string, meta: PendingUndoMeta) => void} [scheduleInlineUndo]
  * @property {(trackId: string, body: string, timestampMs?: number | null) => Promise<void>} [syncNote]
+ * @property {() => void} [onTimestampDiscovered]
  */
 
 const noop = () => {}
@@ -35,7 +37,7 @@ const noop = () => {}
  * @param {UseNoteHandlersOptions} options
  */
 export function useNoteHandlers(options = {}) {
-  const { announce, scheduleInlineUndo, syncNote } = /** @type {UseNoteHandlersOptions} */ (options || {})
+  const { announce, scheduleInlineUndo, syncNote, onTimestampDiscovered } = /** @type {UseNoteHandlersOptions} */ (options || {})
   const dispatch = usePlaylistDispatch()
   const editingState = usePlaylistEditingState()
   const notesByTrack = usePlaylistNotesByTrack()
@@ -53,6 +55,10 @@ export function useNoteHandlers(options = {}) {
   const syncNoteFn = useMemo(
     () => (typeof syncNote === 'function' ? syncNote : null),
     [syncNote],
+  )
+  const timestampDiscoveredFn = useMemo(
+    () => (typeof onTimestampDiscovered === 'function' ? onTimestampDiscovered : noop),
+    [onTimestampDiscovered],
   )
 
   const editingId = editingState?.trackId ?? null
@@ -89,8 +95,9 @@ export function useNoteHandlers(options = {}) {
   )
 
   const onSaveNote = useCallback(
-    async (trackId, timestampInput = '') => {
-      const currentDraft = draft.trim()
+    async (trackId) => {
+      const { timestamp, cleanedBody } = extractTimestamp(draft)
+      const currentDraft = cleanedBody.trim()
       if (!currentDraft) {
         announceFn('Note not saved. The note is empty.')
         dispatch(playlistActions.setEditingError('Note cannot be empty.'))
@@ -98,12 +105,19 @@ export function useNoteHandlers(options = {}) {
       }
 
       const snapshot = createNoteSnapshot(notesByTrack, trackId)
-      const parsedTimestamp = parseTimestampInput(timestampInput)
       const extra = {}
       let timestampMsForSync
-      if (typeof parsedTimestamp === 'number') {
-        extra.timestampMs = parsedTimestamp
-        timestampMsForSync = parsedTimestamp
+      if (timestamp) {
+        extra.timestampMs = timestamp.startMs
+        if (timestamp.kind === 'range') {
+          extra.timestampEndMs = timestamp.endMs
+        }
+        timestampMsForSync = timestamp.startMs
+        // We mark timestamp as "discovered" once a local note has a parsed timestamp.
+        // This is intentionally optimistic; even if remote sync fails, the user has already
+        // seen the feature work in the UI.
+        markFeatureDiscovered('timestamp')
+        timestampDiscoveredFn()
       }
       dispatch(playlistActions.saveNoteOptimistic(trackId, currentDraft, extra))
       announceFn('Note added.')
@@ -125,7 +139,7 @@ export function useNoteHandlers(options = {}) {
         announceFn('Note save failed. Restored previous note list.')
       }
     },
-    [announceFn, dispatch, draft, notesByTrack, syncNoteFn],
+    [announceFn, dispatch, draft, notesByTrack, syncNoteFn, timestampDiscoveredFn],
   )
 
   const onCancelNote = useCallback(() => {

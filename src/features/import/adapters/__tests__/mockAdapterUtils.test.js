@@ -9,7 +9,7 @@ describe('createPagedMockAdapter', () => {
 
   it('returns paginated results with deterministic ids and cursors', async () => {
     const adapter = createPagedMockAdapter({
-      provider: /** @type {any} */ ('test'),
+      provider: 'spotify',
       title: 'Mock Playlist',
       tracks: baseTracks,
       total: 12,
@@ -19,8 +19,8 @@ describe('createPagedMockAdapter', () => {
     const first = await adapter.importPlaylist({ url: 'https://playlist', cursor: null })
     expect(first.tracks).toHaveLength(10)
     expect(first.tracks[0]).toMatchObject({
-      id: 'test-mock-1',
-      providerTrackId: 'test-raw-1',
+      id: 'spotify-mock-1',
+      providerTrackId: 'spotify-raw-1',
       title: 'Intro',
       artist: 'Artist A',
     })
@@ -35,7 +35,7 @@ describe('createPagedMockAdapter', () => {
 
   it('falls back to generated dates and clears non-string cover urls', async () => {
     const adapter = createPagedMockAdapter({
-      provider: /** @type {any} */ ('demo'),
+      provider: 'youtube',
       title: 'Demo Playlist',
       tracks: [{ title: 'Single', artist: 'Demo Artist', dateAdded: 'invalid-date' }],
       total: 1,
@@ -49,14 +49,14 @@ describe('createPagedMockAdapter', () => {
 
   it('treats invalid cursors as the first page and honors abort signals', async () => {
     const adapter = createPagedMockAdapter({
-      provider: /** @type {any} */ ('abort'),
+      provider: 'soundcloud',
       title: 'Abortable Playlist',
       tracks: baseTracks,
       total: 5,
     })
 
     const invalidCursorPage = await adapter.importPlaylist({ cursor: 'not-a-cursor' })
-    expect(invalidCursorPage.tracks[0].id).toBe('abort-mock-1')
+    expect(invalidCursorPage.tracks[0].id).toBe('soundcloud-mock-1')
 
     const controller = new AbortController()
     controller.abort()

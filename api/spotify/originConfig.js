@@ -1,6 +1,8 @@
 // api/spotify/originConfig.js
 // Shared origin allowlist utilities for the Spotify token handler and tests.
 
+import net from 'node:net';
+
 const DEFAULT_ALLOWED_ORIGINS = Object.freeze([
   'http://localhost:5173',
   'https://playlist-notes.vercel.app',
@@ -79,7 +81,20 @@ function normalizeOrigin(origin) {
 function isLoopbackHost(hostname) {
   if (!hostname) return false;
   if (LOOPBACK_HOSTNAMES.includes(hostname)) return true;
-  return hostname.startsWith('127.');
+
+  const ipType = net.isIP(hostname);
+  if (ipType === 4) {
+    // Only treat IPv4 addresses within 127.0.0.0/8 as loopback.
+    const parts = hostname.split('.').map((part) => Number(part));
+    return parts.length === 4 && Number.isInteger(parts[0]) && parts[0] === 127;
+  }
+
+  if (ipType === 6) {
+    // net.isIP ensures canonical form; ::1 already covered above but check anyway.
+    return hostname === '::1';
+  }
+
+  return false;
 }
 
 /**

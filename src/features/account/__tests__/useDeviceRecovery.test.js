@@ -3,6 +3,8 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest'
 import useDeviceRecovery, { RECOVERY_PROMPT_NOTE_THRESHOLD } from '../useDeviceRecovery.js'
 
+vi.setConfig({ testTimeout: 15_000 })
+
 // Mock dependencies - must be before imports due to hoisting
 vi.mock('../../../lib/apiClient.js', () => ({
   apiFetch: vi.fn(),

@@ -37,4 +37,11 @@ describe('NoteList', () => {
     expect(screen.queryByText(/\[/)).toBeNull()
     expect(screen.queryByLabelText(/Note created at/i)).toBeNull()
   })
+
+  it('shows a single pill for timestamp ranges', () => {
+    const note = makeNote('Range note', { timestampMs: 30_000, timestampEndMs: 90_000 })
+    render(<NoteList {...baseProps} notes={[note]} />)
+
+    expect(screen.getByText(/\[0:30–1:30\]/)).toBeInTheDocument()
+  })
 })

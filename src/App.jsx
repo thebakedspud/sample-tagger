@@ -164,6 +164,12 @@ function AppInner({
 
   const reimportBtnRef = useRef(null)
   const loadMoreBtnRef = useRef(null)
+  const [hasDiscoveredTimestamp, setHasDiscoveredTimestamp] = useState(
+    Boolean(persisted?.uiPrefs?.discovered?.timestamp),
+  )
+  const handleTimestampDiscovered = useCallback(() => {
+    setHasDiscoveredTimestamp(true)
+  }, [])
 
   const {
     importUrl,
@@ -390,6 +396,7 @@ function AppInner({
     announce,
     scheduleInlineUndo,
     syncNote,
+    onTimestampDiscovered: handleTimestampDiscovered,
   })
 
   const handleOpenSpotifyLink = useCallback(() => {
@@ -869,8 +876,6 @@ function AppInner({
       <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px', paddingBottom: 128 }}>
         {screen === 'account' ? (
           <AccountView
-            anonId={anonId}
-            deviceId={deviceId}
             recoveryCode={recoveryCode}
             recoveryAcknowledgedAt={recoveryAcknowledgedAt}
             recoveryCopyButtonRef={recoveryCopyButtonRef}
@@ -992,6 +997,7 @@ function AppInner({
               skipFocusManagement={skipPlaylistFocusManagement}
               focusContext={trackFocusContext}
               onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
+              hasDiscoveredTimestamp={hasDiscoveredTimestamp}
             />
             )}
           </>

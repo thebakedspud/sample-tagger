@@ -12,7 +12,11 @@ import { normalizeNotesList } from './notesTagsData.js'
  *
  * @typedef {'default' | 'system' | 'dyslexic'} FontPreference
  *
- * @typedef {{ font: FontPreference }} UiPrefs
+ * @typedef {{ timestamp?: boolean }} DiscoveryPrefs
+ *
+ * @typedef {{ font: FontPreference, discovered?: DiscoveryPrefs }} UiPrefs
+ *
+ * @typedef {'timestamp'} DiscoverableFeature
  *
  * @typedef {Object} ImportMeta
  * @property {'spotify' | 'youtube' | 'soundcloud' | null} [provider]
@@ -79,6 +83,8 @@ const RECENT_FALLBACK_TITLE = 'Untitled playlist';
 const RECENT_DEFAULT_MAX = 8;
 const FONT_PREF_DEFAULT = 'default';
 const FONT_PREF_VALUES = new Set(['default', 'system', 'dyslexic']);
+const DISCOVERABLE_FEATURES = /** @type {const} */ (['timestamp']);
+const DISCOVERABLE_FEATURE_SET = new Set(DISCOVERABLE_FEATURES);
 
 const EMPTY_META = Object.freeze({
   provider: null,
@@ -291,12 +297,47 @@ export function getFontPreference() {
 export function setFontPreference(font) {
   const nextFont = sanitizeFontPreference(font);
   const base = loadAppState() ?? createEmptyState();
+  const currentPrefs = base.uiPrefs ? sanitizeUiPrefs(base.uiPrefs) : sanitizeUiPrefs(null);
   const nextState = {
     ...base,
-    uiPrefs: { font: nextFont },
+    uiPrefs: {
+      ...currentPrefs,
+      font: nextFont,
+    },
   };
   persistState(nextState);
   return nextFont;
+}
+
+/**
+ * @param {DiscoverableFeature} feature
+ * @param {UiPrefs | null | undefined} [prefs]
+ * @returns {boolean}
+ */
+export function hasDiscoveredFeature(feature, prefs) {
+  if (!DISCOVERABLE_FEATURE_SET.has(feature)) return false;
+  const source = prefs ?? loadAppState()?.uiPrefs;
+  if (!source) return false;
+  return hasDiscoveryFlag(source, feature);
+}
+
+/**
+ * Marks a feature as discovered and persists the preference.
+ * @param {DiscoverableFeature} feature
+ * @returns {boolean}
+ */
+export function markFeatureDiscovered(feature) {
+  if (!DISCOVERABLE_FEATURE_SET.has(feature)) return false;
+  const base = loadAppState() ?? createEmptyState();
+  const prefs = base.uiPrefs ? sanitizeUiPrefs(base.uiPrefs) : sanitizeUiPrefs(null);
+  if (hasDiscoveryFlag(prefs, feature)) return true;
+  const nextPrefs = applyDiscoveryFlag(prefs, feature, true);
+  const nextState = {
+    ...base,
+    uiPrefs: nextPrefs,
+  };
+  persistState(nextState);
+  return true;
 }
 
 /**
@@ -370,17 +411,21 @@ function createEmptyState(theme = 'dark') {
  */
 function normalizeState(data) {
   const base = createEmptyState(sanitizeTheme(data?.theme));
+  const tracks = sanitizeTracks(data?.tracks);
+  const notesByTrack = sanitizeNotesMap(data?.notesByTrack, data?.tracks);
+  let uiPrefs = sanitizeUiPrefs(data?.uiPrefs);
+  uiPrefs = seedTimestampDiscovery(uiPrefs, notesByTrack, tracks);
   return {
     ...base,
     playlistTitle: sanitizeTitle(data?.playlistTitle) ?? base.playlistTitle,
     importedAt: typeof data?.importedAt === 'string' ? data.importedAt : base.importedAt,
     lastImportUrl: typeof data?.lastImportUrl === 'string' ? data.lastImportUrl : base.lastImportUrl,
-    tracks: sanitizeTracks(data?.tracks),
+    tracks,
     importMeta: sanitizeImportMeta(data?.importMeta),
-    notesByTrack: sanitizeNotesMap(data?.notesByTrack, data?.tracks),
+    notesByTrack,
     tagsByTrack: sanitizeTagsMap(data?.tagsByTrack, data?.tracks),
     recentPlaylists: sanitizeRecentList(data?.recentPlaylists),
-    uiPrefs: sanitizeUiPrefs(data?.uiPrefs),
+    uiPrefs,
   };
 }
 
@@ -457,10 +502,33 @@ function sanitizeFontPreference(value) {
  * @returns {UiPrefs}
  */
 function sanitizeUiPrefs(prefs) {
-  if (prefs && typeof prefs === 'object') {
-    return { font: sanitizeFontPreference(/** @type {any} */ (prefs).font) };
+  const font = sanitizeFontPreference(prefs && typeof prefs === 'object' ? /** @type {any} */ (prefs).font : FONT_PREF_DEFAULT);
+  const discovered = sanitizeDiscoveredPrefs(
+    prefs && typeof prefs === 'object' ? /** @type {any} */ (prefs).discovered : null,
+  );
+  /** @type {UiPrefs} */
+  const normalized = { font };
+  if (Object.keys(discovered).length > 0) {
+    normalized.discovered = discovered;
   }
-  return { font: FONT_PREF_DEFAULT };
+  return normalized;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {DiscoveryPrefs}
+ */
+function sanitizeDiscoveredPrefs(value) {
+  /** @type {DiscoveryPrefs} */
+  const out = {};
+  if (value && typeof value === 'object') {
+    DISCOVERABLE_FEATURES.forEach((feature) => {
+      if (value && typeof value === 'object' && Boolean(/** @type {any} */ (value)[feature])) {
+        out[feature] = true;
+      }
+    });
+  }
+  return out;
 }
 
 /**
@@ -569,6 +637,69 @@ function sanitizeNotesMap(input, fallbackTracks) {
   }
 
   return out;
+}
+
+function seedTimestampDiscovery(uiPrefs, notesByTrack, tracks) {
+  if (hasDiscoveryFlag(uiPrefs, 'timestamp')) {
+    return uiPrefs;
+  }
+  if (notesMapHasTimestamp(notesByTrack)) {
+    return applyDiscoveryFlag(uiPrefs, 'timestamp', true);
+  }
+  if (Array.isArray(tracks)) {
+    for (const track of tracks) {
+      if (track && Array.isArray(track.notes) && listHasTimestamp(track.notes)) {
+        return applyDiscoveryFlag(uiPrefs, 'timestamp', true);
+      }
+    }
+  }
+  return uiPrefs;
+}
+
+function notesMapHasTimestamp(map) {
+  if (!map || typeof map !== 'object') return false;
+  for (const list of Object.values(map)) {
+    if (listHasTimestamp(list)) return true;
+  }
+  return false;
+}
+
+function listHasTimestamp(list) {
+  if (!Array.isArray(list)) return false;
+  for (const entry of list) {
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      (isFiniteTimestamp(entry.timestampMs) || isFiniteTimestamp(entry.timestampEndMs))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isFiniteTimestamp(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function applyDiscoveryFlag(prefs, feature, value) {
+  const next = {
+    ...prefs,
+    discovered: { ...(prefs.discovered || {}) },
+  };
+  if (value) {
+    next.discovered[feature] = true;
+  } else if (next.discovered) {
+    delete next.discovered[feature];
+  }
+  if (next.discovered && Object.keys(next.discovered).length === 0) {
+    delete next.discovered;
+  }
+  return next;
+}
+
+function hasDiscoveryFlag(prefs, feature) {
+  return Boolean(prefs?.discovered && prefs.discovered[feature]);
 }
 
 /**

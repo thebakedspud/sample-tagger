@@ -21,7 +21,6 @@ const makeEntry = (key, storedAt) => /** @type {import('../playlistCache.js').Pl
 
 describe('playlistCache storage helpers', () => {
   beforeEach(() => {
-    window.localStorage.clear()
     clearPlaylistCacheStorage()
   })
 

@@ -19,6 +19,7 @@ import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from '../features/
  * @property {string} body
  * @property {number} createdAt
  * @property {number | null | undefined} [timestampMs]
+ * @property {number | null | undefined} [timestampEndMs]
  */
 
 /** @typedef {Record<string, NoteEntry[]>} NotesByTrack */
@@ -76,6 +77,11 @@ function normalizeNoteEntry(value, fallbackTs) {
         candidate.timestampMs ?? candidate.timestamp_ms
       ),
     )
+    const timestampEndMs = coerceTimestampMs(
+      /** @type {number | string | null | undefined} */ (
+        candidate.timestampEndMs ?? candidate.timestamp_end_ms
+      ),
+    )
     /** @type {NoteEntry} */
     const entry = {
       body,
@@ -83,6 +89,9 @@ function normalizeNoteEntry(value, fallbackTs) {
     }
     if (timestampMs != null) {
       entry.timestampMs = timestampMs
+      if (typeof timestampEndMs === 'number' && timestampEndMs >= timestampMs) {
+        entry.timestampEndMs = timestampEndMs
+      }
     }
     return entry
   }
@@ -111,11 +120,20 @@ export function cloneNoteEntry(note) {
   const fallback = Date.now()
   const normalized = normalizeNoteEntry(note, fallback)
   if (!normalized) return null
-  return {
+  /** @type {NoteEntry} */
+  const clone = {
     body: normalized.body,
     createdAt: normalized.createdAt,
     ...(normalized.timestampMs != null ? { timestampMs: normalized.timestampMs } : {}),
   }
+  if (
+    normalized.timestampMs != null &&
+    typeof normalized.timestampEndMs === 'number' &&
+    normalized.timestampEndMs >= normalized.timestampMs
+  ) {
+    clone.timestampEndMs = normalized.timestampEndMs
+  }
+  return clone
 }
 
 // ===== SECTION 1: Foundation Utilities =====
@@ -163,6 +181,11 @@ export function normalizeNotesList(value) {
         body: normalized.body,
         createdAt: normalized.createdAt,
         ...(normalized.timestampMs != null ? { timestampMs: normalized.timestampMs } : {}),
+        ...(normalized.timestampMs != null &&
+        typeof normalized.timestampEndMs === 'number' &&
+        normalized.timestampEndMs >= normalized.timestampMs
+          ? { timestampEndMs: normalized.timestampEndMs }
+          : {}),
       });
     }
   });
@@ -377,6 +400,7 @@ export function groupRemoteNotes(rows) {
           body,
           createdAt: row.createdAt ?? row.created_at,
           timestampMs: row.timestampMs ?? row.timestamp_ms,
+          timestampEndMs: row.timestampEndMs ?? row.timestamp_end_ms,
         },
         Date.now(),
       )

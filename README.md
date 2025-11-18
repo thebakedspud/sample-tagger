@@ -63,6 +63,30 @@ This project keeps type safety in plain JavaScript by relying on JSDoc plus the 
 
 The CI workflow runs `check:tsc` on every push/PR; consider adding the overlap check locally to catch duplicate declarations early.
 
+### Example Type Error
+
+Type checking often catches null/undefined paths before they hit runtime. For example, accessing a track before verifying it exists will fail `npm run check:tsc`:
+
+```js
+/** @param {{ tracks?: import('./types.js').NormalizedTrack[] }} playlist */
+function describeFirstTrack(playlist) {
+  return playlist.tracks[0].title.toLowerCase();
+}
+```
+
+```
+Property '0' does not exist on type 'NormalizedTrack[] | undefined'.
+```
+
+Fixing it is as simple as guarding the access:
+
+```js
+function describeFirstTrack(playlist) {
+  const first = playlist.tracks?.[0];
+  return first ? first.title.toLowerCase() : 'No tracks';
+}
+```
+
 ---
 
 ## Running Log
