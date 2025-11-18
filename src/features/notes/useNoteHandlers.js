@@ -9,7 +9,7 @@ import {
   usePlaylistNotesByTrack,
   usePlaylistTracks,
 } from '../playlist/usePlaylistContext.js'
-import { parseTimestampInput } from '../playlist/noteTimestamps.js'
+import { extractTimestamp } from '../playlist/noteTimestamps.js'
 /** @typedef {import('../../utils/notesTagsData.js').NoteEntry} NoteEntry */
 
 /**
@@ -89,8 +89,9 @@ export function useNoteHandlers(options = {}) {
   )
 
   const onSaveNote = useCallback(
-    async (trackId, timestampInput = '') => {
-      const currentDraft = draft.trim()
+    async (trackId) => {
+      const { timestamp, cleanedBody } = extractTimestamp(draft)
+      const currentDraft = cleanedBody.trim()
       if (!currentDraft) {
         announceFn('Note not saved. The note is empty.')
         dispatch(playlistActions.setEditingError('Note cannot be empty.'))
@@ -98,12 +99,14 @@ export function useNoteHandlers(options = {}) {
       }
 
       const snapshot = createNoteSnapshot(notesByTrack, trackId)
-      const parsedTimestamp = parseTimestampInput(timestampInput)
       const extra = {}
       let timestampMsForSync
-      if (typeof parsedTimestamp === 'number') {
-        extra.timestampMs = parsedTimestamp
-        timestampMsForSync = parsedTimestamp
+      if (timestamp) {
+        extra.timestampMs = timestamp.startMs
+        if (timestamp.kind === 'range') {
+          extra.timestampEndMs = timestamp.endMs
+        }
+        timestampMsForSync = timestamp.startMs
       }
       dispatch(playlistActions.saveNoteOptimistic(trackId, currentDraft, extra))
       announceFn('Note added.')

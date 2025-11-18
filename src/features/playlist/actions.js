@@ -55,7 +55,7 @@ export const playlistActions = {
    * Save note optimistically (before API call)
    * @param {string} trackId
    * @param {string} note
-   * @param {{ timestampMs?: number | null }} [extra]
+   * @param {{ timestampMs?: number | null, timestampEndMs?: number | null }} [extra]
    * @returns {Object}
    */
   saveNoteOptimistic(trackId, note, extra = {}) {
@@ -64,8 +64,13 @@ export const playlistActions = {
       throw new Error('Note cannot be empty')
     }
     const payload = { trackId, note: trimmed }
-    if (extra && typeof extra === 'object' && 'timestampMs' in extra) {
-      payload.timestampMs = extra.timestampMs
+    if (extra && typeof extra === 'object') {
+      if ('timestampMs' in extra) {
+        payload.timestampMs = extra.timestampMs
+      }
+      if ('timestampEndMs' in extra) {
+        payload.timestampEndMs = extra.timestampEndMs
+      }
     }
     return { type: 'NOTE_SAVE_OPTIMISTIC', payload }
   },

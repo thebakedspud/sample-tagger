@@ -869,8 +869,6 @@ function AppInner({
       <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px', paddingBottom: 128 }}>
         {screen === 'account' ? (
           <AccountView
-            anonId={anonId}
-            deviceId={deviceId}
             recoveryCode={recoveryCode}
             recoveryAcknowledgedAt={recoveryAcknowledgedAt}
             recoveryCopyButtonRef={recoveryCopyButtonRef}

@@ -79,7 +79,7 @@ export function validateTag(tag, existingTags = [], maxTags = MAX_TAGS_PER_TRACK
  * Create rollback snapshot for note operations
  * @param {Record<string, NoteEntry[]>} notesByTrack
  * @param {string} trackId
- * @returns {{ trackId: string, previousNotes: import('../../utils/notesTagsData.js').NoteEntry[] }}
+ * @returns {{ trackId: string, previousNotes: NoteEntry[] }}
  */
 export function createNoteSnapshot(notesByTrack, trackId) {
   const notes = notesByTrack[trackId]

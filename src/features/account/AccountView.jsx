@@ -37,8 +37,6 @@ function formatTimestamp(timestamp) {
 
 /**
  * @typedef {Object} AccountViewProps
- * @property {string|null} [anonId]
- * @property {string|null} [deviceId]
  * @property {string|null} [recoveryCode]
  * @property {Date|string|null} [recoveryAcknowledgedAt]
  * @property {import('react').RefObject<HTMLButtonElement>} [recoveryCopyButtonRef]
@@ -59,8 +57,6 @@ function formatTimestamp(timestamp) {
  * @param {AccountViewProps} props
  */
 export default function AccountView({
-  anonId: _anonId = null,
-  deviceId: _deviceId = null,
   recoveryCode,
   recoveryAcknowledgedAt,
   recoveryCopyButtonRef,
@@ -75,6 +71,7 @@ export default function AccountView({
   spotifyAccountLabel: _spotifyAccountLabel = '',
   emailLinkingEnabled: _emailLinkingEnabled = false,
   showBackupPrompt = false,
+  // Spotify/email linking props remain for the intentionally hidden cards below.
 }) {
   const [masked, setMasked] = useState(true);
   const autoMaskTimer = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null));

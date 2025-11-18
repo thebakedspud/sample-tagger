@@ -13,7 +13,6 @@ import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
 import ErrorMessage from '../../components/ErrorMessage.jsx'
 import { focusElement } from '../../utils/focusById.js'
-import { parseTimestampInput } from './noteTimestamps.js'
 
 const FOCUS_ADD_TAG_BUTTON = Symbol('focus-add-tag-button')
 
@@ -28,7 +27,7 @@ const FOCUS_ADD_TAG_BUTTON = Symbol('focus-add-tag-button')
  * @property {string|null} editingError
  * @property {(value: string) => void} onDraftChange
  * @property {(trackId: string|number) => void} onAddNote
- * @property {(trackId: string|number, timestamp?: string) => void} onSaveNote
+ * @property {(trackId: string|number) => void} onSaveNote
  * @property {() => void} onCancelNote
  * @property {(trackId: string|number, noteIndex: number) => void} onDeleteNote
  * @property {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string, tag?: string }} onAddTag
@@ -64,7 +63,7 @@ const FOCUS_ADD_TAG_BUTTON = Symbol('focus-add-tag-button')
  * @param {string|null} props.editingError
  * @param {(value: string) => void} props.onDraftChange
  * @param {(trackId: string|number) => void} props.onAddNote
- * @param {(trackId: string|number, timestamp?: string) => void} props.onSaveNote
+ * @param {(trackId: string|number) => void} props.onSaveNote
  * @param {() => void} props.onCancelNote
  * @param {(trackId: string|number, noteIndex: number) => void} props.onDeleteNote
  * @param {(trackId: string|number, tag: string) => boolean | { success: boolean, error?: string, tag?: string }} props.onAddTag
@@ -142,8 +141,6 @@ const TrackCardComponent = forwardRef(function TrackCard(
   const [addingTag, setAddingTag] = useState(false)
   const [pendingFocus, setPendingFocus] = useState(null)
   const [tagError, setTagError] = useState(null)
-  const [timestampInput, setTimestampInput] = useState('')
-  const [timestampError, setTimestampError] = useState('')
   const addTagBtnRef = useRef(null)
   const tagInputRef = useRef(null)
   const chipRefs = useRef(new Map())
@@ -193,30 +190,7 @@ const TrackCardComponent = forwardRef(function TrackCard(
       focusElement(addTagBtnRef.current)
       setPendingFocus(null)
     }
-  }, [tags, pendingFocus])
-
-  useEffect(() => {
-    if (!isEditing) {
-      setTimestampInput('')
-      setTimestampError('')
-    }
-  }, [isEditing])
-
-  const handleTimestampChange = (value) => {
-    setTimestampInput(value)
-    if (timestampError) {
-      setTimestampError('')
-    }
-  }
-
-  const handleSaveWithTimestamp = () => {
-    if (timestampInput.trim() && parseTimestampInput(timestampInput) == null) {
-      setTimestampError('Invalid timestamp format')
-      return
-    }
-    setTimestampError('')
-    onSaveNote(track.id, timestampInput)
-  }
+  }, [tags, pendingFocus, focusAddTagButton])
 
   const registerChipRef = (tag) => (node) => {
     const map = chipRefs.current
@@ -478,36 +452,6 @@ const TrackCardComponent = forwardRef(function TrackCard(
               color: 'var(--fg)',
             }}
           />
-          <div style={{ marginTop: 8 }}>
-            <label
-              htmlFor={`note-ts-${track.id}`}
-              style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: 4 }}
-            >
-              Timestamp (optional)
-            </label>
-            <input
-              id={`note-ts-${track.id}`}
-              placeholder="1:23"
-              value={timestampInput}
-              onChange={(event) => handleTimestampChange(event.target.value)}
-              style={{
-                width: '100%',
-                padding: 8,
-                borderRadius: 6,
-                border: '1px solid var(--border)',
-                background: 'var(--card)',
-                color: 'var(--fg)',
-              }}
-            />
-            <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: 'var(--muted)' }}>
-              Format: mm:ss or hh:mm:ss
-            </p>
-            {timestampError && (
-              <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: '#d9534f' }}>
-                {timestampError}
-              </p>
-            )}
-          </div>
           <ErrorMessage id={`note-error-${track.id}`}>
             {error}
           </ErrorMessage>
@@ -515,7 +459,7 @@ const TrackCardComponent = forwardRef(function TrackCard(
             <button
               type="button"
               className="btn primary"
-              onClick={handleSaveWithTimestamp}
+              onClick={() => onSaveNote(track.id)}
             >
               Save note
             </button>

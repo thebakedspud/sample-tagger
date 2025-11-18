@@ -68,8 +68,12 @@ function createNoteEntry(body, payload = {}) {
     createdAt: Date.now()
   }
   const ts = normalizeTimestampMs(payload.timestampMs)
+  const tsEnd = normalizeTimestampMs(payload.timestampEndMs)
   if (ts != null) {
     entry.timestampMs = ts
+    if (tsEnd != null && tsEnd >= ts) {
+      entry.timestampEndMs = tsEnd
+    }
   }
   return entry
 }

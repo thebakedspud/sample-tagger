@@ -3,8 +3,8 @@
 /**
  * Build a deterministic note entry for tests
  * @param {string} body
- * @param {{ createdAt?: number, timestampMs?: number | null }} [overrides]
- * @returns {{ body: string, createdAt: number, timestampMs?: number | null }}
+ * @param {{ createdAt?: number, timestampMs?: number | null, timestampEndMs?: number | null }} [overrides]
+ * @returns {{ body: string, createdAt: number, timestampMs?: number | null, timestampEndMs?: number | null }}
  */
 export function makeNote(body, overrides = {}) {
   const createdAt =
@@ -21,6 +21,14 @@ export function makeNote(body, overrides = {}) {
       note.timestampMs = Math.trunc(value)
     } else if (value == null) {
       note.timestampMs = null
+    }
+  }
+  if ('timestampEndMs' in overrides) {
+    const value = overrides.timestampEndMs
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      note.timestampEndMs = Math.trunc(value)
+    } else if (value == null) {
+      note.timestampEndMs = null
     }
   }
   return note
@@ -41,4 +49,3 @@ export function noteBodies(notes) {
     })
     .filter(Boolean)
 }
-

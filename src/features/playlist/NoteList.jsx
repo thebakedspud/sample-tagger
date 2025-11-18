@@ -1,6 +1,6 @@
 import UndoPlaceholder from '../../components/UndoPlaceholder.jsx'
 import { getNoteBody } from '../../utils/notesTagsData.js'
-import { formatNoteCreatedAt, formatTimestampMs } from './noteTimestamps.js'
+import { formatNoteCreatedAt, formatTimestampMs, formatTimestampRange } from './noteTimestamps.js'
 
 /**
  * @param {object} props
@@ -57,7 +57,16 @@ export default function NoteList({
       const note = notes[idx]
       const body = getNoteBody(note)
       const createdAtLabel = formatNoteCreatedAt(note?.createdAt)
-      const timestampLabel = formatTimestampMs(note?.timestampMs)
+      let timestampLabel = null
+      if (
+        typeof note?.timestampMs === 'number' &&
+        typeof note?.timestampEndMs === 'number' &&
+        note.timestampEndMs >= note.timestampMs
+      ) {
+        timestampLabel = formatTimestampRange(note.timestampMs, note.timestampEndMs)
+      } else {
+        timestampLabel = formatTimestampMs(note?.timestampMs)
+      }
       rows.push(
         <li
           key={`n-${trackId}-${idx}`}
