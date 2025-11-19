@@ -3,13 +3,19 @@ import detectProvider from './detectProvider.js';
 import usePlaylistImportFlow, { ImportFlowStatus } from './usePlaylistImportFlow.js';
 import { extractErrorCode, CODES } from './adapters/types.js';
 import { ERROR_MAP } from './errors.js';
-import { ensureNotesEntries, ensureTagsEntries } from '../../utils/notesTagsData.js';
+import {
+  ensureNotesEntries,
+  ensureTagsEntries,
+  groupRemoteNotes,
+} from '../../utils/notesTagsData.js';
 import { EMPTY_IMPORT_META } from '../../utils/storageBootstrap.js';
 import { normalizeTimestamp } from '../../utils/trackProcessing.js';
 import { playlistActions } from '../playlist/actions.js';
 import { focusById, focusElement } from '../../utils/focusById.js';
 import { debugFocus } from '../../utils/debug.js';
 import usePersistentPlaylistCache from './usePersistentPlaylistCache.js';
+import { apiFetch } from '../../lib/apiClient.js';
+import { derivePlaylistIdentity } from './playlistIdentity.js';
 
 const REFRESHING_FROM_CACHE_ANNOUNCEMENT = 'Showing saved playlist while refreshing the latest data.';
 
@@ -89,6 +95,7 @@ function computePayloadTotal(payload) {
  * @property {'idle' | 'importing' | 'reimporting' | 'loadingMore'} importStatus
  * @property {() => Promise<void>} primeUpstreamServices
  * @property {boolean} isRefreshingCachedData
+ * @property {CachedViewInfo | null} cachedViewInfo
  */
 
 /**
@@ -161,10 +168,7 @@ export default function usePlaylistImportController({
     [initialImportMeta],
   );
 
-  const {
-    getCachedResult,
-    rememberCachedResult,
-  } = usePersistentPlaylistCache();
+  const { getCachedResult, rememberCachedResult } = usePersistentPlaylistCache();
 
   const [importUrl, setImportUrl] = useState('');
   const providerChip = useMemo(() => detectProvider(importUrl || ''), [importUrl]);
@@ -180,21 +184,52 @@ export default function usePlaylistImportController({
     resolveInitialBackgroundState(baseImportMeta, initialPersistedTrackCount),
   );
   const [isRefreshingCachedData, setIsRefreshingCachedData] = useState(false);
+  const [cachedViewInfo, setCachedViewInfo] = useState(null);
 
   const rememberResultInCache = useCallback(
-    (sourceUrl, payload) => {
+    (payload, options = {}) => {
       if (!payload) return;
-      const incomingKey = normalizeSourceKey(sourceUrl ?? '');
-      const metaKey = normalizeSourceKey(payload?.meta?.sourceUrl ?? '');
-      if (incomingKey) {
-        rememberCachedResult(incomingKey, payload);
-      }
-      if (metaKey && metaKey !== incomingKey) {
-        rememberCachedResult(metaKey, payload);
-      }
+      const primarySource = normalizeSourceKey(
+        options.sourceUrl ?? payload?.meta?.sourceUrl ?? '',
+      );
+      const identity = derivePlaylistIdentity(payload?.meta, primarySource);
+      const canonicalKey = identity?.key ?? (primarySource || null);
+      const aliasSet = new Set(
+        [
+          primarySource,
+          normalizeSourceKey(payload?.meta?.sourceUrl ?? ''),
+          ...(Array.isArray(options.aliases) ? options.aliases.map(normalizeSourceKey) : []),
+        ].filter(Boolean),
+      );
+      if (!canonicalKey) return;
+      aliasSet.delete(canonicalKey);
+      rememberCachedResult(canonicalKey, payload, { aliases: Array.from(aliasSet) });
     },
     [rememberCachedResult],
   );
+
+  const syncAnnotations = useCallback(async () => {
+    try {
+      const response = await apiFetch('/api/db/notes');
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `Failed to sync notes (${response.status})`);
+      }
+      const { notes: remoteNotes, tags: remoteTags } = groupRemoteNotes(
+        Array.isArray(payload?.notes) ? payload.notes : [],
+      );
+      if (
+        Object.keys(remoteNotes).length === 0 &&
+        Object.keys(remoteTags).length === 0
+      ) {
+        return;
+      }
+      dispatch(playlistActions.mergeRemoteData(remoteNotes, remoteTags));
+    } catch (err) {
+      console.error('[annotation sync] failed', err);
+      throw err;
+    }
+  }, [dispatch]);
 
   const {
     status: importStatus,
@@ -463,6 +498,7 @@ export default function usePlaylistImportController({
           importedAt: importedAtMs ?? undefined,
           lastUsedAt: recents.lastUsedAt,
           pinned: recents.pinned,
+          lastRefreshedAt: recents.lastRefreshedAt,
         });
       }
 
@@ -482,7 +518,7 @@ export default function usePlaylistImportController({
       });
 
       const cacheSource = sourceUrl ?? meta?.sourceUrl ?? '';
-      rememberResultInCache(cacheSource, payload);
+      rememberResultInCache(payload, { sourceUrl: cacheSource });
 
       return { trackCount, title: resolvedTitle };
     },
@@ -527,8 +563,12 @@ export default function usePlaylistImportController({
         return null;
       }
       const total = computePayloadTotal(payload);
-      const { recents: recentsOverrides, announceMessage: announceOverride, focusBehavior: focusOverride } =
-        options || {};
+      const {
+        recents: recentsOverrides,
+        announceMessage: announceOverride,
+        focusBehavior: focusOverride,
+        viewSource = 'manual',
+      } = options || {};
       const shouldSkipRecents = recentsOverrides === null;
       const mergedRecents = shouldSkipRecents
         ? null
@@ -538,6 +578,7 @@ export default function usePlaylistImportController({
             coverUrl: payload?.coverUrl ?? recentsOverrides?.coverUrl ?? null,
             lastUsedAt: recentsOverrides?.lastUsedAt ?? Date.now(),
             pinned: recentsOverrides?.pinned,
+            lastRefreshedAt: recentsOverrides?.lastRefreshedAt ?? null,
           };
 
       applyImportResult(payload, {
@@ -545,6 +586,23 @@ export default function usePlaylistImportController({
         announceMessage: announceOverride ?? REFRESHING_FROM_CACHE_ANNOUNCEMENT,
         ...(focusOverride ? { focusBehavior: focusOverride } : {}),
         recents: mergedRecents,
+      });
+
+      const resolvedCount =
+        typeof total === 'number'
+          ? total
+          : Array.isArray(payload?.tracks)
+            ? payload.tracks.length
+            : null;
+      const cachedImportedAt = normalizeTimestamp(
+        payload?.importedAt ?? recentsOverrides?.importedAt ?? null,
+      );
+      const cachedRefreshedAt = normalizeTimestamp(recentsOverrides?.lastRefreshedAt ?? null);
+      setCachedViewInfo({
+        trackCount: resolvedCount,
+        importedAt: cachedImportedAt ?? null,
+        lastRefreshedAt: cachedRefreshedAt ?? null,
+        source: viewSource === 'recent' ? 'recent' : viewSource === 'import' ? 'import' : 'manual',
       });
 
       return { data: payload };
@@ -611,8 +669,10 @@ export default function usePlaylistImportController({
                   ? result.data.tracks.length
                   : null,
             coverUrl: result.data?.coverUrl ?? null,
+            lastRefreshedAt: Date.now(),
           },
         });
+        setCachedViewInfo(null);
       } catch (err) {
         if (err?.name === 'AbortError') return;
         const code = extractErrorCode(err);
@@ -676,7 +736,7 @@ export default function usePlaylistImportController({
       setImportUrl(trimmedUrl);
       setImportError(null);
       updateRecentCardState(recent.id, { loading: true, error: null });
-      announce(`Loading playlist ${recent.title ? `"${recent.title}"` : ''}.`);
+      announce(`Loading playlist ${recent.title ? `"${recent.title}"` : ''} from your saved copy.`);
       const cachedEntry = hydrateFromCache(trimmedUrl, {
         focusBehavior: 'heading',
         announceMessage: REFRESHING_FROM_CACHE_ANNOUNCEMENT,
@@ -684,13 +744,29 @@ export default function usePlaylistImportController({
           coverUrl: recent.coverUrl ?? null,
           pinned: Boolean(recent.pinned),
           lastUsedAt: Date.now(),
+          importedAt: recent.importedAt ?? null,
+          total: typeof recent.total === 'number' ? recent.total : null,
+          lastRefreshedAt: recent.lastRefreshedAt ?? null,
         },
+        viewSource: 'recent',
       });
-      const hydratedFromCache = Boolean(cachedEntry);
-      if (hydratedFromCache) {
+
+      if (cachedEntry) {
+        updateRecentCardState(recent.id, null);
         setIsRefreshingCachedData(true);
+        try {
+          await syncAnnotations();
+        } catch (_err) {
+          announce("Couldn't sync latest notes (check connection)");
+        } finally {
+          setIsRefreshingCachedData(false);
+        }
+        return { ok: true };
       }
 
+      // Cache miss: fall back to live import
+      setIsRefreshingCachedData(true);
+      announce('Saved copy unavailable. Fetching latest playlist data.');
       try {
         const result = await importInitial(trimmedUrl, {
           providerHint: recent.provider,
@@ -725,8 +801,10 @@ export default function usePlaylistImportController({
                   : null,
             coverUrl: result.data?.coverUrl ?? recent.coverUrl ?? null,
             lastUsedAt: Date.now(),
+            lastRefreshedAt: Date.now(),
           },
         });
+        setCachedViewInfo(null);
         updateRecentCardState(recent.id, null);
         return { ok: true };
       } catch (err) {
@@ -742,9 +820,7 @@ export default function usePlaylistImportController({
         announce(msg);
         return { ok: false, error: msg };
       } finally {
-        if (hydratedFromCache) {
-          setIsRefreshingCachedData(false);
-        }
+        setIsRefreshingCachedData(false);
       }
     },
     [
@@ -756,8 +832,10 @@ export default function usePlaylistImportController({
       importStatus,
       msgFromCode,
       setImportError,
+      setCachedViewInfo,
       setIsRefreshingCachedData,
       setImportUrl,
+      syncAnnotations,
       updateRecentCardState,
     ],
   );
@@ -811,9 +889,11 @@ export default function usePlaylistImportController({
           total: resolvedTotal,
           coverUrl: result.data?.coverUrl ?? null,
           lastUsedAt: Date.now(),
+          lastRefreshedAt: Date.now(),
         },
         updateLastImportUrl: false,
       });
+      setCachedViewInfo(null);
       if (wasActive) focusElement(reimportBtnRef.current);
     } catch (err) {
       if (err?.name === 'AbortError') {
@@ -838,6 +918,7 @@ export default function usePlaylistImportController({
     importMeta,
     lastImportUrl,
     playlistTitle,
+    setCachedViewInfo,
     setIsRefreshingCachedData,
     msgFromCode,
     reimportBtnRef,
@@ -1290,5 +1371,9 @@ export default function usePlaylistImportController({
     importStatus,
     primeUpstreamServices,
     isRefreshingCachedData,
+    cachedViewInfo,
   };
 }
+/**
+ * @typedef {{ trackCount: number|null, importedAt: number|null, lastRefreshedAt: number|null, source: 'import' | 'recent' | 'manual' }} CachedViewInfo
+ */

@@ -84,7 +84,7 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 | Handler | Purpose | Location |
 |---------|---------|----------|
 | `handleImport(e)` | Submits the import form, normalises the payload, persists state, updates recents, and restores focus. | `usePlaylistImportController.js` |
-| `handleSelectRecent(recent)` | Loads a playlist from the recents carousel with the same orchestration pipeline as the initial import. | `usePlaylistImportController.js` |
+| `handleSelectRecent(recent)` | Hydrates the cached playlist from Recents, kicks off lightweight annotation sync, and only re-imports if the cache is missing. | `usePlaylistImportController.js` |
 | `handleReimport()` | Reuses the stored URL/meta with `reimportPlaylist`, refreshes tracks/recents, and preserves button focus on completion. | `usePlaylistImportController.js` |
 | `handleLoadMore()` | Invokes `loadMore`, dedupes new pages, updates derived state, and manages manual/background focus flows. | `usePlaylistImportController.js` |
 | `onAddNote / onSaveNote / onDeleteNote` | Dispatch actions via `playlistActions` to manage per-track note drafts, update provider state, and schedule inline undo metadata. | `App.jsx` |
@@ -94,6 +94,20 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 | `handleRestoreNotesRequest()` | Opens the hidden file input and merges imported notes into the current session. | `App.jsx` |
 | `handleClearAll()` | Clears storage, resets device identifiers, wipes in-memory state. Bootstrap is handled automatically by useDeviceRecovery hook. | `App.jsx` |
 | `handleBackToLanding()` | Returns to the landing screen and focuses the URL field for a fresh import. | `App.jsx` |
+
+### Import Flow Matrix
+
+| User Action | Track Data Source | Notes/Tags Source | Cache Updated? | Default Focus Target |
+|-------------|------------------|-------------------|----------------|----------------------|
+| New URL import | Network adapter (`importInitial`) | Included in adapter result | ✅ Yes (canonical key + aliases) | First track’s “Add note” button |
+| Recent playlist click | Local cache (`hydrateFromCache`) | Background sync via `/api/db/notes` | ❌ No (read-only) | Playlist heading |
+| Reimport button | Network adapter (`reimportPlaylist`) | Included in adapter result | ✅ Yes + updates `lastRefreshedAt` | Reimport button |
+| Load more | Network adapter (`loadMore`) | Appends to existing notes/tags map | ✅ Yes (append only) | First newly added track |
+
+**Key behaviors**
+- Cache keys follow `${provider}:${playlistId}` while alias lookups cover URL variants.
+- Cache-miss when selecting a recent playlist automatically falls back to the “New URL import” flow.
+- Annotation sync failures are logged but currently silent (UI continues showing cached notes).
 
 ## Import Controller Hook (`src/features/import/usePlaylistImportController.js`)
 
@@ -121,6 +135,13 @@ Hook consumers (currently `AppInner`) simply destructure the API and wire it int
 | `helpers.js` | Pure helper functions for state computations (`computeHasLocalNotes`, `validateTag`, etc.). |
 | `usePlaylistContext.js` | Consumer hooks (`usePlaylistDispatch`, `usePlaylistTracks`, `usePlaylistNotesByTrack`, etc.) with error guards. |
 | `contexts.js` | Context definitions (`PlaylistStateContext`, `PlaylistDispatchContext`, `PlaylistSyncContext`). |
+
+### Multi-device note syncing
+
+- **Notes** are local-first: remote notes only merge if the local entry is empty. If two devices both have local notes for the same track, they will not auto-merge—users must explicitly reimport to pull the latest server snapshot.
+- **Tags** are remote-first: the server is canonical and always overwrites local tag lists when remote data is fetched.
+
+This strategy avoids duplicate notes without maintaining per-note timestamps. Future refinements (timestamp conflict resolution or additive merge) can be layered on later.
 
 ## Device & Recovery Handlers (from `useDeviceRecovery` hook)
 

@@ -10,6 +10,16 @@ const reimportMock = vi.hoisted(() => vi.fn());
 const loadMoreMock = vi.hoisted(() => vi.fn());
 const resetFlowMock = vi.hoisted(() => vi.fn());
 const primeUpstreamServicesMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const apiFetchMock = vi.hoisted(() =>
+  vi.fn(() =>
+    Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ notes: [] }),
+      headers: { get: () => null },
+    }),
+  ),
+);
 
 const createDeferred = () => {
   /** @type {(value: any) => void} */
@@ -51,6 +61,10 @@ vi.mock('../usePlaylistImportFlow.js', () => ({
 const focusByIdMock = vi.fn();
 vi.mock('../../utils/focusById.js', () => ({
   focusById: focusByIdMock,
+}));
+
+vi.mock('../../../lib/apiClient.js', () => ({
+  apiFetch: apiFetchMock,
 }));
 
 vi.mock('../../utils/debug.js', () => ({
@@ -145,9 +159,16 @@ beforeEach(() => {
   cacheApi.getCachedResult.mockImplementation((key) =>
     key ? cacheStore.map.get(key) ?? null : null,
   );
-  cacheApi.rememberCachedResult.mockImplementation((key, payload) => {
+  cacheApi.rememberCachedResult.mockImplementation((key, payload, options = {}) => {
     if (!key) return;
     cacheStore.map.set(key.trim(), payload);
+    if (options?.aliases && Array.isArray(options.aliases)) {
+      options.aliases.forEach((alias) => {
+        if (typeof alias === 'string' && alias.trim()) {
+          cacheStore.map.set(alias.trim(), payload);
+        }
+      });
+    }
   });
   importFlowState.status = 'idle';
   importFlowState.loading = false;
@@ -157,6 +178,7 @@ beforeEach(() => {
   loadMoreMock.mockReset();
   resetFlowMock.mockReset();
   primeUpstreamServicesMock.mockClear();
+  apiFetchMock.mockClear();
   focusByIdMock.mockReset();
   rafSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
     if (typeof cb === 'function') {
@@ -250,6 +272,34 @@ describe('usePlaylistImportController', () => {
       loading: false,
     });
     expect(importInitialMock).not.toHaveBeenCalled();
+  });
+
+  it('hydrates a recent playlist from cache without re-importing', async () => {
+    const deps = createDeps();
+    const cachedPayload = {
+      tracks: [{ id: 'track-1', notes: [], tags: [] }],
+      meta: { provider: 'spotify', playlistId: 'playlist-xyz', snapshotId: 'snap-1', hasMore: false },
+      importedAt: '2024-01-05T00:00:00.000Z',
+    };
+    cacheStore.map.set('spotify:playlist-xyz', cachedPayload);
+    cacheStore.map.set('https://open.spotify.com/playlist/xyz', cachedPayload);
+
+    const { result } = renderHook(() => usePlaylistImportController(deps));
+    let outcome;
+    await act(async () => {
+      outcome = await result.current.handleSelectRecent({
+        id: 'recent-1',
+        sourceUrl: 'https://open.spotify.com/playlist/xyz',
+        provider: 'spotify',
+        playlistId: 'playlist-xyz',
+        title: 'Saved Playlist',
+      });
+    });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(importInitialMock).not.toHaveBeenCalled();
+    expect(deps.updateRecentCardState).toHaveBeenCalledWith('recent-1', null);
+    expect(apiFetchMock).toHaveBeenCalled();
   });
 
   it('loads more tracks manually and announces result', async () => {
@@ -448,17 +498,6 @@ describe('usePlaylistImportController', () => {
       },
       title: 'Cached Playlist',
     };
-    const refreshedPayload = {
-      tracks: [{ id: 'track-2', title: 'New Track', artist: 'Artist B' }],
-      meta: {
-        provider: 'spotify',
-        playlistId: 'playlist-123',
-        cursor: null,
-        hasMore: false,
-        sourceUrl: spotifyUrl,
-      },
-      title: 'Refreshed Playlist',
-    };
     importInitialMock.mockResolvedValueOnce({ ok: true, data: cachedPayload });
 
     const { result } = renderHook(() => usePlaylistImportController(deps));
@@ -471,8 +510,6 @@ describe('usePlaylistImportController', () => {
 
     deps.setPlaylistTitle.mockClear();
     deps.announce.mockClear();
-    const deferred = createDeferred();
-    importInitialMock.mockImplementationOnce(() => deferred.promise);
     const recent = {
       id: 'recent-1',
       sourceUrl: spotifyUrl,
@@ -482,18 +519,83 @@ describe('usePlaylistImportController', () => {
     };
 
     await act(async () => {
-      const pending = result.current.handleSelectRecent(recent);
-      await Promise.resolve();
-      expect(deps.setPlaylistTitle).toHaveBeenCalledWith('Cached Playlist');
-      expect(deps.announce).toHaveBeenCalledWith(
-        expect.stringContaining('Showing saved playlist while refreshing'),
-      );
-      deferred.resolve({ ok: true, data: refreshedPayload });
-      await pending;
+      await result.current.handleSelectRecent(recent);
     });
 
     expect(result.current.isRefreshingCachedData).toBe(false);
-    expect(deps.setPlaylistTitle).toHaveBeenLastCalledWith('Refreshed Playlist');
+    expect(deps.setPlaylistTitle).toHaveBeenLastCalledWith('Cached Playlist');
+    expect(importInitialMock).toHaveBeenCalledTimes(1);
+    expect(apiFetchMock).toHaveBeenCalled();
+  });
+
+  it('falls back to live import when cache is missing', async () => {
+    const deps = createDeps();
+    const spotifyUrl = 'https://open.spotify.com/playlist/xyz';
+    const recent = {
+      id: 'recent-1',
+      sourceUrl: spotifyUrl,
+      provider: 'spotify',
+      title: 'Missing cache',
+    };
+    importInitialMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        tracks: [{ id: 'track-1', notes: [], tags: [] }],
+        meta: { provider: 'spotify', playlistId: 'playlist-123', hasMore: false },
+      },
+    });
+
+    const { result } = renderHook(() => usePlaylistImportController(deps));
+    await act(async () => {
+      await result.current.handleSelectRecent(recent);
+    });
+
+    expect(importInitialMock).toHaveBeenCalled();
+    expect(deps.announce).toHaveBeenCalledWith(
+      expect.stringContaining('Saved copy unavailable'),
+    );
+  });
+
+  it('syncs annotations after loading a recent playlist from cache', async () => {
+    const deps = createDeps();
+    const spotifyUrl = 'https://open.spotify.com/playlist/xyz';
+    const cachedPayload = {
+      tracks: [{ id: 'track-1', title: 'Cached Track', artist: 'Artist A' }],
+      meta: {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: null,
+        hasMore: false,
+        sourceUrl: spotifyUrl,
+      },
+      title: 'Cached Playlist',
+    };
+    cacheStore.map.set('spotify:playlist-123', cachedPayload);
+    cacheStore.map.set(spotifyUrl.trim(), cachedPayload);
+    apiFetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        notes: [{ trackId: 'track-1', body: 'Server note' }],
+      }),
+      headers: { get: () => null },
+    });
+
+    const { result } = renderHook(() => usePlaylistImportController(deps));
+    const recent = {
+      id: 'recent-1',
+      sourceUrl: spotifyUrl,
+      provider: 'spotify',
+      title: 'Recent Playlist',
+    };
+    await act(async () => {
+      await result.current.handleSelectRecent(recent);
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/db/notes');
+    expect(deps.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'REMOTE_DATA_MERGE' }),
+    );
   });
 
   it('reuses cached data when reimporting while refreshing in the background', async () => {

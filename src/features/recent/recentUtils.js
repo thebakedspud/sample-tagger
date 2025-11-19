@@ -33,6 +33,7 @@ import { normalizeTimestamp } from '../../utils/trackProcessing.js'
  * @param {number} [options.total] - Total track count
  * @param {string} [options.coverUrl] - Cover image URL
  * @param {boolean} [options.pinned] - Whether playlist is pinned
+ * @param {number | Date | string} [options.lastRefreshedAt] - Timestamp of last manual refresh
  *
  * @returns {object | null} Partial recent playlist candidate object, or null if validation fails
  *
@@ -100,6 +101,10 @@ export function createRecentCandidate(meta, options = {}) {
   }
   if (options.pinned) {
     next.pinned = true
+  }
+  const lastRefreshedAt = normalizeTimestamp(options.lastRefreshedAt)
+  if (lastRefreshedAt != null) {
+    next.lastRefreshedAt = lastRefreshedAt
   }
 
   return next

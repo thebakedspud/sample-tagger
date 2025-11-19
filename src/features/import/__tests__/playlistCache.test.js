@@ -17,6 +17,7 @@ const makeEntry = (key, storedAt) => /** @type {import('../playlistCache.js').Pl
       meta: { provider: 'spotify', playlistId: key, snapshotId: 'snap-1', cursor: '0', hasMore: false, sourceUrl: 'https://example.com', total: 1 },
     },
   },
+  aliases: [`alias-${key}`],
 })
 
 describe('playlistCache storage helpers', () => {
@@ -45,5 +46,6 @@ describe('playlistCache storage helpers', () => {
     expect(loaded[0].key).toBe('alpha')
     expect(loaded[1].key).toBe('beta')
     expect(loaded[0].data.data.meta.playlistId).toBe('alpha')
+    expect(loaded[0].aliases).toEqual(['alias-alpha'])
   })
 })

@@ -191,6 +191,7 @@ function AppInner({
     backgroundSync,
     resetImportFlow,
     isRefreshingCachedData,
+    cachedViewInfo,
   } = usePlaylistImportController({
     dispatch,
     announce,
@@ -998,6 +999,7 @@ function AppInner({
               focusContext={trackFocusContext}
               onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
               hasDiscoveredTimestamp={hasDiscoveredTimestamp}
+              cachedViewInfo={cachedViewInfo}
             />
             )}
           </>

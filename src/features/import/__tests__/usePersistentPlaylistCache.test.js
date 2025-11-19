@@ -29,7 +29,7 @@ describe('usePersistentPlaylistCache', () => {
       meta: { provider: 'spotify', playlistId: 'p1', cursor: null },
     }
     mockLoad.mockReturnValue([
-      { key: 'cached-key', storedAt: 123, data: payload },
+      { key: 'cached-key', storedAt: 123, data: payload, aliases: ['alias-key'] },
     ])
 
     const { result } = renderHook(() => usePersistentPlaylistCache())
@@ -38,6 +38,8 @@ describe('usePersistentPlaylistCache', () => {
 
     const fromCache = result.current.getCachedResult('cached-key')
     expect(fromCache).toEqual(payload)
+    const fromAlias = result.current.getCachedResult('alias-key')
+    expect(fromAlias).toEqual(payload)
     expect(mockLoad).toHaveBeenCalledTimes(1)
   })
 
@@ -52,7 +54,9 @@ describe('usePersistentPlaylistCache', () => {
     }
 
     await act(async () => {
-      result.current.rememberCachedResult(' foo ', payload)
+      result.current.rememberCachedResult(' foo ', payload, {
+        aliases: ['https://example.com/foo '],
+      })
     })
 
     expect(mockSortAndTrim).toHaveBeenCalled()
@@ -60,7 +64,7 @@ describe('usePersistentPlaylistCache', () => {
     const [persistArg] = mockPersist.mock.calls.at(-1)
     expect(persistArg).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ key: 'foo', data: payload }),
+        expect.objectContaining({ key: 'foo', data: payload, aliases: ['https://example.com/foo'] }),
       ]),
     )
     nowSpy.mockRestore()
@@ -76,5 +80,30 @@ describe('usePersistentPlaylistCache', () => {
     })
 
     expect(mockPersist).toHaveBeenCalledWith([])
+  })
+
+  it('tracks alias lookups without duplicating entries', async () => {
+    const payload = {
+      meta: { provider: 'spotify', playlistId: 'p3' },
+    }
+    const { result } = renderHook(() => usePersistentPlaylistCache())
+    await waitFor(() => expect(result.current.isHydrating).toBe(false))
+    await act(async () => {
+      result.current.rememberCachedResult('spotify:p3', payload, {
+        aliases: ['https://open.spotify.com/playlist/p3'],
+      })
+    })
+    const aliasHit = result.current.getCachedResult('https://open.spotify.com/playlist/p3')
+    expect(aliasHit).toEqual(payload)
+
+    expect(mockPersist).toHaveBeenCalled()
+    const [persistArg] = mockPersist.mock.calls.at(-1)
+    expect(persistArg).toHaveLength(1)
+    expect(persistArg[0]).toEqual(
+      expect.objectContaining({
+        key: 'spotify:p3',
+        aliases: ['https://open.spotify.com/playlist/p3'],
+      }),
+    )
   })
 })

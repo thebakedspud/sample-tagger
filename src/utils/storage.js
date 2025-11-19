@@ -58,6 +58,7 @@ import { normalizeNotesList } from './notesTagsData.js'
  * @property {string=} coverUrl
  * @property {number=} total
  * @property {boolean=} pinned
+ * @property {number=} lastRefreshedAt
  *
  * @typedef {Object} PersistedState
  * @property {number} version
@@ -776,6 +777,7 @@ function normalizeRecentItem(entry) {
   const coverUrl = safeString(/** @type {any} */ (entry).coverUrl);
   const total = normalizeTrackTotal(/** @type {any} */ (entry).total);
   const pinned = Boolean(/** @type {any} */ (entry).pinned);
+  const lastRefreshedAt = coerceTimestamp(/** @type {any} */ (entry).lastRefreshedAt);
 
   /** @type {RecentPlaylist} */
   const normalized = {
@@ -790,6 +792,7 @@ function normalizeRecentItem(entry) {
   if (coverUrl) normalized.coverUrl = coverUrl;
   if (typeof total === 'number') normalized.total = total;
   if (pinned) normalized.pinned = true;
+  if (typeof lastRefreshedAt === 'number') normalized.lastRefreshedAt = lastRefreshedAt;
   return normalized;
 }
 
