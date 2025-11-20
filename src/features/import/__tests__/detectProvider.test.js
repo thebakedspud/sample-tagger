@@ -1,9 +1,14 @@
 // @ts-nocheck
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import detectProvider from '../detectProvider.js';
 
 describe('detectProvider', () => {
   const VALID_ID = '37i9dQZF1DX4WYpdgoPlCD';
+  const originalFlag = import.meta.env.VITE_ENABLE_PODCASTS;
+
+  afterEach(() => {
+    import.meta.env.VITE_ENABLE_PODCASTS = originalFlag;
+  });
 
   it('returns spotify for Spotify playlist URLs and URIs', () => {
     expect(detectProvider(` https://open.spotify.com/playlist/${VALID_ID} `)).toBe('spotify');
@@ -38,5 +43,18 @@ describe('detectProvider', () => {
   it('rejects unsupported URLs such as tracks', () => {
     expect(detectProvider('https://open.spotify.com/track/abc')).toBeNull();
     expect(detectProvider('https://example.com/not-a-playlist')).toBeNull();
+  });
+
+  it('detects Spotify show and episode URLs only when podcasts are enabled', () => {
+    import.meta.env.VITE_ENABLE_PODCASTS = 'true';
+    expect(detectProvider(`https://open.spotify.com/show/${VALID_ID}`)).toBe('spotify');
+    expect(detectProvider(`https://open.spotify.com/episode/${VALID_ID}`)).toBe('spotify');
+    expect(detectProvider(`https://open.spotify.com/intl-en/show/${VALID_ID}`)).toBe('spotify');
+    expect(detectProvider(`https://open.spotify.com/embed/episode/${VALID_ID}`)).toBe('spotify');
+    expect(detectProvider(`spotify:show:${VALID_ID}`)).toBe('spotify');
+    expect(detectProvider(`spotify:episode:${VALID_ID}`)).toBe('spotify');
+
+    import.meta.env.VITE_ENABLE_PODCASTS = '';
+    expect(detectProvider(`https://open.spotify.com/show/${VALID_ID}`)).toBeNull();
   });
 });

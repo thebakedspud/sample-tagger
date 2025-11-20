@@ -9,17 +9,22 @@ import { importPlaylist as importSoundCloud } from '../adapters/soundcloudAdapte
 import { CODES } from '../adapters/types.js';
 
 const SPOTIFY_URL = 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M';
+const SPOTIFY_SHOW_URL = 'https://open.spotify.com/show/2rYZ0msCH4KcKPZJGG6xY3';
+const SPOTIFY_EPISODE_URL = 'https://open.spotify.com/episode/2o3sE8uLsDFOiF23Y8QbXn';
 
 describe('adapter contracts', () => {
   describe('spotify importPlaylist', () => {
     const originalDevFlag = import.meta.env.DEV;
+    const originalPodcastFlag = import.meta.env.VITE_ENABLE_PODCASTS;
 
     beforeEach(() => {
       import.meta.env.DEV = false;
+      import.meta.env.VITE_ENABLE_PODCASTS = 'true';
     });
 
     afterEach(() => {
       import.meta.env.DEV = originalDevFlag;
+      import.meta.env.VITE_ENABLE_PODCASTS = originalPodcastFlag;
       vi.restoreAllMocks();
       __resetSpotifyTokenMemoForTests();
     });
@@ -216,6 +221,155 @@ describe('adapter contracts', () => {
       expect(second.pageInfo?.hasMore).toBe(false);
       expect(second.total).toBe(12);
       expect(second.debug?.tokenRefreshed).toBe(false);
+    });
+
+    it('imports a Spotify show and normalizes episodes as podcasts', async () => {
+      const tokenPayload = { access_token: 'token-show', expires_in: 3600 };
+      const showMeta = {
+        id: 'show-1',
+        name: 'Cool Show',
+        publisher: 'PodCo',
+        images: [{ url: 'https://images.spotify.com/show.jpg', width: 640 }],
+      };
+      const episodesPayload = {
+        items: [
+          {
+            id: 'ep-1',
+            name: 'Episode One',
+            duration_ms: 1000,
+            external_urls: { spotify: 'https://open.spotify.com/episode/ep-1' },
+            images: [{ url: 'https://images.spotify.com/ep1.jpg', width: 320 }],
+            show: showMeta,
+          },
+          {
+            id: 'ep-2',
+            name: 'Episode Two',
+            duration_ms: 2000,
+            external_urls: { spotify: 'https://open.spotify.com/episode/ep-2' },
+            images: [],
+            show: showMeta,
+          },
+        ],
+        next: null,
+        total: 2,
+      };
+
+      const fetchClient = {
+        getJson: vi
+          .fn()
+          .mockResolvedValueOnce(tokenPayload)
+          .mockResolvedValueOnce(showMeta)
+          .mockResolvedValueOnce(episodesPayload),
+      };
+
+      const result = await importSpotify({ url: SPOTIFY_SHOW_URL, fetchClient });
+      expect(fetchClient.getJson).toHaveBeenCalledTimes(3);
+      expect(result.provider).toBe('spotify');
+      expect(result.playlistId).toBe('2rYZ0msCH4KcKPZJGG6xY3');
+      expect(result.title).toBe(showMeta.name);
+      expect(result.total).toBe(2);
+      expect(result.pageInfo).toEqual({ hasMore: false, cursor: null });
+      expect(result.tracks).toHaveLength(2);
+      expect(result.tracks[0]).toMatchObject({
+        id: 'ep-1',
+        kind: 'podcast',
+        title: 'Episode One',
+        artist: 'Cool Show',
+        showName: 'Cool Show',
+        showId: 'show-1',
+      });
+      expect(result.tracks[1].thumbnailUrl).toBe('https://images.spotify.com/show.jpg');
+      expect(result.debug?.contentType).toBe('show');
+      expect(result.debug?.longShow).toBe(false);
+    });
+
+    it('flags long shows and preserves pagination metadata', async () => {
+      const tokenPayload = { access_token: 'token-long-show', expires_in: 3600 };
+      const showMeta = { id: 'show-long', name: 'Very Long Show', images: [] };
+      const episodesPayload = {
+        items: [
+          {
+            id: 'ep-long',
+            name: 'Episode Long',
+            duration_ms: 123,
+            external_urls: { spotify: 'https://open.spotify.com/episode/ep-long' },
+            show: showMeta,
+          },
+        ],
+        next: null,
+        total: 800,
+      };
+      const fetchClient = {
+        getJson: vi
+          .fn()
+          .mockResolvedValueOnce(tokenPayload)
+          .mockResolvedValueOnce(showMeta)
+          .mockResolvedValueOnce(episodesPayload),
+      };
+
+      const result = await importSpotify({ url: SPOTIFY_SHOW_URL, fetchClient });
+      expect(result.debug?.longShow).toBe(true);
+      expect(result.total).toBe(800);
+    });
+
+    it('imports a single episode as a one-item playlist', async () => {
+      const tokenPayload = { access_token: 'token-episode', expires_in: 3600 };
+      const episodePayload = {
+        id: 'ep-single',
+        name: 'Solo Episode',
+        duration_ms: 999,
+        external_urls: { spotify: 'https://open.spotify.com/episode/ep-single' },
+        images: [{ url: 'https://images.spotify.com/ep-single.jpg', width: 300 }],
+        show: { id: 'show-solo', name: 'Solo Show', publisher: 'Pub' },
+      };
+
+      const fetchClient = {
+        getJson: vi.fn().mockResolvedValueOnce(tokenPayload).mockResolvedValueOnce(episodePayload),
+      };
+
+      const result = await importSpotify({ url: SPOTIFY_EPISODE_URL, fetchClient });
+      expect(result.tracks).toHaveLength(1);
+      expect(result.tracks[0]).toMatchObject({
+        id: 'ep-single',
+        title: 'Solo Episode',
+        kind: 'podcast',
+        showName: 'Solo Show',
+      });
+      expect(result.pageInfo).toEqual({ cursor: null, hasMore: false });
+      expect(result.debug?.contentType).toBe('episode');
+    });
+
+    it('errors on region-restricted episodes', async () => {
+      const tokenPayload = { access_token: 'token-geo', expires_in: 3600 };
+      const restrictedErr = new Error('HTTP_403');
+      restrictedErr.code = 'HTTP_403';
+      restrictedErr.details = { status: 403 };
+
+      const fetchClient = {
+        getJson: vi.fn().mockResolvedValueOnce(tokenPayload).mockRejectedValueOnce(restrictedErr),
+      };
+
+      await expect(importSpotify({ url: SPOTIFY_EPISODE_URL, fetchClient })).rejects.toMatchObject({
+        code: CODES.ERR_EPISODE_UNAVAILABLE,
+      });
+    });
+
+    it('errors on empty show payloads', async () => {
+      const tokenPayload = { access_token: 'token-empty-show', expires_in: 3600 };
+      const showMeta = { id: 'show-empty', name: 'Empty Show' };
+      const episodesPayload = { items: [], next: null, total: 0 };
+
+      const fetchClient = {
+        getJson: vi
+          .fn()
+          .mockResolvedValueOnce(tokenPayload)
+          .mockResolvedValueOnce(showMeta)
+          .mockResolvedValueOnce(episodesPayload),
+      };
+
+      await expect(importSpotify({ url: SPOTIFY_SHOW_URL, fetchClient })).rejects.toMatchObject({
+        code: CODES.ERR_SHOW_EMPTY,
+      });
     });
   });
 

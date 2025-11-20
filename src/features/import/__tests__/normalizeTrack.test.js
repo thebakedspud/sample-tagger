@@ -24,6 +24,7 @@ describe('normalizeTrack', () => {
     const track = normalizeTrack(raw, 2, 'soundcloud');
     expect(track.durationMs).toBe(1234);
     expect(track.thumbnailUrl).toBe('thumb.jpg');
+    expect(track.kind).toBe('music');
   });
 
   it('sanitizes album and drops empty values', () => {
@@ -32,6 +33,13 @@ describe('normalizeTrack', () => {
 
     const trackWithoutAlbum = normalizeTrack({ title: 'Song', artist: 'Artist', album: '   ' }, 4, 'spotify');
     expect(trackWithoutAlbum.album).toBeUndefined();
+  });
+
+  it('defaults kind to music unless explicitly podcast', () => {
+    const music = normalizeTrack({ title: 'Song', artist: 'Artist' }, 0, 'spotify');
+    expect(music.kind).toBe('music');
+    const podcast = normalizeTrack({ title: 'Episode', artist: 'Host', kind: 'podcast' }, 1, 'spotify');
+    expect(podcast.kind).toBe('podcast');
   });
 
   it('normalizes dateAdded and removes invalid timestamps', () => {

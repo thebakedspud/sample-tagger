@@ -42,6 +42,11 @@ import { normalizeNotesList } from './notesTagsData.js'
  * @property {string=} importedAt
  * @property {number=} originalIndex
  * @property {'spotify' | 'youtube' | 'soundcloud'=} provider
+ * @property {'music' | 'podcast'=} kind
+ * @property {string=} showId
+ * @property {string=} showName
+ * @property {string=} publisher
+ * @property {string=} description
  *
  * @typedef {Record<string, import('./notesTagsData.js').NoteEntry[]>} NotesByTrack
  *
@@ -593,6 +598,16 @@ function sanitizeTracks(list) {
     if (provider) {
       record.provider = provider;
     }
+    const kind = /** @type {any} */(t).kind === 'podcast' ? 'podcast' : 'music';
+    record.kind = kind;
+    const showId = safeString(/** @type {any} */(t).showId);
+    if (showId) record.showId = showId;
+    const showName = safeString(/** @type {any} */(t).showName);
+    if (showName) record.showName = showName;
+    const publisher = safeString(/** @type {any} */(t).publisher);
+    if (publisher) record.publisher = publisher;
+    const description = safeString(/** @type {any} */(t).description);
+    if (description) record.description = description;
     const cleanedTags = normalizeTagsArray(/** @type {any} */(t).tags);
     if (cleanedTags.length > 0) {
       record.tags = cleanedTags;

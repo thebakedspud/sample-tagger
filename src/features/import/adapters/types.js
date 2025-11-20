@@ -18,6 +18,11 @@
  * @property {string} [sourceUrl]
  * @property {string} [providerTrackId]
  * @property {PlaylistProvider} [provider]
+ * @property {'music' | 'podcast'} [kind]
+ * @property {string} [showId]
+ * @property {string} [showName]
+ * @property {string} [publisher]
+ * @property {string} [description]
  * @property {number} [durationMs]
  * @property {string} [thumbnailUrl]
  * @property {any[]} [notes]
@@ -64,7 +69,7 @@
 
 /**
  * Error codes adapters should surface so the UI can branch correctly.
- * @typedef {'ERR_UNSUPPORTED_URL' | 'ERR_NOT_FOUND' | 'ERR_PRIVATE_PLAYLIST' | 'ERR_RATE_LIMITED' | 'ERR_TOKEN_EXPIRED' | 'ERR_NETWORK' | 'ERR_INVALID_RESPONSE' | 'ERR_ABORTED' | 'ERR_UNKNOWN'} AdapterErrorCode
+ * @typedef {'ERR_UNSUPPORTED_URL' | 'ERR_NOT_FOUND' | 'ERR_PRIVATE_PLAYLIST' | 'ERR_RATE_LIMITED' | 'ERR_TOKEN_EXPIRED' | 'ERR_NETWORK' | 'ERR_INVALID_RESPONSE' | 'ERR_ABORTED' | 'ERR_UNKNOWN' | 'ERR_EPISODE_UNAVAILABLE' | 'ERR_SHOW_EMPTY' | 'ERR_PODCAST_CONTENT'} AdapterErrorCode
  */
 
 export const KNOWN_PROVIDERS = Object.freeze(['spotify', 'youtube', 'soundcloud']);
@@ -78,6 +83,9 @@ export const KNOWN_ADAPTER_ERRORS = Object.freeze([
   'ERR_NETWORK',
   'ERR_INVALID_RESPONSE',
   'ERR_ABORTED',
+  'ERR_EPISODE_UNAVAILABLE',
+  'ERR_SHOW_EMPTY',
+  'ERR_PODCAST_CONTENT',
   'ERR_UNKNOWN',
 ]);
 
@@ -109,6 +117,9 @@ export const CODES = Object.freeze({
   ERR_NETWORK: 'ERR_NETWORK',
   ERR_INVALID_RESPONSE: 'ERR_INVALID_RESPONSE',
   ERR_ABORTED: 'ERR_ABORTED',
+  ERR_EPISODE_UNAVAILABLE: 'ERR_EPISODE_UNAVAILABLE',
+  ERR_SHOW_EMPTY: 'ERR_SHOW_EMPTY',
+  ERR_PODCAST_CONTENT: 'ERR_PODCAST_CONTENT',
   ERR_UNKNOWN: 'ERR_UNKNOWN',
 });
 

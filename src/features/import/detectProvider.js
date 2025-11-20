@@ -1,4 +1,12 @@
-import { extractPlaylistId } from './adapters/spotifyAdapter.js';
+import {
+  extractPlaylistId,
+  extractShowId,
+  extractEpisodeId,
+} from './adapters/spotifyAdapter.js';
+
+function podcastsEnabled() {
+  return Boolean(/** @type {any} */ (import.meta?.env?.VITE_ENABLE_PODCASTS));
+}
 
 // Detects which platform a playlist URL belongs to.
 // Returns 'spotify' | 'youtube' | 'soundcloud' | null.
@@ -9,6 +17,9 @@ export default function detectProvider(input = '') {
   if (!trimmed) return null;
 
   if (extractPlaylistId(trimmed)) return 'spotify';
+  if (podcastsEnabled() && (extractShowId(trimmed) || extractEpisodeId(trimmed))) {
+    return 'spotify';
+  }
 
   const lower = trimmed.toLowerCase();
 

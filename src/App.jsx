@@ -66,6 +66,8 @@ import {
 import { useNoteHandlers } from './features/notes/useNoteHandlers.js'
 import buildInitialPlaylistState from './features/playlist/buildInitialPlaylistState.js'
 
+const PODCASTS_ENABLED = Boolean(/** @type {any} */ (import.meta?.env?.VITE_ENABLE_PODCASTS))
+
 /**
  * Inner component that consumes playlist state from context
  * @param {{
@@ -94,6 +96,7 @@ function AppInner({
     /** @type {'landing' | 'playlist' | 'account'} */ (initialScreen)
   )
   const goToLanding = useCallback(() => { setScreen('landing') }, [setScreen])
+  const [importMode, setImportMode] = useState(/** @type {'music' | 'podcast'} */ ('music'))
 
   const { message: announceMsg, announce } = useAnnounce({ debounceMs: 60 })
 
@@ -808,6 +811,15 @@ function AppInner({
 
   const hasPlaylist = Array.isArray(tracks) && tracks.length > 0
 
+  const switchToImportMode = useCallback(
+    (mode) => {
+      setImportMode(mode)
+      setScreen('landing')
+      announce(mode === 'podcast' ? 'Podcast import mode' : 'Music import mode')
+    },
+    [announce],
+  )
+
   // Helper to hide the mock prefix from SRs but keep it visible
   return (
     <div className="app">
@@ -843,11 +855,22 @@ function AppInner({
               <button
                 type="button"
                 className={`app-nav__btn${screen === 'landing' ? ' is-active' : ''}`}
-                onClick={goToLanding}
-                aria-current={screen === 'landing' ? 'page' : undefined}
+                onClick={() => switchToImportMode('music')}
+                aria-current={screen === 'landing' && importMode === 'music' ? 'page' : undefined}
               >
                 Import
               </button>
+              {PODCASTS_ENABLED && (
+                <button
+                  type="button"
+                  className={`app-nav__btn${screen === 'landing' && importMode === 'podcast' ? ' is-active' : ''}`}
+                  onClick={() => switchToImportMode('podcast')}
+                  aria-current={screen === 'landing' && importMode === 'podcast' ? 'page' : undefined}
+                  aria-pressed={screen === 'landing' && importMode === 'podcast' ? 'true' : 'false'}
+                >
+                  Podcasts
+                </button>
+              )}
               <button
                 type="button"
                 className={`app-nav__btn${screen === 'playlist' ? ' is-active' : ''}`}
@@ -897,9 +920,17 @@ function AppInner({
             {screen === 'landing' && (
               <section aria-labelledby="landing-title">
                 <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
-                <p style={{ color: 'var(--muted)' }}>
-                  Paste a Spotify / YouTube / SoundCloud <strong>playlist</strong> URL to import a snapshot and start adding notes.
-                </p>
+                {PODCASTS_ENABLED ? (
+                  <p style={{ color: 'var(--muted)' }}>
+                    {importMode === 'podcast'
+                      ? 'Paste a Spotify podcast show or episode URL to import a snapshot and start adding notes.'
+                      : 'Paste a Spotify / YouTube / SoundCloud playlist URL, or switch to Podcasts to import shows/episodes.'}
+                  </p>
+                ) : (
+                  <p style={{ color: 'var(--muted)' }}>
+                    Paste a Spotify / YouTube / SoundCloud <strong>playlist</strong> URL to import a snapshot and start adding notes.
+                  </p>
+                )}
 
                 <form
                   onSubmit={(event) => {
@@ -915,7 +946,11 @@ function AppInner({
                         ref={importInputRef}
                         type="url"
                         inputMode="url"
-                        placeholder="https://open.spotify.com/playlist/..."
+                        placeholder={
+                          importMode === 'podcast'
+                            ? 'https://open.spotify.com/show/... or https://open.spotify.com/episode/...'
+                            : 'https://open.spotify.com/playlist/...'
+                        }
                         autoComplete="off"
                         value={importUrl}
                         onChange={handleImportUrlChange}

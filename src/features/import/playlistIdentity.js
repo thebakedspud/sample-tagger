@@ -1,7 +1,11 @@
 // src/features/import/playlistIdentity.js
 // Helpers for deriving canonical playlist identities/keys across providers.
 
-import { extractPlaylistId as extractSpotifyPlaylistId } from './adapters/spotifyAdapter.js'
+import {
+  extractPlaylistId as extractSpotifyPlaylistId,
+  extractShowId as extractSpotifyShowId,
+  extractEpisodeId as extractSpotifyEpisodeId,
+} from './adapters/spotifyAdapter.js'
 import detectProvider from './detectProvider.js'
 
 const PROVIDER_ALIASES = new Map([
@@ -67,7 +71,10 @@ export function parsePlaylistIdentityFromUrl(raw) {
   const provider = normalizeProvider(detectedProvider)
   if (provider === 'spotify') {
     const playlistId = extractSpotifyPlaylistId(raw)
-    return playlistId ? { provider, playlistId } : null
+    const showId = extractSpotifyShowId(raw)
+    const episodeId = extractSpotifyEpisodeId(raw)
+    const resolvedId = playlistId || showId || episodeId
+    return resolvedId ? { provider, playlistId: resolvedId } : null
   }
   if (provider === 'youtube') {
     const playlistId = extractYoutubePlaylistId(raw)
