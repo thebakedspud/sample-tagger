@@ -351,10 +351,24 @@ export default function usePlaylistImportController({
       initialFocusAppliedRef.current = false;
 
       const mapped = Array.isArray(payload?.tracks) ? payload.tracks : [];
-      const meta = payload?.meta ?? {};
+      const rawMeta = payload?.meta ?? {};
       const importedTimestamp = payload?.importedAt ?? null;
       const resolvedTitle = payload?.title || fallbackTitle || 'Imported Playlist';
       const trackCount = mapped.length;
+      const hasPodcastTracks = mapped.some((track) => track?.kind === 'podcast');
+      const hasMusicTracks = mapped.some((track) => track?.kind !== 'podcast');
+      const fallbackKind = hasPodcastTracks && !hasMusicTracks ? 'podcast' : 'music';
+      const resolvedContentKind =
+        rawMeta?.contentKind === 'podcast' || rawMeta?.contentKind === 'music'
+          ? rawMeta.contentKind
+          : fallbackKind;
+      const targetScreen = resolvedContentKind === 'podcast' ? 'podcast' : 'playlist';
+      const headingId = targetScreen === 'podcast' ? 'podcast-title' : 'playlist-title';
+      const meta = {
+        ...EMPTY_IMPORT_META,
+        ...rawMeta,
+        contentKind: resolvedContentKind,
+      };
 
       try {
         setSkipPlaylistFocusManagement(true);
@@ -382,21 +396,20 @@ export default function usePlaylistImportController({
           ),
         );
         markTrackFocusContext('initial-import');
-        setImportMeta({
-          ...EMPTY_IMPORT_META,
-          ...meta,
-        });
+        setImportMeta(meta);
         setPlaylistTitle(resolvedTitle);
         setImportedAt(importedTimestamp);
         if (updateLastImportUrl && typeof sourceUrl === 'string') {
           setLastImportUrl(sourceUrl);
         }
-        setScreen('playlist');
+        setScreen(targetScreen);
 
         const message =
           typeof announceMessage === 'string'
             ? announceMessage
-            : `Playlist imported. ${trackCount} tracks.`;
+            : targetScreen === 'podcast'
+              ? `Podcast imported. ${trackCount} ${trackCount === 1 ? 'episode' : 'episodes'}.`
+              : `Playlist imported. ${trackCount} ${trackCount === 1 ? 'track' : 'tracks'}.`;
         announce(message);
 
         const releaseFocusGate = () => {
@@ -456,7 +469,7 @@ export default function usePlaylistImportController({
             debugFocus('app:init-import:fallback-heading', {
               reportedTrackId: targetId,
             });
-            focusById('playlist-title');
+            focusById(headingId);
           }
           releaseFocusGate();
         };
@@ -465,7 +478,7 @@ export default function usePlaylistImportController({
           try {
             if (focusBehavior === 'heading') {
               debugFocus('app:init-import:heading-request', {});
-              focusById('playlist-title');
+              focusById(headingId);
               releaseFocusGate();
               return;
             }
@@ -474,7 +487,7 @@ export default function usePlaylistImportController({
               return;
             }
             debugFocus('app:init-import:default-heading', {});
-            focusById('playlist-title');
+            focusById(headingId);
             releaseFocusGate();
           } catch (err) {
             releaseFocusGate();

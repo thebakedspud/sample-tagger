@@ -96,6 +96,7 @@ function resolveVirtualizationPreference(trackCount) {
  *   Receives the ID of the first track in the filtered/sorted list, or null if no tracks are
  *   visible. This enables App to focus the correct track even when adapter order differs from
  *   display order (e.g., oldest-to-newest import with newest-first sort).
+ * @param {'playlist' | 'podcast'} [props.viewMode]
  */
 export default function PlaylistView({
   playlistTitle,
@@ -134,8 +135,12 @@ export default function PlaylistView({
   onFirstVisibleTrackChange,
   initialSyncStatus,
   cachedViewInfo = null,
+  viewMode = 'playlist',
 }) {
   const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
+  const isPodcastMode = viewMode === 'podcast'
+  const headingId = isPodcastMode ? 'podcast-title' : 'playlist-title'
+  const viewLabel = isPodcastMode ? 'podcast' : 'playlist'
   const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
   const cleanTitle = hasMockPrefix ? playlistTitle.slice(MOCK_PREFIX.length) : playlistTitle
   const showLoadMore = Boolean(importMeta?.hasMore && importMeta?.cursor)
@@ -174,11 +179,11 @@ export default function PlaylistView({
     const parts = []
     if (countLabel) parts.push(countLabel)
     if (importedLabel) parts.push(`imported ${importedLabel}`)
-    const summary = parts.length > 0 ? parts.join(' — ') : 'cached playlist'
+    const summary = parts.length > 0 ? parts.join(' — ') : `cached ${viewLabel}`
     return {
       text: `Viewing saved copy (${summary}). Reimport to check for updates.`,
     }
-  }, [cachedViewInfo])
+  }, [cachedViewInfo, viewLabel])
 
   const pendingByTrack = useMemo(() => {
     if (!(pending instanceof Map)) return new Map()
@@ -509,10 +514,10 @@ export default function PlaylistView({
   const cooldownMessageId = cooldownMessage ? 'load-more-cooldown' : undefined
 
   return (
-    <section aria-labelledby="playlist-title">
+    <section aria-labelledby={headingId}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h1 id="playlist-title" aria-label={cleanTitle} style={{ marginTop: 0, marginBottom: 0 }}>
+          <h1 id={headingId} aria-label={cleanTitle} style={{ marginTop: 0, marginBottom: 0 }}>
             {hasMockPrefix && <span aria-hidden="true">{MOCK_PREFIX}</span>}
             {cleanTitle}
           </h1>
@@ -530,7 +535,7 @@ export default function PlaylistView({
               ref={reimportBtnRef}
               className="btn"
               onClick={onReimport}
-              aria-label="Re-import this playlist"
+              aria-label={`Re-import this ${viewLabel}`}
               disabled={isAnyImportBusy}
               aria-busy={showReimportSpinner ? 'true' : 'false'}
             >

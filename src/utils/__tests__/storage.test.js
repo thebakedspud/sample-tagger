@@ -110,6 +110,29 @@ describe('storage cursors', () => {
     expect(restored?.importMeta.cursor).toBeNull();
   });
 
+  it('persists podcast contentKind in importMeta', () => {
+    saveAppState({
+      theme: 'dark',
+      playlistTitle: 'Podcast Playlist',
+      tracks: [],
+      importMeta: {
+        provider: 'spotify',
+        cursor: null,
+        hasMore: false,
+        sourceUrl: 'https://open.spotify.com/show/demo',
+        contentKind: 'podcast',
+      },
+      lastImportUrl: 'https://open.spotify.com/show/demo',
+      importedAt: null,
+    });
+
+    const parsed = JSON.parse(globalThis.localStorage.getItem('sta:v6'));
+    expect(parsed.importMeta.contentKind).toBe('podcast');
+
+    const restored = loadAppState();
+    expect(restored?.importMeta.contentKind).toBe('podcast');
+  });
+
   it('persists notesByTrack independently of tracks', () => {
     saveAppState({
       theme: 'dark',

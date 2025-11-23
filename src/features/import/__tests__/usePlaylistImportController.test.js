@@ -139,6 +139,7 @@ const createDeps = (overrides = {}) => {
       hasMore: false,
       snapshotId: null,
       total: null,
+      contentKind: null,
     },
     initialPersistedTrackCount: 0,
     ...overrides,
@@ -238,7 +239,7 @@ describe('usePlaylistImportController', () => {
     expect(deps.setPlaylistTitle).toHaveBeenCalledWith('Demo Playlist');
     expect(deps.setImportedAt).toHaveBeenCalledWith(importData.importedAt);
     expect(deps.setLastImportUrl).toHaveBeenCalledWith('https://open.spotify.com/playlist/xyz');
-    expect(deps.announce).toHaveBeenCalledWith('Playlist imported. 1 tracks.');
+    expect(deps.announce).toHaveBeenCalledWith('Playlist imported. 1 track.');
     expect(deps.pushRecentPlaylist).toHaveBeenCalledWith(
       expect.objectContaining({ provider: 'spotify' }),
       expect.objectContaining({ total: 1 }),
@@ -249,6 +250,39 @@ describe('usePlaylistImportController', () => {
       snapshotId: 'snap-1',
     });
     expect(result.current.backgroundSync.status).toBe('complete');
+  });
+
+  it('routes podcast imports to the podcast screen', async () => {
+    const deps = createDeps();
+    const importData = {
+      tracks: [{ id: 'episode-1', kind: 'podcast', notes: [], tags: [] }],
+      meta: {
+        hasMore: false,
+        provider: 'spotify',
+        playlistId: 'show-123',
+        snapshotId: 'show-snap',
+        total: 1,
+      },
+      importedAt: '2024-02-01T00:00:00.000Z',
+      title: 'Daily Podcast',
+      total: 1,
+    };
+    importInitialMock.mockResolvedValue({ ok: true, data: importData });
+
+    const { result } = renderHook(() => usePlaylistImportController(deps));
+
+    await act(() => {
+      result.current.setImportUrl('https://open.spotify.com/show/abc');
+    });
+    await act(async () => {
+      await result.current.handleImport();
+    });
+
+    await waitFor(() => {
+      expect(deps.setScreen).toHaveBeenCalledWith('podcast');
+    });
+    expect(deps.announce).toHaveBeenCalledWith('Podcast imported. 1 episode.');
+    expect(result.current.importMeta.contentKind).toBe('podcast');
   });
 
   it('rejects selecting a recent playlist when an import is in progress', async () => {

@@ -27,6 +27,7 @@ import { normalizeNotesList } from './notesTagsData.js'
  * @property {string | null} [sourceUrl]
  * @property {number | null} [total]
  * @property {{ isMock?: boolean, lastErrorCode?: string | null } | null} [debug]
+ * @property {'music' | 'podcast' | null} [contentKind]
  *
  * @typedef {Object} PersistedTrack
  * @property {string} id
@@ -101,6 +102,7 @@ const EMPTY_META = Object.freeze({
   sourceUrl: null,
   debug: null,
   total: null,
+  contentKind: null,
 });
 
 /** @returns {PersistedState | null} */
@@ -939,6 +941,12 @@ function sanitizeImportMeta(meta) {
     typeof rawCursor === 'string' && rawCursor.trim().length > 0
       ? rawCursor.trim()
       : null;
+  const kind =
+    m.contentKind === 'podcast'
+      ? 'podcast'
+      : m.contentKind === 'music'
+        ? 'music'
+        : null;
   return {
     provider,
     playlistId: safeString(m.playlistId),
@@ -951,6 +959,7 @@ function sanitizeImportMeta(meta) {
       typeof m.total === 'number' && Number.isFinite(m.total)
         ? Math.max(0, Math.trunc(m.total))
         : null,
+    contentKind: kind,
   };
 }
 

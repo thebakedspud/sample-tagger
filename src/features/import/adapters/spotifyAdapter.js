@@ -513,9 +513,14 @@ async function fetchPlaylistMeta(fetchClient, playlistId, token, { signal }) {
  * @param {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} fetchClient
  * @param {string} showId
  * @param {TokenMemo} token
- * @param {{ signal?: AbortSignal, offset?: number }} options
+ * @param {{ signal?: AbortSignal, offset?: number, cursor?: string | null }} [options]
  */
-async function fetchShowEpisodes(fetchClient, showId, token, { signal, offset = 0, cursor }) {
+async function fetchShowEpisodes(
+  fetchClient,
+  showId,
+  token,
+  { signal, offset = 0, cursor = null } = {},
+) {
   const endpoint = cursor ? sanitizeCursor(cursor) : buildShowEpisodesUrl(showId, offset);
   if (!endpoint) {
     invalidResponse('tracks', { reason: 'invalid_cursor', cursor });

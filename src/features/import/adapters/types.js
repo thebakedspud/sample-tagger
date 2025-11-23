@@ -186,6 +186,7 @@ export function isKnownAdapterErrorObject(e) {
  * @property {string} sourceUrl
  * @property {any | null} [debug]
  * @property {number | null} total
+ * @property {'music' | 'podcast' | null} [contentKind]
  */
 
 /**
