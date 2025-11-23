@@ -23,6 +23,12 @@ const TOKEN_REFRESH_BUFFER_MS = 30_000;
 const CANONICAL_BASE_URL = 'https://open.spotify.com/';
 const TRACK_THUMB_DISPLAY_WIDTH = 40;
 const IDEAL_TRACK_THUMB_WIDTH = 80; // ~2x the 40px display size for HiDPI clarity
+const DEFAULT_PODCAST_MARKET = 'US';
+const PODCAST_MARKET =
+  typeof import.meta?.env?.VITE_SPOTIFY_PODCAST_MARKET === 'string' &&
+  import.meta.env.VITE_SPOTIFY_PODCAST_MARKET.trim()
+    ? import.meta.env.VITE_SPOTIFY_PODCAST_MARKET.trim().toUpperCase()
+    : DEFAULT_PODCAST_MARKET;
 
 /**
  * @typedef {{ value: string, tokenType: string, expiresAt: number }} TokenMemo
@@ -604,7 +610,7 @@ async function fetchPlaylistTracks(fetchClient, playlistId, token, { signal, cur
  */
 function buildShowMetaUrl(showId) {
   const params = new URLSearchParams({
-    market: 'from_token',
+    market: PODCAST_MARKET,
     fields: SHOW_FIELDS,
   });
   return `${SPOTIFY_API_BASE}/shows/${showId}?${params.toString()}`;
@@ -618,7 +624,7 @@ function buildShowEpisodesUrl(showId, offset = 0) {
   const params = new URLSearchParams({
     limit: String(SHOW_PAGE_SIZE),
     offset: String(offset),
-    market: 'from_token',
+    market: PODCAST_MARKET,
     fields:
       'items(id,uri,name,description,duration_ms,images,external_urls,release_date,release_date_precision,show(id,name,publisher,images)),next,total',
   });
@@ -630,7 +636,7 @@ function buildShowEpisodesUrl(showId, offset = 0) {
  */
 function buildEpisodeUrl(episodeId) {
   const params = new URLSearchParams({
-    market: 'from_token',
+    market: PODCAST_MARKET,
     fields: EPISODE_FIELDS,
   });
   return `${SPOTIFY_API_BASE}/episodes/${episodeId}?${params.toString()}`;
