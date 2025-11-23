@@ -809,13 +809,19 @@ function AppInner({
     [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks, dispatch],
   )
 
+  const isPodcastTrack = useCallback((track) => {
+    if (!track) return false
+    if (track?.kind === 'podcast') return true
+    // Legacy data (before `kind` existed) can be inferred by show metadata.
+    return Boolean(track?.showId || track?.showName || track?.publisher)
+  }, [])
   const musicTracks = useMemo(
-    () => (Array.isArray(tracks) ? tracks.filter((track) => track?.kind !== 'podcast') : []),
-    [tracks],
+    () => (Array.isArray(tracks) ? tracks.filter((track) => !isPodcastTrack(track)) : []),
+    [tracks, isPodcastTrack],
   )
   const podcastTracks = useMemo(
-    () => (Array.isArray(tracks) ? tracks.filter((track) => track?.kind === 'podcast') : []),
-    [tracks],
+    () => (Array.isArray(tracks) ? tracks.filter((track) => isPodcastTrack(track)) : []),
+    [tracks, isPodcastTrack],
   )
   const hasMusicTracks = musicTracks.length > 0
   const hasPodcastTracks = podcastTracks.length > 0
