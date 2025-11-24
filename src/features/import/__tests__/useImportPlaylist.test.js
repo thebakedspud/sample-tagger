@@ -5,6 +5,7 @@ import useImportPlaylist from '../useImportPlaylist.js';
 import { CODES } from '../adapters/types.js';
 import * as youtubeAdapter from '../adapters/youtubeAdapter.js';
 import * as spotifyAdapter from '../adapters/spotifyAdapter.js';
+import { __setPodcastFlagOverrideForTests } from '../../../utils/podcastFlags.js';
 
 const { __resetSpotifyTokenMemoForTests } = spotifyAdapter;
 
@@ -13,18 +14,17 @@ const SPOTIFY_SHOW_URL = 'https://open.spotify.com/show/2rYZ0msCH4KcKPZJGG6xY3';
 const SPOTIFY_EPISODE_URL = 'https://open.spotify.com/episode/2o3sE8uLsDFOiF23Y8QbXn';
 const YOUTUBE_URL = 'https://www.youtube.com/playlist?list=PL123';
 const ORIGINAL_DEV_FLAG = import.meta.env.DEV;
-const ORIGINAL_PODCAST_FLAG = import.meta.env.VITE_ENABLE_PODCASTS;
 
 describe('useImportPlaylist', () => {
   beforeEach(() => {
     import.meta.env.DEV = false;
-    import.meta.env.VITE_ENABLE_PODCASTS = 'true';
+    __setPodcastFlagOverrideForTests(true);
     __resetSpotifyTokenMemoForTests();
   });
 
   afterEach(() => {
     import.meta.env.DEV = ORIGINAL_DEV_FLAG;
-    import.meta.env.VITE_ENABLE_PODCASTS = ORIGINAL_PODCAST_FLAG;
+    __setPodcastFlagOverrideForTests(undefined);
     vi.restoreAllMocks();
     __resetSpotifyTokenMemoForTests();
   });

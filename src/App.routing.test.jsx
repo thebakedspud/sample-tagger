@@ -1,7 +1,8 @@
 import '@testing-library/jest-dom/vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest'
+import { __setPodcastFlagOverrideForTests } from './utils/podcastFlags.js'
 
 const announceMock = vi.hoisted(() => vi.fn())
 
@@ -115,7 +116,7 @@ describe('App routing', () => {
     vi.clearAllMocks()
     announceMock.mockClear()
     bootstrapStateRef.value = buildBootstrapState({ tracks: [] })
-    vi.stubEnv('VITE_ENABLE_PODCASTS', 'true')
+    __setPodcastFlagOverrideForTests(true)
     if (!window.matchMedia) {
       window.matchMedia = vi.fn().mockImplementation((query) => ({
         matches: false,
@@ -128,6 +129,10 @@ describe('App routing', () => {
         dispatchEvent: vi.fn(),
       }))
     }
+  })
+
+  afterEach(() => {
+    __setPodcastFlagOverrideForTests(undefined)
   })
 
   it('auto-switches to podcast view when only podcast episodes exist', async () => {

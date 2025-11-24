@@ -1,8 +1,9 @@
 // src/features/import/errors.js
 // @ts-check
 import { CODES } from './adapters/types.js';
+import { isPodcastImportEnabled } from '../../utils/podcastFlags.js';
 
-const PODCASTS_ENABLED = Boolean(/** @type {any} */ (import.meta?.env?.VITE_ENABLE_PODCASTS));
+const PODCASTS_ENABLED = isPodcastImportEnabled();
 
 /** @type {Record<string, string>} */
 export const ERROR_MAP = {

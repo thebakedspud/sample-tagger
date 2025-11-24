@@ -7,6 +7,7 @@ import { normalizeTrack } from '../normalizeTrack.js';
 import { createAdapterError, CODES } from './types.js';
 import { defaultFetchClient } from '../../../utils/fetchClient.js';
 import { isDev } from '../../../utils/isDev.js';
+import { isPodcastImportEnabled } from '../../../utils/podcastFlags.js';
 
 const PROVIDER = 'spotify';
 const TOKEN_ENDPOINT = '/api/spotify/token';
@@ -135,10 +136,6 @@ export function extractShowId(raw) {
 
 export function extractEpisodeId(raw) {
   return extractIdByKind(raw, 'episode');
-}
-
-function podcastsEnabled() {
-  return Boolean(/** @type {any} */ (import.meta?.env?.VITE_ENABLE_PODCASTS));
 }
 
 /**
@@ -769,7 +766,7 @@ export async function importPlaylist(options = {}) {
 
   const { type: contentType, id: contentId, canonicalUrl } = detected;
   const isPodcast = contentType === 'show' || contentType === 'episode';
-  if (isPodcast && !podcastsEnabled()) {
+  if (isPodcast && !isPodcastImportEnabled()) {
     throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, {
       urlPreview: playlistUrl.slice(0, 120),
     });

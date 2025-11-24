@@ -1,13 +1,13 @@
 // @ts-nocheck
 import { describe, it, expect, afterEach } from 'vitest';
 import detectProvider from '../detectProvider.js';
+import { __setPodcastFlagOverrideForTests } from '../../../utils/podcastFlags.js';
 
 describe('detectProvider', () => {
   const VALID_ID = '37i9dQZF1DX4WYpdgoPlCD';
-  const originalFlag = import.meta.env.VITE_ENABLE_PODCASTS;
 
   afterEach(() => {
-    import.meta.env.VITE_ENABLE_PODCASTS = originalFlag;
+    __setPodcastFlagOverrideForTests(undefined);
   });
 
   it('returns spotify for Spotify playlist URLs and URIs', () => {
@@ -46,7 +46,7 @@ describe('detectProvider', () => {
   });
 
   it('detects Spotify show and episode URLs only when podcasts are enabled', () => {
-    import.meta.env.VITE_ENABLE_PODCASTS = 'true';
+    __setPodcastFlagOverrideForTests(true);
     expect(detectProvider(`https://open.spotify.com/show/${VALID_ID}`)).toBe('spotify');
     expect(detectProvider(`https://open.spotify.com/episode/${VALID_ID}`)).toBe('spotify');
     expect(detectProvider(`https://open.spotify.com/intl-en/show/${VALID_ID}`)).toBe('spotify');
@@ -54,7 +54,7 @@ describe('detectProvider', () => {
     expect(detectProvider(`spotify:show:${VALID_ID}`)).toBe('spotify');
     expect(detectProvider(`spotify:episode:${VALID_ID}`)).toBe('spotify');
 
-    import.meta.env.VITE_ENABLE_PODCASTS = '';
+    __setPodcastFlagOverrideForTests(false);
     expect(detectProvider(`https://open.spotify.com/show/${VALID_ID}`)).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import {
 import { importPlaylist as importYouTube } from '../adapters/youtubeAdapter.js';
 import { importPlaylist as importSoundCloud } from '../adapters/soundcloudAdapter.js';
 import { CODES } from '../adapters/types.js';
+import { __setPodcastFlagOverrideForTests } from '../../../utils/podcastFlags.js';
 
 const SPOTIFY_URL = 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M';
 const SPOTIFY_SHOW_URL = 'https://open.spotify.com/show/2rYZ0msCH4KcKPZJGG6xY3';
@@ -15,16 +16,14 @@ const SPOTIFY_EPISODE_URL = 'https://open.spotify.com/episode/2o3sE8uLsDFOiF23Y8
 describe('adapter contracts', () => {
   describe('spotify importPlaylist', () => {
     const originalDevFlag = import.meta.env.DEV;
-    const originalPodcastFlag = import.meta.env.VITE_ENABLE_PODCASTS;
-
     beforeEach(() => {
       import.meta.env.DEV = false;
-      import.meta.env.VITE_ENABLE_PODCASTS = 'true';
+      __setPodcastFlagOverrideForTests(true);
     });
 
     afterEach(() => {
       import.meta.env.DEV = originalDevFlag;
-      import.meta.env.VITE_ENABLE_PODCASTS = originalPodcastFlag;
+      __setPodcastFlagOverrideForTests(undefined);
       vi.restoreAllMocks();
       __resetSpotifyTokenMemoForTests();
     });

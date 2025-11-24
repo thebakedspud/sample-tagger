@@ -27,7 +27,7 @@ export const SORT_DIRECTION = Object.freeze({
 
 export const DEFAULT_SORT = Object.freeze({
   key: SORT_KEY.DATE,
-  direction: SORT_DIRECTION.DESC,
+  direction: SORT_DIRECTION.ASC,
 });
 
 const SCOPE_LABELS = {

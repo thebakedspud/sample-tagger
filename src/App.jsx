@@ -38,6 +38,7 @@ import './styles/primitives.css';
 import './styles/app.css';
 import useAnnounce from './features/a11y/useAnnounce.js'
 import { DEBUG_FOCUS, debugFocus } from './utils/debug.js'
+import { isPodcastImportEnabled } from './utils/podcastFlags.js'
 
 // NEW: inline undo
 import useInlineUndo from './features/undo/useInlineUndo.js'
@@ -67,7 +68,7 @@ import {
 import { useNoteHandlers } from './features/notes/useNoteHandlers.js'
 import buildInitialPlaylistState from './features/playlist/buildInitialPlaylistState.js'
 
-const PODCASTS_ENABLED = Boolean(/** @type {any} */ (import.meta?.env?.VITE_ENABLE_PODCASTS))
+const PODCASTS_ENABLED = isPodcastImportEnabled()
 
 /**
  * Inner component that consumes playlist state from context

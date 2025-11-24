@@ -51,6 +51,51 @@ describe('useTrackFilter', () => {
     expect(result.current.hasNotesOnly).toBe(true)
   })
 
+  it('upgrades legacy newest-first default to oldest-first once', () => {
+    setStoredState(storageKeySnap1, {
+      query: '',
+      scope: SEARCH_SCOPE.BOTH,
+      sort: { key: SORT_KEY.DATE, direction: SORT_DIRECTION.DESC },
+      selectedTags: [],
+      hasNotesOnly: false,
+    })
+
+    const { result } = renderHook(() =>
+      useTrackFilter({
+        tracks,
+        provider: 'spotify',
+        playlistId: 'abc',
+        snapshotId: 'snap-1',
+        announce,
+      }),
+    )
+
+    expect(result.current.sort).toEqual({ key: SORT_KEY.DATE, direction: SORT_DIRECTION.ASC })
+  })
+
+  it('respects user-selected newest-first sort after migration', () => {
+    setStoredState(storageKeySnap1, {
+      version: 2,
+      query: '',
+      scope: SEARCH_SCOPE.BOTH,
+      sort: { key: SORT_KEY.DATE, direction: SORT_DIRECTION.DESC },
+      selectedTags: [],
+      hasNotesOnly: false,
+    })
+
+    const { result } = renderHook(() =>
+      useTrackFilter({
+        tracks,
+        provider: 'spotify',
+        playlistId: 'abc',
+        snapshotId: 'snap-1',
+        announce,
+      }),
+    )
+
+    expect(result.current.sort).toEqual({ key: SORT_KEY.DATE, direction: SORT_DIRECTION.DESC })
+  })
+
   it('debounces query updates over 250ms', () => {
     vi.useFakeTimers()
     const { result } = renderHook(() =>
