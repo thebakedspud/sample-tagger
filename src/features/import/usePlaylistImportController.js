@@ -356,7 +356,16 @@ export default function usePlaylistImportController({
         if (updateLastImportUrl && typeof sourceUrl === 'string') {
           setLastImportUrl(sourceUrl);
         }
-        setScreen('playlist');
+
+        const isPodcastOnly =
+          mapped.length > 0 &&
+          mapped.every((track) => {
+            if (!track || typeof track !== 'object') return false;
+            if (track.kind === 'podcast') return true;
+            return Boolean(track.showId || track.showName || track.publisher);
+          });
+
+        setScreen(isPodcastOnly ? 'podcast' : 'playlist');
 
         const message =
           typeof announceMessage === 'string'
