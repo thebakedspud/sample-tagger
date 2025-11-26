@@ -27,6 +27,7 @@ import { normalizeNotesList } from './notesTagsData.js'
  * @property {string | null} [sourceUrl]
  * @property {number | null} [total]
  * @property {{ isMock?: boolean, lastErrorCode?: string | null } | null} [debug]
+ * @property {'music' | 'podcast' | null} [contentKind]
  *
  * @typedef {Object} PersistedTrack
  * @property {string} id
@@ -42,6 +43,11 @@ import { normalizeNotesList } from './notesTagsData.js'
  * @property {string=} importedAt
  * @property {number=} originalIndex
  * @property {'spotify' | 'youtube' | 'soundcloud'=} provider
+ * @property {'music' | 'podcast'=} kind
+ * @property {string=} showId
+ * @property {string=} showName
+ * @property {string=} publisher
+ * @property {string=} description
  *
  * @typedef {Record<string, import('./notesTagsData.js').NoteEntry[]>} NotesByTrack
  *
@@ -58,6 +64,7 @@ import { normalizeNotesList } from './notesTagsData.js'
  * @property {string=} coverUrl
  * @property {number=} total
  * @property {boolean=} pinned
+ * @property {number=} lastRefreshedAt
  *
  * @typedef {Object} PersistedState
  * @property {number} version
@@ -95,6 +102,7 @@ const EMPTY_META = Object.freeze({
   sourceUrl: null,
   debug: null,
   total: null,
+  contentKind: null,
 });
 
 /** @returns {PersistedState | null} */
@@ -592,6 +600,16 @@ function sanitizeTracks(list) {
     if (provider) {
       record.provider = provider;
     }
+    const kind = /** @type {any} */(t).kind === 'podcast' ? 'podcast' : 'music';
+    record.kind = kind;
+    const showId = safeString(/** @type {any} */(t).showId);
+    if (showId) record.showId = showId;
+    const showName = safeString(/** @type {any} */(t).showName);
+    if (showName) record.showName = showName;
+    const publisher = safeString(/** @type {any} */(t).publisher);
+    if (publisher) record.publisher = publisher;
+    const description = safeString(/** @type {any} */(t).description);
+    if (description) record.description = description;
     const cleanedTags = normalizeTagsArray(/** @type {any} */(t).tags);
     if (cleanedTags.length > 0) {
       record.tags = cleanedTags;
@@ -776,6 +794,7 @@ function normalizeRecentItem(entry) {
   const coverUrl = safeString(/** @type {any} */ (entry).coverUrl);
   const total = normalizeTrackTotal(/** @type {any} */ (entry).total);
   const pinned = Boolean(/** @type {any} */ (entry).pinned);
+  const lastRefreshedAt = coerceTimestamp(/** @type {any} */ (entry).lastRefreshedAt);
 
   /** @type {RecentPlaylist} */
   const normalized = {
@@ -790,6 +809,7 @@ function normalizeRecentItem(entry) {
   if (coverUrl) normalized.coverUrl = coverUrl;
   if (typeof total === 'number') normalized.total = total;
   if (pinned) normalized.pinned = true;
+  if (typeof lastRefreshedAt === 'number') normalized.lastRefreshedAt = lastRefreshedAt;
   return normalized;
 }
 
@@ -921,6 +941,12 @@ function sanitizeImportMeta(meta) {
     typeof rawCursor === 'string' && rawCursor.trim().length > 0
       ? rawCursor.trim()
       : null;
+  const kind =
+    m.contentKind === 'podcast'
+      ? 'podcast'
+      : m.contentKind === 'music'
+        ? 'music'
+        : null;
   return {
     provider,
     playlistId: safeString(m.playlistId),
@@ -933,6 +959,7 @@ function sanitizeImportMeta(meta) {
       typeof m.total === 'number' && Number.isFinite(m.total)
         ? Math.max(0, Math.trunc(m.total))
         : null,
+    contentKind: kind,
   };
 }
 

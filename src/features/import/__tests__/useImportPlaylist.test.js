@@ -5,21 +5,26 @@ import useImportPlaylist from '../useImportPlaylist.js';
 import { CODES } from '../adapters/types.js';
 import * as youtubeAdapter from '../adapters/youtubeAdapter.js';
 import * as spotifyAdapter from '../adapters/spotifyAdapter.js';
+import { __setPodcastFlagOverrideForTests } from '../../../utils/podcastFlags.js';
 
 const { __resetSpotifyTokenMemoForTests } = spotifyAdapter;
 
 const SPOTIFY_URL = 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M';
+const SPOTIFY_SHOW_URL = 'https://open.spotify.com/show/2rYZ0msCH4KcKPZJGG6xY3';
+const SPOTIFY_EPISODE_URL = 'https://open.spotify.com/episode/2o3sE8uLsDFOiF23Y8QbXn';
 const YOUTUBE_URL = 'https://www.youtube.com/playlist?list=PL123';
 const ORIGINAL_DEV_FLAG = import.meta.env.DEV;
 
 describe('useImportPlaylist', () => {
   beforeEach(() => {
     import.meta.env.DEV = false;
+    __setPodcastFlagOverrideForTests(true);
     __resetSpotifyTokenMemoForTests();
   });
 
   afterEach(() => {
     import.meta.env.DEV = ORIGINAL_DEV_FLAG;
+    __setPodcastFlagOverrideForTests(undefined);
     vi.restoreAllMocks();
     __resetSpotifyTokenMemoForTests();
   });
@@ -116,6 +121,57 @@ describe('useImportPlaylist', () => {
     return fetchClient;
   }
 
+  function makeSpotifyShowClient({ total = 12, next = null }) {
+    const showMeta = {
+      id: 'show-1',
+      name: 'Cool Show',
+      publisher: 'PodCo',
+    };
+    const episodesPayload = {
+      items: [
+        {
+          id: 'episode-1',
+          name: 'Episode One',
+          duration_ms: 111,
+          external_urls: { spotify: 'https://open.spotify.com/episode/episode-1' },
+          show: showMeta,
+        },
+        {
+          id: 'episode-2',
+          name: 'Episode Two',
+          duration_ms: 222,
+          external_urls: { spotify: 'https://open.spotify.com/episode/episode-2' },
+          show: showMeta,
+        },
+      ],
+      next,
+      total,
+    };
+    const fetchClient = {
+      getJson: vi
+        .fn()
+        .mockResolvedValueOnce({ access_token: 'token-show', expires_in: 3600 })
+        .mockResolvedValueOnce(showMeta)
+        .mockResolvedValueOnce(episodesPayload),
+    };
+    return { fetchClient, showMeta, episodesPayload };
+  }
+
+  function makeSpotifyEpisodeClient() {
+    const episode = {
+      id: 'episode-single',
+      name: 'Solo Episode',
+      duration_ms: 999,
+      external_urls: { spotify: 'https://open.spotify.com/episode/episode-single' },
+      images: [{ url: 'https://images.spotify.com/ep-single.jpg', width: 300 }],
+      show: { id: 'show-solo', name: 'Solo Show', publisher: 'Pub' },
+    };
+    const fetchClient = {
+      getJson: vi.fn().mockResolvedValueOnce({ access_token: 'token-episode', expires_in: 3600 }).mockResolvedValueOnce(episode),
+    };
+    return { fetchClient, episode };
+  }
+
   it('exposes playlist data and clears loading on success', async () => {
     const fetchClient = makeSpotifySuccessClient();
 
@@ -176,6 +232,83 @@ describe('useImportPlaylist', () => {
     expect(result.current.importBusyKind).toBe(null);
     expect(result.current.total).toBeNull();
     expect(result.current.progress).toBeNull();
+  });
+
+  it('imports a show as podcast episodes and exposes pod-specific metadata', async () => {
+    const { fetchClient, showMeta } = makeSpotifyShowClient({ total: 2, next: null });
+
+    const { result } = renderHook(() => useImportPlaylist());
+    await act(async () => {
+      await result.current.importPlaylist(SPOTIFY_SHOW_URL, { fetchClient });
+    });
+
+    expect(fetchClient.getJson).toHaveBeenCalledTimes(3);
+    expect(result.current.tracks).toHaveLength(2);
+    expect(result.current.tracks[0]).toMatchObject({
+      id: 'episode-1',
+      kind: 'podcast',
+      showName: showMeta.name,
+      showId: showMeta.id,
+    });
+    expect(result.current.pageInfo.hasMore).toBe(false);
+    expect(result.current.total).toBe(2);
+  });
+
+  it('imports a single episode as a one-item playlist', async () => {
+    const { fetchClient, episode } = makeSpotifyEpisodeClient();
+
+    const { result } = renderHook(() => useImportPlaylist());
+    await act(async () => {
+      await result.current.importPlaylist(SPOTIFY_EPISODE_URL, { fetchClient });
+    });
+
+    expect(result.current.tracks).toHaveLength(1);
+    expect(result.current.tracks[0]).toMatchObject({
+      id: episode.id,
+      kind: 'podcast',
+      title: episode.name,
+      showName: episode.show.name,
+    });
+    expect(result.current.pageInfo.hasMore).toBe(false);
+  });
+
+  it('errors on podcast region restrictions', async () => {
+    const restrictedErr = new Error('HTTP_403');
+    restrictedErr.code = 'HTTP_403';
+    restrictedErr.details = { status: 403 };
+    const fetchClient = {
+      getJson: vi
+        .fn()
+        .mockResolvedValueOnce({ access_token: 'token-geo', expires_in: 3600 })
+        .mockRejectedValueOnce(restrictedErr),
+    };
+
+    const { result } = renderHook(() => useImportPlaylist());
+    let response;
+    await act(async () => {
+      response = await result.current.importPlaylist(SPOTIFY_EPISODE_URL, { fetchClient });
+    });
+    expect(result.current.errorCode).toBe(CODES.ERR_EPISODE_UNAVAILABLE);
+    expect(response?.debug?.lastErrorCode).toBe(CODES.ERR_EPISODE_UNAVAILABLE);
+  });
+
+  it('errors on empty show payloads', async () => {
+    const showMeta = { id: 'show-empty', name: 'Empty Show' };
+    const fetchClient = {
+      getJson: vi
+        .fn()
+        .mockResolvedValueOnce({ access_token: 'token-empty', expires_in: 3600 })
+        .mockResolvedValueOnce(showMeta)
+        .mockResolvedValueOnce({ items: [], next: null, total: 0 }),
+    };
+
+    const { result } = renderHook(() => useImportPlaylist());
+    let response;
+    await act(async () => {
+      response = await result.current.importPlaylist(SPOTIFY_SHOW_URL, { fetchClient });
+    });
+    expect(result.current.errorCode).toBe(CODES.ERR_SHOW_EMPTY);
+    expect(response?.debug?.lastErrorCode).toBe(CODES.ERR_SHOW_EMPTY);
   });
 
   it('tracks progress across paginated imports', async () => {

@@ -7,18 +7,29 @@ import { normalizeTrack } from '../normalizeTrack.js';
 import { createAdapterError, CODES } from './types.js';
 import { defaultFetchClient } from '../../../utils/fetchClient.js';
 import { isDev } from '../../../utils/isDev.js';
+import { isPodcastImportEnabled } from '../../../utils/podcastFlags.js';
 
 const PROVIDER = 'spotify';
 const TOKEN_ENDPOINT = '/api/spotify/token';
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 const PLAYLIST_FIELDS = 'name,external_urls,images,owner(display_name),snapshot_id';
 const TRACK_FIELDS =
-  'items(added_at,track(id,uri,name,duration_ms,external_urls,album(name,images),artists(name),is_local,type)),next,total';
-const PAGE_SIZE = 100;
+  'items(added_at,track(id,uri,name,duration_ms,external_urls,album(name,images),artists(name),is_local,type,show(publisher,name,images))),next,total';
+const SHOW_FIELDS = 'name,publisher,images,external_urls';
+const EPISODE_FIELDS =
+  'id,uri,name,description,duration_ms,images,external_urls,show(id,name,publisher,images)';
+const PLAYLIST_PAGE_SIZE = 100;
+const SHOW_PAGE_SIZE = 50;
 const TOKEN_REFRESH_BUFFER_MS = 30_000;
-const CANONICAL_BASE_URL = 'https://open.spotify.com/playlist/';
+const CANONICAL_BASE_URL = 'https://open.spotify.com/';
 const TRACK_THUMB_DISPLAY_WIDTH = 40;
 const IDEAL_TRACK_THUMB_WIDTH = 80; // ~2x the 40px display size for HiDPI clarity
+const DEFAULT_PODCAST_MARKET = 'US';
+const PODCAST_MARKET =
+  typeof import.meta?.env?.VITE_SPOTIFY_PODCAST_MARKET === 'string' &&
+  import.meta.env.VITE_SPOTIFY_PODCAST_MARKET.trim()
+    ? import.meta.env.VITE_SPOTIFY_PODCAST_MARKET.trim().toUpperCase()
+    : DEFAULT_PODCAST_MARKET;
 
 /**
  * @typedef {{ value: string, tokenType: string, expiresAt: number }} TokenMemo
@@ -37,7 +48,7 @@ const PLAYLIST_ID_PATTERN = /^[0-9a-zA-Z]+$/;
  * @param {string | undefined} maybeId
  * @returns {string | null}
  */
-function sanitizePlaylistId(maybeId) {
+function sanitizeSpotifyId(maybeId) {
   if (!maybeId) return null;
   const trimmed = maybeId.trim();
   if (trimmed.length !== PLAYLIST_ID_LENGTH) return null;
@@ -51,12 +62,13 @@ function debugLog(label, payload) {
 }
 
 /**
- * Extract a playlist ID from supported Spotify playlist formats.
- * Supports canonical, legacy user, embed, and URI share links.
+ * Extract a Spotify ID from supported formats for the given path segment.
+ * Supports canonical, legacy user, embed, localized (/intl-xx), and URI share links.
  * @param {string} raw
+ * @param {'playlist' | 'show' | 'episode'} kind
  * @returns {string | null}
  */
-export function extractPlaylistId(raw) {
+function extractIdByKind(raw, kind) {
   if (typeof raw !== 'string') return null;
 
   const input = raw.trim();
@@ -66,13 +78,13 @@ export function extractPlaylistId(raw) {
 
   if (lowerInput.startsWith('spotify://')) {
     const translated = `https://open.spotify.com/${input.slice('spotify://'.length).replace(/^\/+/, '')}`;
-    return extractPlaylistId(translated);
+    return extractIdByKind(translated, kind);
   }
 
   if (lowerInput.startsWith('spotify:')) {
     const parts = input.split(':').filter(Boolean);
-    if (parts.length >= 3 && parts[parts.length - 2]?.toLowerCase() === 'playlist') {
-      return sanitizePlaylistId(parts[parts.length - 1]);
+    if (parts.length >= 3 && parts[parts.length - 2]?.toLowerCase() === kind) {
+      return sanitizeSpotifyId(parts[parts.length - 1]);
     }
     return null;
   }
@@ -88,30 +100,77 @@ export function extractPlaylistId(raw) {
     if (!rawSegments.length) return null;
     const segments = rawSegments.map((seg) => seg.toLowerCase());
 
-    // Canonical: /playlist/{id}
-    if (segments[0] === 'playlist') {
-      return sanitizePlaylistId(rawSegments[1]);
+    // Canonical: /{kind}/{id}
+    if (segments[0] === kind) {
+      return sanitizeSpotifyId(rawSegments[1]);
     }
 
-    // Localized: /intl-xx/playlist/{id}
-    if (segments[0]?.startsWith('intl-') && segments[1] === 'playlist') {
-      return sanitizePlaylistId(rawSegments[2]);
+    // Localized: /intl-xx/{kind}/{id}
+    if (segments[0]?.startsWith('intl-') && segments[1] === kind) {
+      return sanitizeSpotifyId(rawSegments[2]);
     }
 
     // Legacy: /user/{userId}/playlist/{id}
-    if (segments[0] === 'user' && segments[2] === 'playlist') {
-      return sanitizePlaylistId(rawSegments[3]);
+    if (kind === 'playlist' && segments[0] === 'user' && segments[2] === 'playlist') {
+      return sanitizeSpotifyId(rawSegments[3]);
     }
 
-    // Embed: /embed/playlist/{id}
-    if (segments[0] === 'embed' && segments[1] === 'playlist') {
-      return sanitizePlaylistId(rawSegments[2]);
+    // Embed: /embed/{kind}/{id}
+    if (segments[0] === 'embed' && segments[1] === kind) {
+      return sanitizeSpotifyId(rawSegments[2]);
     }
 
     return null;
   } catch {
     return null;
   }
+}
+
+export function extractPlaylistId(raw) {
+  return extractIdByKind(raw, 'playlist');
+}
+
+export function extractShowId(raw) {
+  return extractIdByKind(raw, 'show');
+}
+
+export function extractEpisodeId(raw) {
+  return extractIdByKind(raw, 'episode');
+}
+
+/**
+ * @param {string} raw
+ * @returns {{ type: 'playlist' | 'show' | 'episode', id: string, canonicalUrl: string } | null}
+ */
+function detectContent(raw) {
+  const playlistId = extractPlaylistId(raw);
+  if (playlistId) {
+    return {
+      type: 'playlist',
+      id: playlistId,
+      canonicalUrl: buildCanonicalPlaylistUrl(playlistId),
+    };
+  }
+
+  const showId = extractShowId(raw);
+  if (showId) {
+    return {
+      type: 'show',
+      id: showId,
+      canonicalUrl: `${CANONICAL_BASE_URL}show/${showId}`,
+    };
+  }
+
+  const episodeId = extractEpisodeId(raw);
+  if (episodeId) {
+    return {
+      type: 'episode',
+      id: episodeId,
+      canonicalUrl: `${CANONICAL_BASE_URL}episode/${episodeId}`,
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -148,10 +207,17 @@ function mapSpotifyError(stage, err) {
   };
 
   if (status === 401 || status === 403) {
+    const isRegionRestriction = status === 403 && details?.stage === 'tracks';
+    if (isRegionRestriction) {
+      throw createAdapterError(CODES.ERR_EPISODE_UNAVAILABLE, details, err);
+    }
     throw createAdapterError(CODES.ERR_PRIVATE_PLAYLIST, details, err);
   }
   if (status === 404) {
     throw createAdapterError(CODES.ERR_NOT_FOUND, details, err);
+  }
+  if (status === 451) {
+    throw createAdapterError(CODES.ERR_EPISODE_UNAVAILABLE, details, err);
   }
   if (status === 429) {
     throw createAdapterError(CODES.ERR_RATE_LIMITED, details, err);
@@ -223,6 +289,63 @@ function selectAlbumThumb(albumImages, fallbackUrl) {
 export const __private = {
   selectAlbumThumb,
 };
+
+/**
+ * @param {any} episode
+ * @param {{ id?: string, name?: string, publisher?: string, images?: any[] }} showMeta
+ * @param {number} index
+ * @param {string | undefined} addedAt
+ */
+function normalizeEpisodeItem(episode, showMeta, index, addedAt) {
+  if (!episode || typeof episode !== 'object') return null;
+  const episodeId = episode?.id ?? episode?.uri;
+  if (!episodeId) return null;
+
+  const showName =
+    typeof episode?.show?.name === 'string'
+      ? episode.show.name
+      : typeof showMeta?.name === 'string'
+        ? showMeta.name
+        : undefined;
+
+  const publisher =
+    typeof episode?.show?.publisher === 'string'
+      ? episode.show.publisher
+      : typeof showMeta?.publisher === 'string'
+        ? showMeta.publisher
+        : undefined;
+
+  const showId = typeof episode?.show?.id === 'string' ? episode.show.id : showMeta?.id;
+  const thumbnailUrl =
+    selectAlbumThumb(episode?.images, null) ??
+    selectAlbumThumb(showMeta?.images, null) ??
+    null;
+
+  return normalizeTrack(
+    {
+      id: episodeId,
+      providerTrackId: episodeId,
+      title: typeof episode?.name === 'string' ? episode.name : '',
+      artist: showName ?? '',
+      album: showName ?? undefined,
+      durationMs:
+        typeof episode?.duration_ms === 'number' && Number.isFinite(episode.duration_ms)
+          ? episode.duration_ms
+          : undefined,
+      sourceUrl: episode?.external_urls?.spotify ?? '',
+      thumbnailUrl: thumbnailUrl ?? undefined,
+      provider: PROVIDER,
+      kind: 'podcast',
+      showId: typeof showId === 'string' ? showId : undefined,
+      showName: showName ?? undefined,
+      publisher: publisher ?? undefined,
+      description: typeof episode?.description === 'string' ? episode.description : undefined,
+      dateAdded: addedAt,
+    },
+    index,
+    PROVIDER
+  );
+}
 
 /**
  * @param {TokenMemo | null} memo
@@ -341,7 +464,7 @@ function buildPlaylistMetaUrl(playlistId) {
  */
 function buildPlaylistTracksUrl(playlistId) {
   const params = new URLSearchParams({
-    limit: String(PAGE_SIZE),
+    limit: String(PLAYLIST_PAGE_SIZE),
     fields: TRACK_FIELDS,
   });
   return `${SPOTIFY_API_BASE}/playlists/${playlistId}/tracks?${params.toString()}`;
@@ -351,7 +474,7 @@ function buildPlaylistTracksUrl(playlistId) {
  * @param {string} playlistId
  */
 function buildCanonicalPlaylistUrl(playlistId) {
-  return `${CANONICAL_BASE_URL}${playlistId}`;
+  return `${CANONICAL_BASE_URL}playlist/${playlistId}`;
 }
 
 /**
@@ -391,6 +514,72 @@ async function fetchPlaylistMeta(fetchClient, playlistId, token, { signal }) {
 
 /**
  * @param {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} fetchClient
+ * @param {string} showId
+ * @param {TokenMemo} token
+ * @param {{ signal?: AbortSignal, offset?: number, cursor?: string | null }} [options]
+ */
+async function fetchShowEpisodes(
+  fetchClient,
+  showId,
+  token,
+  { signal, offset = 0, cursor = null } = {},
+) {
+  const endpoint = cursor ? sanitizeCursor(cursor) : buildShowEpisodesUrl(showId, offset);
+  if (!endpoint) {
+    invalidResponse('tracks', { reason: 'invalid_cursor', cursor });
+  }
+  try {
+    return await fetchClient.getJson(endpoint, {
+      signal,
+      headers: {
+        Authorization: `${token.tokenType} ${token.value}`,
+      },
+    });
+  } catch (err) {
+    mapSpotifyError('tracks', err);
+  }
+}
+
+/**
+ * @param {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} fetchClient
+ * @param {string} showId
+ * @param {TokenMemo} token
+ * @param {{ signal?: AbortSignal }} options
+ */
+async function fetchShowMeta(fetchClient, showId, token, { signal }) {
+  try {
+    return await fetchClient.getJson(buildShowMetaUrl(showId), {
+      signal,
+      headers: {
+        Authorization: `${token.tokenType} ${token.value}`,
+      },
+    });
+  } catch (err) {
+    mapSpotifyError('meta', err);
+  }
+}
+
+/**
+ * @param {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} fetchClient
+ * @param {string} episodeId
+ * @param {TokenMemo} token
+ * @param {{ signal?: AbortSignal }} options
+ */
+async function fetchEpisode(fetchClient, episodeId, token, { signal }) {
+  try {
+    return await fetchClient.getJson(buildEpisodeUrl(episodeId), {
+      signal,
+      headers: {
+        Authorization: `${token.tokenType} ${token.value}`,
+      },
+    });
+  } catch (err) {
+    mapSpotifyError('tracks', err);
+  }
+}
+
+/**
+ * @param {ReturnType<typeof import('../../../utils/fetchClient.js').makeFetchClient>} fetchClient
  * @param {string} playlistId
  * @param {TokenMemo} token
  * @param {{ signal?: AbortSignal, cursor?: string | null }} options
@@ -414,6 +603,43 @@ async function fetchPlaylistTracks(fetchClient, playlistId, token, { signal, cur
 }
 
 /**
+ * @param {string} showId
+ */
+function buildShowMetaUrl(showId) {
+  const params = new URLSearchParams({
+    market: PODCAST_MARKET,
+    fields: SHOW_FIELDS,
+  });
+  return `${SPOTIFY_API_BASE}/shows/${showId}?${params.toString()}`;
+}
+
+/**
+ * @param {string} showId
+ * @param {number} [offset]
+ */
+function buildShowEpisodesUrl(showId, offset = 0) {
+  const params = new URLSearchParams({
+    limit: String(SHOW_PAGE_SIZE),
+    offset: String(offset),
+    market: PODCAST_MARKET,
+    fields:
+      'items(id,uri,name,description,duration_ms,images,external_urls,release_date,release_date_precision,show(id,name,publisher,images)),next,total',
+  });
+  return `${SPOTIFY_API_BASE}/shows/${showId}/episodes?${params.toString()}`;
+}
+
+/**
+ * @param {string} episodeId
+ */
+function buildEpisodeUrl(episodeId) {
+  const params = new URLSearchParams({
+    market: PODCAST_MARKET,
+    fields: EPISODE_FIELDS,
+  });
+  return `${SPOTIFY_API_BASE}/episodes/${episodeId}?${params.toString()}`;
+}
+
+/**
  * @param {any[]} rawItems
  * @param {any} meta
  */
@@ -429,7 +655,17 @@ function toNormalizedTracks(rawItems, meta) {
   rawItems.forEach((item) => {
     const track = item?.track;
     if (!track || typeof track !== 'object') return;
-    if (track.is_local || track.type === 'episode') return;
+    if (track.is_local) return;
+
+    const addedAt = typeof item?.added_at === 'string' ? item.added_at : undefined;
+
+    if (track.type === 'episode') {
+      const normalizedEpisode = normalizeEpisodeItem(track, track.show ?? {}, out.length, addedAt);
+      if (normalizedEpisode) {
+        out.push(normalizedEpisode);
+      }
+      return;
+    }
 
     const title = typeof track.name === 'string' ? track.name : '';
     const artistList = Array.isArray(track.artists)
@@ -442,7 +678,6 @@ function toNormalizedTracks(rawItems, meta) {
     const albumThumb = selectAlbumThumb(track.album?.images, fallbackThumb);
     const albumName =
       track?.album && typeof track.album.name === 'string' ? track.album.name : undefined;
-    const addedAt = typeof item?.added_at === 'string' ? item.added_at : undefined;
 
     const normalized = normalizeTrack(
       {
@@ -456,12 +691,36 @@ function toNormalizedTracks(rawItems, meta) {
         provider: PROVIDER,
         album: albumName,
         dateAdded: addedAt,
+        kind: 'music',
       },
       out.length, // note: indices are page-local
       PROVIDER
     );
 
     out.push(normalized);
+  });
+
+  return out;
+}
+
+/**
+ * @param {any[]} rawItems
+ * @param {any} showMeta
+ * @param {number} startIndex
+ */
+function toNormalizedShowEpisodes(rawItems, showMeta, startIndex = 0) {
+  if (!Array.isArray(rawItems)) {
+    invalidResponse('tracks', { reason: 'missing_episodes' });
+  }
+
+  /** @type {import('./types.js').NormalizedTrack[]} */
+  const out = [];
+
+  rawItems.forEach((episode, idx) => {
+    const normalized = normalizeEpisodeItem(episode, showMeta, startIndex + idx, undefined);
+    if (normalized) {
+      out.push(normalized);
+    }
   });
 
   return out;
@@ -498,8 +757,16 @@ function toNormalizedTracks(rawItems, meta) {
 export async function importPlaylist(options = {}) {
   const fetchClient = options.fetchClient ?? defaultFetchClient;
   const playlistUrl = typeof options?.url === 'string' ? options.url.trim() : '';
-  const playlistId = extractPlaylistId(playlistUrl);
-  if (!playlistId) {
+  const detected = detectContent(playlistUrl);
+  if (!detected) {
+    throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, {
+      urlPreview: playlistUrl.slice(0, 120),
+    });
+  }
+
+  const { type: contentType, id: contentId, canonicalUrl } = detected;
+  const isPodcast = contentType === 'show' || contentType === 'episode';
+  if (isPodcast && !isPodcastImportEnabled()) {
     throw createAdapterError(CODES.ERR_UNSUPPORTED_URL, {
       urlPreview: playlistUrl.slice(0, 120),
     });
@@ -520,36 +787,76 @@ export async function importPlaylist(options = {}) {
     const token = await fetchAccessToken(fetchClient, { signal, forceRefresh });
     const tokenMs = Date.now() - tokenStart;
 
-    // Fetch playlist meta and first page of tracks in parallel under the same token.
-    // If either returns 401 once, we retry the whole pair with a fresh token (see loop below).
     let metaMs = null;
     let tracksMs = null;
 
+    if (contentType === 'playlist') {
+      const metaStart = perfNow();
+      const metaPromise = fetchPlaylistMeta(fetchClient, contentId, token, { signal }).then((meta) => {
+        metaMs = perfNow() - metaStart;
+        return meta;
+      });
+
+      const trackStart = perfNow();
+      const tracksPromise = fetchPlaylistTracks(fetchClient, contentId, token, {
+        signal,
+        cursor,
+      }).then((payload) => {
+        tracksMs = perfNow() - trackStart;
+        return payload;
+      });
+
+      const [meta, tracksPayload] = await Promise.all([metaPromise, tracksPromise]);
+      debugLog('parallel:fetch', {
+        metaMs,
+        tracksMs,
+        tokenMs,
+        next: Boolean(tracksPayload?.next),
+        total: typeof tracksPayload?.total === 'number' ? tracksPayload.total : null,
+        items: Array.isArray(tracksPayload?.items) ? tracksPayload.items.length : 0,
+      });
+      return { meta, tracksPayload, timings: { metaMs, tracksMs, tokenMs } };
+    }
+
+    if (contentType === 'show') {
+      const metaStart = perfNow();
+      const metaPromise = fetchShowMeta(fetchClient, contentId, token, { signal }).then((meta) => {
+        metaMs = perfNow() - metaStart;
+        return meta;
+      });
+
+      const trackStart = perfNow();
+      const tracksPromise = fetchShowEpisodes(fetchClient, contentId, token, {
+        signal,
+        cursor,
+      }).then((payload) => {
+        tracksMs = perfNow() - trackStart;
+        return payload;
+      });
+
+      const [meta, tracksPayload] = await Promise.all([metaPromise, tracksPromise]);
+      debugLog('parallel:fetch:show', {
+        metaMs,
+        tracksMs,
+        tokenMs,
+        next: Boolean(tracksPayload?.next),
+        total: typeof tracksPayload?.total === 'number' ? tracksPayload.total : null,
+        items: Array.isArray(tracksPayload?.items) ? tracksPayload.items.length : 0,
+      });
+      return { meta, tracksPayload, timings: { metaMs, tracksMs, tokenMs } };
+    }
+
     const metaStart = perfNow();
-    const metaPromise = fetchPlaylistMeta(fetchClient, playlistId, token, { signal }).then((meta) => {
+    const episodePayload = await fetchEpisode(fetchClient, contentId, token, { signal }).then((episode) => {
       metaMs = perfNow() - metaStart;
-      return meta;
+      return episode;
     });
-
-    const trackStart = perfNow();
-    const tracksPromise = fetchPlaylistTracks(fetchClient, playlistId, token, {
-      signal,
-      cursor,
-    }).then((payload) => {
-      tracksMs = perfNow() - trackStart;
-      return payload;
-    });
-
-    const [meta, tracksPayload] = await Promise.all([metaPromise, tracksPromise]);
-    debugLog('parallel:fetch', {
+    debugLog('episode:fetch', {
       metaMs,
-      tracksMs,
       tokenMs,
-      next: Boolean(tracksPayload?.next),
-      total: typeof tracksPayload?.total === 'number' ? tracksPayload.total : null,
-      items: Array.isArray(tracksPayload?.items) ? tracksPayload.items.length : 0,
+      id: contentId.slice(0, 8),
     });
-    return { meta, tracksPayload, timings: { metaMs, tracksMs, tokenMs } };
+    return { meta: episodePayload, tracksPayload: episodePayload, timings: { metaMs, tracksMs: 0, tokenMs } };
   };
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -557,48 +864,132 @@ export async function importPlaylist(options = {}) {
     try {
       const { meta, tracksPayload, timings } = await runWithToken(forceRefresh);
 
-      const items = /** @type {any[]} */ (tracksPayload?.items ?? []);
-      const tracks = toNormalizedTracks(items, meta); // note: indices are page-local
-      const nextCursor = typeof tracksPayload?.next === 'string' ? tracksPayload.next : null;
-      const totalTracks =
-        typeof tracksPayload?.total === 'number' && Number.isFinite(tracksPayload.total)
-          ? tracksPayload.total
-          : undefined;
-      const coverImage =
-        Array.isArray(meta?.images) && meta.images[0]?.url ? meta.images[0].url : undefined;
+      if (contentType === 'playlist') {
+        const items = /** @type {any[]} */ (tracksPayload?.items ?? []);
+        const tracks = toNormalizedTracks(items, meta); // note: indices are page-local
+        const nextCursor = typeof tracksPayload?.next === 'string' ? tracksPayload.next : null;
+        const totalTracks =
+          typeof tracksPayload?.total === 'number' && Number.isFinite(tracksPayload.total)
+            ? tracksPayload.total
+            : undefined;
+        const coverImage =
+          Array.isArray(meta?.images) && meta.images[0]?.url ? meta.images[0].url : undefined;
 
-      const canonicalUrl = buildCanonicalPlaylistUrl(playlistId);
+        return {
+          provider: PROVIDER,
+          playlistId: contentId,
+          title: typeof meta?.name === 'string' ? meta.name : `Spotify playlist ${contentId}`,
+          snapshotId: typeof meta?.snapshot_id === 'string' ? meta.snapshot_id : undefined,
+          sourceUrl: canonicalUrl,
+          coverUrl: coverImage,
+          total: totalTracks,
+          tracks,
+          pageInfo: {
+            cursor: nextCursor,
+            hasMore: Boolean(nextCursor),
+          },
+          debug: {
+            source: 'spotify:web',
+            stage: cursor ? 'paginate' : 'initial',
+            hasNext: Boolean(nextCursor),
+            tokenRefreshed,
+            metaMs: timings.metaMs,
+            tracksMs: timings.tracksMs,
+            tokenMs: timings.tokenMs,
+            inputUrl: playlistUrl || null,
+            contentType,
+          },
+        };
+      }
+
+      if (contentType === 'show') {
+        const items = /** @type {any[]} */ (tracksPayload?.items ?? []);
+        const nextCursor = typeof tracksPayload?.next === 'string' ? tracksPayload.next : null;
+        const totalEpisodes =
+          typeof tracksPayload?.total === 'number' && Number.isFinite(tracksPayload.total)
+            ? tracksPayload.total
+            : undefined;
+        const longShow = typeof totalEpisodes === 'number' && totalEpisodes > 500;
+
+        if (!items.length && !nextCursor) {
+          throw createAdapterError(CODES.ERR_SHOW_EMPTY, { showId: contentId });
+        }
+
+        const tracks = toNormalizedShowEpisodes(items, meta, 0);
+
+        const coverImage =
+          Array.isArray(meta?.images) && meta.images[0]?.url ? meta.images[0].url : undefined;
+
+        return {
+          provider: PROVIDER,
+          playlistId: contentId,
+          title: typeof meta?.name === 'string' ? meta.name : `Spotify show ${contentId}`,
+          sourceUrl: canonicalUrl,
+          coverUrl: coverImage,
+          total: totalEpisodes,
+          tracks,
+          pageInfo: {
+            cursor: nextCursor,
+            hasMore: Boolean(nextCursor),
+          },
+          debug: {
+            source: 'spotify:web',
+            stage: cursor ? 'paginate' : 'initial',
+            hasNext: Boolean(nextCursor),
+            tokenRefreshed,
+            metaMs: timings.metaMs,
+            tracksMs: timings.tracksMs,
+            tokenMs: timings.tokenMs,
+            inputUrl: playlistUrl || null,
+            contentType,
+            longShow,
+          },
+        };
+      }
+
+      const episodeTrack = normalizeEpisodeItem(
+        tracksPayload,
+        tracksPayload?.show ?? {},
+        0,
+        undefined
+      );
+      if (!episodeTrack) {
+        throw createAdapterError(CODES.ERR_PODCAST_CONTENT, { episodeId: contentId });
+      }
 
       return {
         provider: PROVIDER,
-        playlistId,
-        title: typeof meta?.name === 'string' ? meta.name : `Spotify playlist ${playlistId}`,
-        snapshotId: typeof meta?.snapshot_id === 'string' ? meta.snapshot_id : undefined,
+        playlistId: contentId,
+        title:
+          typeof tracksPayload?.name === 'string'
+            ? tracksPayload.name
+            : `Spotify episode ${contentId}`,
         sourceUrl: canonicalUrl,
-        coverUrl: coverImage,
-        total: totalTracks,
-        tracks,
+        coverUrl: episodeTrack.thumbnailUrl ?? undefined,
+        total: 1,
+        tracks: [episodeTrack],
         pageInfo: {
-          cursor: nextCursor,
-          hasMore: Boolean(nextCursor),
+          cursor: null,
+          hasMore: false,
         },
         debug: {
           source: 'spotify:web',
-          stage: cursor ? 'paginate' : 'initial',
-          hasNext: Boolean(nextCursor),
+          stage: 'episode',
+          hasNext: false,
           tokenRefreshed,
           metaMs: timings.metaMs,
           tracksMs: timings.tracksMs,
           tokenMs: timings.tokenMs,
           inputUrl: playlistUrl || null,
+          contentType,
         },
       };
     } catch (err) {
       lastError = err;
       const status = extractHttpStatus(err);
       if (status === 401 && attempt === 0) {
-        // Unauthorized once → drop memo and retry with a fresh token.
-        debugLog('token:retry', { reason: 'unauthorized', playlist: playlistId.slice(0, 8) });
+        // Unauthorized once — drop memo and retry with a fresh token.
+        debugLog('token:retry', { reason: 'unauthorized', playlist: contentId.slice(0, 8) });
         invalidateTokenMemo();
         tokenRefreshed = true;
         continue;

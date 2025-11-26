@@ -82,6 +82,7 @@ function resolveVirtualizationPreference(trackCount) {
  * @param {string[]} props.customTags
  * @param {(message: string) => void} props.announce
  * @param {BackgroundSyncState} [props.initialSyncStatus]
+ * @param {import('../import/usePlaylistImportController.js').CachedViewInfo | null} [props.cachedViewInfo]
  * @param {BackgroundSyncState} [props.backgroundSync]
  * @param {{ reason: string|null, ts: number }} [props.focusContext]
  * @param {boolean} props.hasDiscoveredTimestamp
@@ -95,6 +96,7 @@ function resolveVirtualizationPreference(trackCount) {
  *   Receives the ID of the first track in the filtered/sorted list, or null if no tracks are
  *   visible. This enables App to focus the correct track even when adapter order differs from
  *   display order (e.g., oldest-to-newest import with newest-first sort).
+ * @param {'playlist' | 'podcast'} [props.viewMode]
  */
 export default function PlaylistView({
   playlistTitle,
@@ -132,8 +134,13 @@ export default function PlaylistView({
   skipFocusManagement = false,
   onFirstVisibleTrackChange,
   initialSyncStatus,
+  cachedViewInfo = null,
+  viewMode = 'playlist',
 }) {
   const MOCK_PREFIX = 'MOCK DATA ACTIVE - '
+  const isPodcastMode = viewMode === 'podcast'
+  const headingId = isPodcastMode ? 'podcast-title' : 'playlist-title'
+  const viewLabel = isPodcastMode ? 'podcast' : 'playlist'
   const hasMockPrefix = typeof playlistTitle === 'string' && playlistTitle.startsWith(MOCK_PREFIX)
   const cleanTitle = hasMockPrefix ? playlistTitle.slice(MOCK_PREFIX.length) : playlistTitle
   const showLoadMore = Boolean(importMeta?.hasMore && importMeta?.cursor)
@@ -160,6 +167,23 @@ export default function PlaylistView({
     }
     return Array.from(bucket).sort((a, b) => a.localeCompare(b))
   }, [stockTags, customTags])
+
+  const cachedBannerDetails = useMemo(() => {
+    if (!cachedViewInfo) return null
+    const count = typeof cachedViewInfo.trackCount === 'number' ? cachedViewInfo.trackCount : null
+    const countLabel =
+      typeof count === 'number' ? `${count} track${count === 1 ? '' : 's'}` : null
+    const importedLabel = cachedViewInfo.importedAt
+      ? new Date(cachedViewInfo.importedAt).toLocaleString()
+      : null
+    const parts = []
+    if (countLabel) parts.push(countLabel)
+    if (importedLabel) parts.push(`imported ${importedLabel}`)
+    const summary = parts.length > 0 ? parts.join(' — ') : `cached ${viewLabel}`
+    return {
+      text: `Viewing saved copy (${summary}). Reimport to check for updates.`,
+    }
+  }, [cachedViewInfo, viewLabel])
 
   const pendingByTrack = useMemo(() => {
     if (!(pending instanceof Map)) return new Map()
@@ -490,10 +514,10 @@ export default function PlaylistView({
   const cooldownMessageId = cooldownMessage ? 'load-more-cooldown' : undefined
 
   return (
-    <section aria-labelledby="playlist-title">
+    <section aria-labelledby={headingId}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h1 id="playlist-title" aria-label={cleanTitle} style={{ marginTop: 0, marginBottom: 0 }}>
+          <h1 id={headingId} aria-label={cleanTitle} style={{ marginTop: 0, marginBottom: 0 }}>
             {hasMockPrefix && <span aria-hidden="true">{MOCK_PREFIX}</span>}
             {cleanTitle}
           </h1>
@@ -511,7 +535,7 @@ export default function PlaylistView({
               ref={reimportBtnRef}
               className="btn"
               onClick={onReimport}
-              aria-label="Re-import this playlist"
+              aria-label={`Re-import this ${viewLabel}`}
               disabled={isAnyImportBusy}
               aria-busy={showReimportSpinner ? 'true' : 'false'}
             >
@@ -569,6 +593,22 @@ export default function PlaylistView({
           {initialSyncStatus?.status === 'error'
             ? `Sync paused: ${initialSyncStatus?.lastError ?? 'Unknown error'}`
             : 'Syncing notes in the background...'}
+        </div>
+      )}
+
+      {cachedBannerDetails && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 12,
+            padding: '8px 12px',
+            background: 'var(--surface)',
+            borderRadius: 6,
+            border: '1px solid var(--border)',
+            color: 'var(--muted)',
+          }}
+        >
+          {cachedBannerDetails.text}
         </div>
       )}
 

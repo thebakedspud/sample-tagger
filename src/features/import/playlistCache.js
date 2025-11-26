@@ -10,7 +10,7 @@
  */
 
 const STORAGE_KEY = 'sta:playlist-cache:v1'
-const STORAGE_VERSION = 1
+const STORAGE_VERSION = 2
 export const PLAYLIST_CACHE_MAX_ENTRIES = 5
 
 /**
@@ -22,6 +22,7 @@ export const PLAYLIST_CACHE_MAX_ENTRIES = 5
  * @property {string} key
  * @property {number} storedAt
  * @property {ImportResult} data
+ * @property {string[]} [aliases]
  */
 
 /**
@@ -60,10 +61,16 @@ function normalizeEntry(entry) {
   const storedAt = Number(entry.storedAt)
   if (!Number.isFinite(storedAt) || storedAt <= 0) return null
   if (!entry.data || typeof entry.data !== 'object') return null
+  const aliases = Array.isArray(entry.aliases)
+    ? entry.aliases
+        .map((alias) => (typeof alias === 'string' && alias.trim() ? alias.trim() : null))
+        .filter(Boolean)
+    : []
   return {
     key,
     storedAt,
     data: entry.data,
+    aliases,
   }
 }
 
@@ -73,7 +80,10 @@ function normalizeEntry(entry) {
  */
 export function loadPersistedPlaylistCache() {
   const payload = readRawPayload()
-  if (!payload || payload.version !== STORAGE_VERSION) {
+  if (!payload) {
+    return []
+  }
+  if (payload.version > STORAGE_VERSION) {
     return []
   }
   const normalized = payload.entries
@@ -96,6 +106,7 @@ export function persistPlaylistCacheEntries(entries) {
         key: entry.key,
         storedAt: entry.storedAt,
         data: entry.data,
+        aliases: Array.isArray(entry.aliases) ? entry.aliases : [],
       })),
     }
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))

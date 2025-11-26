@@ -36,12 +36,16 @@ export function normalizeTrack(t = {}, i, provider) {
   const source = /** @type {Partial<NormalizedTrack> & { addedAt?: string | number | Date | null | undefined }} */ (t ?? {});
   const safeTitle = sanitizeText(source?.title ?? '');
   const safeArtist = sanitizeText(source?.artist ?? '');
+  const resolvedKind =
+    source?.kind === 'podcast' || source?.kind === 'music' ? source.kind : 'music';
+
   const normalized = /** @type {NormalizedTrack} */ ({
     ...source,
     id: source?.id ?? `${provider ?? 'track'}-${i + 1}`,
     title: safeTitle || `Untitled Track ${i + 1}`,
     artist: safeArtist || 'Unknown Artist',
     provider: source?.provider ?? provider ?? undefined,
+    kind: resolvedKind,
   });
 
   const album = sanitizeText(source?.album ?? '');

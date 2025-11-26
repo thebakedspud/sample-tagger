@@ -35,7 +35,7 @@ const computeTotalFromPayload = (payload) => {
 export function useRecentPlaylists(initialRecents) {
   const [recentPlaylists, setRecentPlaylists] = useState(() => initialRecents)
   const [recentCardState, setRecentCardState] = useState(() => ({}))
-  const { cachedPlaylists, isHydrating } = usePersistentPlaylistCache()
+  const { cachedPlaylists, isHydrating, getCachedResult } = usePersistentPlaylistCache()
 
   const updateRecentCardState = useCallback((id, updater) => {
     if (!id) return
@@ -83,15 +83,22 @@ export function useRecentPlaylists(initialRecents) {
 
   useEffect(() => {
     if (isHydrating) return
-    if (!cachedPlaylists || typeof cachedPlaylists.get !== 'function') return
+    if (!cachedPlaylists) return
     setRecentPlaylists((prev) => {
       if (!Array.isArray(prev) || prev.length === 0) return prev
       let changed = false
       const next = prev.map((item) => {
-        const key = normalizeSourceKey(item?.sourceUrl)
-        if (!key) return item
-        const entry = cachedPlaylists.get(key)
-        const payload = entry?.data ?? entry
+        const urlKey = normalizeSourceKey(item?.sourceUrl)
+        const canonicalKey =
+          typeof item?.provider === 'string' &&
+          item.provider &&
+          typeof item?.playlistId === 'string' &&
+          item.playlistId
+            ? `${item.provider}:${item.playlistId}`
+            : null
+        const payload =
+          (canonicalKey ? getCachedResult(canonicalKey) : null) ||
+          (urlKey ? getCachedResult(urlKey) : null)
         if (!payload || typeof payload !== 'object') return item
 
         const updates = {}
@@ -129,7 +136,7 @@ export function useRecentPlaylists(initialRecents) {
       }
       return prev
     })
-  }, [cachedPlaylists, isHydrating])
+  }, [cachedPlaylists, getCachedResult, isHydrating])
 
   return {
     recentPlaylists,

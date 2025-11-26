@@ -1,4 +1,9 @@
-import { extractPlaylistId } from './adapters/spotifyAdapter.js';
+import {
+  extractPlaylistId,
+  extractShowId,
+  extractEpisodeId,
+} from './adapters/spotifyAdapter.js';
+import { isPodcastImportEnabled } from '../../utils/podcastFlags.js';
 
 // Detects which platform a playlist URL belongs to.
 // Returns 'spotify' | 'youtube' | 'soundcloud' | null.
@@ -9,6 +14,9 @@ export default function detectProvider(input = '') {
   if (!trimmed) return null;
 
   if (extractPlaylistId(trimmed)) return 'spotify';
+  if (isPodcastImportEnabled() && (extractShowId(trimmed) || extractEpisodeId(trimmed))) {
+    return 'spotify';
+  }
 
   const lower = trimmed.toLowerCase();
 
