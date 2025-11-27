@@ -193,6 +193,7 @@ function SearchFilterBar({
         border: '1px solid var(--border)',
         borderRadius: 8,
         padding: 16,
+        marginTop: 12,
         marginBottom: 16,
         boxShadow: 'var(--shadow)',
         display: 'flex',

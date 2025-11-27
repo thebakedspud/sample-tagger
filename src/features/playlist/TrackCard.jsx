@@ -466,6 +466,7 @@ const TrackCardComponent = forwardRef(function TrackCard(
             onChange={(event) => onDraftChange(event.target.value)}
             style={{
               width: '100%',
+              boxSizing: 'border-box',
               padding: 8,
               borderRadius: 6,
               border: `1px solid ${error ? '#d9534f' : 'var(--border)'}`,
