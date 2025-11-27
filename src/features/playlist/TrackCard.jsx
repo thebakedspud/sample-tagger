@@ -9,6 +9,7 @@ import {
   useId,
 } from 'react'
 import NoteList from './NoteList.jsx'
+import { extractTimestamp, formatTimestampMs, formatTimestampRange } from './noteTimestamps.js'
 import TagChip from '../tags/TagChip.jsx'
 import TagInput from '../tags/TagInput.jsx'
 import ErrorMessage from '../../components/ErrorMessage.jsx'
@@ -158,6 +159,22 @@ const TrackCardComponent = forwardRef(function TrackCard(
 
   const trimmedDraft = draft.trim()
   const showTimestampHint = isEditing && !hasDiscoveredTimestamp && trimmedDraft === ''
+
+  const { timestampLabel } = useMemo(() => {
+    if (!isEditing || !trimmedDraft) return { timestampLabel: null }
+    const result = extractTimestamp(draft)
+    if (!result.timestamp) return { timestampLabel: null }
+
+    const { kind, startMs, endMs } = result.timestamp
+    const label = kind === 'range'
+      ? formatTimestampRange(startMs, endMs)
+      : formatTimestampMs(startMs)
+
+    return { timestampLabel: label }
+  }, [isEditing, trimmedDraft, draft])
+
+  const showIndicator = Boolean(timestampLabel) && !error
+
   const textareaDescribedBy = useMemo(() => {
     const ids = []
     if (showTimestampHint) ids.push(timestampHintId)
@@ -457,23 +474,54 @@ const TrackCardComponent = forwardRef(function TrackCard(
           <label className="sr-only" htmlFor={`note-input-${track.id}`}>
             Note text
           </label>
-          <textarea
-            id={`note-input-${track.id}`}
-            rows={3}
-            value={draft}
-            placeholder={showTimestampHint ? TIMESTAMP_HINT_TEXT : undefined}
-            aria-describedby={textareaDescribedBy}
-            onChange={(event) => onDraftChange(event.target.value)}
-            style={{
-              width: '100%',
-              boxSizing: 'border-box',
-              padding: 8,
-              borderRadius: 6,
-              border: `1px solid ${error ? '#d9534f' : 'var(--border)'}`,
-              background: 'var(--card)',
-              color: 'var(--fg)',
-            }}
-          />
+          <div style={{ position: 'relative' }}>
+            <textarea
+              id={`note-input-${track.id}`}
+              rows={3}
+              value={draft}
+              placeholder={showTimestampHint ? TIMESTAMP_HINT_TEXT : undefined}
+              aria-describedby={textareaDescribedBy}
+              onChange={(event) => onDraftChange(event.target.value)}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: 8,
+                paddingRight: 50,
+                borderRadius: 6,
+                border: `1px solid ${error ? '#d9534f' : showIndicator ? 'var(--accent)' : 'var(--border)'}`,
+                boxShadow: showIndicator && !error ? '0 0 0 2px rgba(90, 180, 255, 0.15)' : 'none',
+                transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                background: 'var(--card)',
+                color: 'var(--fg)',
+              }}
+            />
+            {showIndicator && (
+              <>
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 8,
+                    right: 8,
+                    color: 'var(--accent)',
+                    fontSize: '0.81rem',
+                    whiteSpace: 'nowrap',
+                    border: '1px solid var(--accent)',
+                    padding: '0 6px',
+                    borderRadius: 999,
+                    fontFamily: 'monospace',
+                    background: 'var(--card)',
+                    pointerEvents: 'none',
+                    userSelect: 'none',
+                  }}
+                >
+                  [{timestampLabel}]
+                </span>
+                <span role="status" className="sr-only">
+                  Timestamp detected: {timestampLabel}
+                </span>
+              </>
+            )}
+          </div>
           {showTimestampHint && (
             <p id={timestampHintId} className="sr-only">
               You can add a timestamp by typing colon followed by seconds, such as colon-three-zero, or a full time like one-colon-zero-five.

@@ -48,3 +48,6 @@ yarn-debug.log*
 yarn-error.log*
 
 .vercel
+
+# local docs
+docs/timestamp-affordance-plan.md
