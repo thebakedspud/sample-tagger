@@ -55,7 +55,7 @@ import { getDeviceId, getAnonId } from './lib/deviceState.js'
 
 // NEW: Playlist state reducer + context provider
 import { playlistActions } from './features/playlist/actions.js'
-import { validateTag } from './features/playlist/helpers.js'
+import { validateTag, isPodcastTrack } from './features/playlist/helpers.js'
 import { PlaylistStateProvider } from './features/playlist/PlaylistProvider.jsx'
 import {
   usePlaylistDispatch,
@@ -810,19 +810,13 @@ function AppInner({
     [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks, dispatch],
   )
 
-  const isPodcastTrack = useCallback((track) => {
-    if (!track) return false
-    if (track?.kind === 'podcast') return true
-    // Legacy data (before `kind` existed) can be inferred by show metadata.
-    return Boolean(track?.showId || track?.showName || track?.publisher)
-  }, [])
   const musicTracks = useMemo(
     () => (Array.isArray(tracks) ? tracks.filter((track) => !isPodcastTrack(track)) : []),
-    [tracks, isPodcastTrack],
+    [tracks],
   )
   const podcastTracks = useMemo(
     () => (Array.isArray(tracks) ? tracks.filter((track) => isPodcastTrack(track)) : []),
-    [tracks, isPodcastTrack],
+    [tracks],
   )
   const hasMusicTracks = musicTracks.length > 0
   const hasPodcastTracks = podcastTracks.length > 0

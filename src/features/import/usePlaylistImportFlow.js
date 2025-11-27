@@ -141,6 +141,22 @@ function buildTracks(res, providerHint, startIndex = 0, existingIds) {
       normalizedTrack.dateAdded = dateAdded
     }
 
+    const normalizedKind = track?.kind === 'podcast' ? 'podcast' : 'music'
+    normalizedTrack.kind = normalizedKind
+
+    if (typeof track?.showId === 'string' && track.showId) {
+      normalizedTrack.showId = track.showId
+    }
+    if (typeof track?.showName === 'string' && track.showName) {
+      normalizedTrack.showName = track.showName
+    }
+    if (typeof track?.publisher === 'string' && track.publisher) {
+      normalizedTrack.publisher = track.publisher
+    }
+    if (typeof track?.description === 'string' && track.description) {
+      normalizedTrack.description = track.description
+    }
+
     mapped.push(normalizedTrack)
   })
 

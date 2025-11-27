@@ -11,6 +11,7 @@ import {
 import { EMPTY_IMPORT_META } from '../../utils/storageBootstrap.js';
 import { normalizeTimestamp } from '../../utils/trackProcessing.js';
 import { playlistActions } from '../playlist/actions.js';
+import { isPodcastTrack } from '../playlist/helpers.js';
 import { focusById, focusElement } from '../../utils/focusById.js';
 import { debugFocus } from '../../utils/debug.js';
 import usePersistentPlaylistCache from './usePersistentPlaylistCache.js';
@@ -355,8 +356,8 @@ export default function usePlaylistImportController({
       const importedTimestamp = payload?.importedAt ?? null;
       const resolvedTitle = payload?.title || fallbackTitle || 'Imported Playlist';
       const trackCount = mapped.length;
-      const hasPodcastTracks = mapped.some((track) => track?.kind === 'podcast');
-      const hasMusicTracks = mapped.some((track) => track?.kind !== 'podcast');
+      const hasPodcastTracks = mapped.some(isPodcastTrack);
+      const hasMusicTracks = mapped.some(track => !isPodcastTrack(track));
       const fallbackKind = hasPodcastTracks && !hasMusicTracks ? 'podcast' : 'music';
       const resolvedContentKind =
         rawMeta?.contentKind === 'podcast' || rawMeta?.contentKind === 'music'
@@ -1326,7 +1327,8 @@ export default function usePlaylistImportController({
   }, [startBackgroundPagination]);
 
   useEffect(() => {
-    if (screen !== 'playlist') return;
+    const allowsBackgroundPaging = screen === 'playlist' || screen === 'podcast';
+    if (!allowsBackgroundPaging) return;
     if (!importMeta?.hasMore || !importMeta?.cursor) return;
     if (!lastImportUrl) return;
     if (importStatus !== ImportFlowStatus.IDLE) return;

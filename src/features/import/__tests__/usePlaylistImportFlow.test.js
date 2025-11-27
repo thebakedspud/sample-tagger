@@ -177,6 +177,46 @@ describe('usePlaylistImportFlow', () => {
     expect(response.data.meta.cursor).toBe('cursor-2')
   })
 
+  it('preserves podcast metadata returned by adapters', async () => {
+    importPlaylistMock.mockResolvedValueOnce({
+      provider: 'spotify',
+      tracks: [
+        {
+          id: 'episode-1',
+          title: 'Episode One',
+          artist: 'Host',
+          kind: 'podcast',
+          showId: 'show-1',
+          showName: 'Great Show',
+          publisher: 'PodCo',
+          description: 'Deep dive on topic.',
+        },
+      ],
+      pageInfo: { cursor: null, hasMore: false },
+    })
+
+    const { result } = renderHook(() => usePlaylistImportFlow())
+    const flow = /** @type {TestImportFlowApi} */ (result.current)
+
+    /** @type {ImportResult | undefined} */
+    let outcome
+    await act(async () => {
+      outcome = await flow.importInitial('https://example.com/show')
+    })
+
+    if (!outcome || !outcome.data) throw new Error('expected import data')
+    expect(outcome.ok).toBe(true)
+    expect(outcome.data.tracks[0]).toEqual(
+      expect.objectContaining({
+        kind: 'podcast',
+        showId: 'show-1',
+        showName: 'Great Show',
+        publisher: 'PodCo',
+        description: 'Deep dive on topic.',
+      }),
+    )
+  })
+
   it('propagates adapter error codes from rejected imports', async () => {
     const error = Object.assign(new Error('boom'), {
       cause: { code: 'ERR_NOT_FOUND' },
