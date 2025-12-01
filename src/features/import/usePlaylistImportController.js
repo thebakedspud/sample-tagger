@@ -1233,6 +1233,36 @@ export default function usePlaylistImportController({
           setImportedAt(loadMoreStamp);
           pagerLastSuccessRef.current.set(key, true);
 
+          const previousMeta = importMetaRef.current ?? EMPTY_IMPORT_META;
+          const mergedMeta = {
+            ...EMPTY_IMPORT_META,
+            ...previousMeta,
+            ...meta,
+          };
+          const payloadTotal =
+            typeof result.data?.total === 'number'
+              ? result.data.total
+              : typeof mergedMeta.total === 'number'
+                ? mergedMeta.total
+                : null;
+          const resolvedTotal = payloadTotal ?? allTracks.length;
+          mergedMeta.total = resolvedTotal;
+          const cacheSource =
+            (sourceUrl && sourceUrl.trim()) ||
+            mergedMeta.sourceUrl ||
+            metaSnapshot?.sourceUrl ||
+            '';
+          const existingCached = cacheSource ? getCachedResult(cacheSource) : null;
+          const cachePayload = {
+            title: result.data?.title ?? playlistTitle ?? 'Imported Playlist',
+            importedAt: loadMoreStamp,
+            coverUrl: result.data?.coverUrl ?? existingCached?.coverUrl ?? null,
+            total: resolvedTotal,
+            tracks: allTracks,
+            meta: mergedMeta,
+          };
+          rememberResultInCache(cachePayload, { sourceUrl: cacheSource });
+
           const firstNewId = additions[0]?.id ?? null;
 
           if (isBackground) {
@@ -1302,6 +1332,9 @@ export default function usePlaylistImportController({
       markTrackFocusContext,
       msgFromCode,
       notesByTrack,
+      playlistTitle,
+      getCachedResult,
+      rememberResultInCache,
       setImportError,
       setImportMeta,
       setImportedAt,

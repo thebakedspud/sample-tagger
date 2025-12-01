@@ -767,6 +767,209 @@ describe('usePlaylistImportController', () => {
     expect(deps.announce).toHaveBeenCalledWith('Import canceled.');
   });
 
+  describe('cache updates during pagination', () => {
+    it('updates cache with cumulative tracks after each load-more page', async () => {
+      const spotifyUrl = 'https://open.spotify.com/playlist/xyz';
+      const initialTracks = [{ id: 'track-1', notes: [], tags: [] }];
+      const initialMeta = {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: 'cursor-1',
+        hasMore: true,
+        sourceUrl: spotifyUrl,
+        snapshotId: 'snap-1',
+        total: 200,
+      };
+      cacheStore.map.set(spotifyUrl, {
+        tracks: initialTracks,
+        meta: initialMeta,
+        coverUrl: 'cover.jpg',
+      });
+      const deps = createDeps({
+        tracks: initialTracks,
+        tracksRef: { current: initialTracks },
+        notesByTrack: { 'track-1': [] },
+        tagsByTrack: { 'track-1': [] },
+        lastImportUrl: spotifyUrl,
+        lastImportUrlRef: { current: spotifyUrl },
+        initialImportMeta: initialMeta,
+        playlistTitle: 'Test Playlist',
+      });
+      loadMoreMock.mockResolvedValueOnce({
+        ok: true,
+        data: {
+          tracks: [{ id: 'track-2', notes: [], tags: [] }],
+          meta: {
+            provider: 'spotify',
+            playlistId: 'playlist-123',
+            cursor: null,
+            hasMore: false,
+            sourceUrl: spotifyUrl,
+          },
+          title: 'Test Playlist',
+          total: 200,
+        },
+      });
+
+      const { result } = renderHook(() => usePlaylistImportController(deps));
+      await act(() => {
+        result.current.setImportMeta(deps.initialImportMeta);
+      });
+      await act(async () => {
+        await result.current.handleLoadMore({ mode: 'background' });
+      });
+
+      const cachedPayload = cacheStore.map.get(spotifyUrl);
+      expect(cachedPayload).toBeTruthy();
+      expect(cachedPayload.tracks).toHaveLength(2);
+      expect(cachedPayload.tracks.map((t) => t.id)).toEqual(['track-1', 'track-2']);
+      expect(cachedPayload.meta.hasMore).toBe(false);
+      expect(cachedPayload.meta.cursor).toBeNull();
+    });
+
+    it('preserves coverUrl from existing cache when load-more lacks artwork', async () => {
+      const spotifyUrl = 'https://open.spotify.com/playlist/xyz';
+      const initialTracks = [{ id: 'track-1', notes: [], tags: [] }];
+      const initialMeta = {
+        provider: 'spotify',
+        playlistId: 'playlist-123',
+        cursor: 'cursor-1',
+        hasMore: true,
+        sourceUrl: spotifyUrl,
+      };
+      cacheStore.map.set(spotifyUrl, {
+        tracks: initialTracks,
+        meta: initialMeta,
+        coverUrl: 'original-cover.jpg',
+      });
+      const deps = createDeps({
+        tracks: initialTracks,
+        tracksRef: { current: initialTracks },
+        notesByTrack: { 'track-1': [] },
+        tagsByTrack: { 'track-1': [] },
+        lastImportUrl: spotifyUrl,
+        lastImportUrlRef: { current: spotifyUrl },
+        initialImportMeta: initialMeta,
+        playlistTitle: 'Playlist',
+      });
+      loadMoreMock.mockResolvedValueOnce({
+        ok: true,
+        data: {
+          tracks: [{ id: 'track-2', notes: [], tags: [] }],
+          meta: {
+            provider: 'spotify',
+            playlistId: 'playlist-123',
+            cursor: null,
+            hasMore: false,
+            sourceUrl: spotifyUrl,
+          },
+          title: 'Playlist',
+        },
+      });
+
+      const { result } = renderHook(() => usePlaylistImportController(deps));
+      await act(() => {
+        result.current.setImportMeta(deps.initialImportMeta);
+      });
+      await act(async () => {
+        await result.current.handleLoadMore({ mode: 'background' });
+      });
+
+      const cachedPayload = cacheStore.map.get(spotifyUrl);
+      expect(cachedPayload.coverUrl).toBe('original-cover.jpg');
+      expect(cachedPayload.tracks).toHaveLength(2);
+    });
+
+    it('retains cache progress when pagination is interrupted mid-way', async () => {
+      const spotifyUrl = 'https://open.spotify.com/playlist/xyz';
+      const initialTracks = [{ id: 't1', notes: [], tags: [] }];
+      const initialMeta = {
+        provider: 'spotify',
+        playlistId: 'playlist-999',
+        cursor: 'cursor-1',
+        hasMore: true,
+        sourceUrl: spotifyUrl,
+      };
+      cacheStore.map.set(spotifyUrl, {
+        tracks: initialTracks,
+        meta: initialMeta,
+        coverUrl: 'cover.jpg',
+      });
+      const deps = createDeps({
+        tracks: initialTracks,
+        tracksRef: { current: initialTracks },
+        notesByTrack: { t1: [] },
+        tagsByTrack: { t1: [] },
+        lastImportUrl: spotifyUrl,
+        lastImportUrlRef: { current: spotifyUrl },
+        initialImportMeta: initialMeta,
+      });
+      loadMoreMock
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            tracks: [{ id: 't2', notes: [], tags: [] }],
+            meta: {
+              provider: 'spotify',
+              playlistId: 'playlist-999',
+              cursor: 'cursor-2',
+              hasMore: true,
+              sourceUrl: spotifyUrl,
+            },
+            title: 'Playlist',
+          },
+        })
+        .mockRejectedValueOnce(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+
+      const { result } = renderHook(() => usePlaylistImportController(deps));
+      await act(() => {
+        result.current.setImportMeta(deps.initialImportMeta);
+      });
+      await act(async () => {
+        await result.current.handleLoadMore({ mode: 'background' });
+      });
+
+      const cachedAfterFirstPage = cacheStore.map.get(spotifyUrl);
+      expect(cachedAfterFirstPage.tracks).toHaveLength(2);
+      expect(cachedAfterFirstPage.meta.hasMore).toBe(true);
+      expect(cachedAfterFirstPage.coverUrl).toBe('cover.jpg');
+
+      let outcome;
+      await act(async () => {
+        outcome = await result.current.handleLoadMore({ mode: 'background' });
+      });
+      expect(outcome).toEqual({ ok: false, aborted: true });
+
+      const cachedAfterAbort = cacheStore.map.get(spotifyUrl);
+      expect(cachedAfterAbort.tracks).toHaveLength(2);
+      expect(cachedAfterAbort.meta.hasMore).toBe(true);
+    });
+
+    it('gracefully handles load-more when sourceUrl is missing', async () => {
+      const deps = createDeps({
+        lastImportUrl: '',
+        lastImportUrlRef: { current: '' },
+        initialImportMeta: {
+          provider: 'spotify',
+          playlistId: 'playlist-123',
+          cursor: 'cursor-1',
+          hasMore: true,
+          sourceUrl: '',
+        },
+      });
+
+      const { result } = renderHook(() => usePlaylistImportController(deps));
+      let outcome;
+      await act(async () => {
+        outcome = await result.current.handleLoadMore();
+      });
+
+      expect(outcome).toEqual({ ok: false, reason: 'unavailable' });
+      expect(loadMoreMock).not.toHaveBeenCalled();
+      expect(cacheApi.rememberCachedResult).not.toHaveBeenCalled();
+    });
+  });
+
   it('formats rate limit with retry seconds for load more', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
     const deps = createDeps({
