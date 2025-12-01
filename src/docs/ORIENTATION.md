@@ -120,7 +120,7 @@ A quick map of how the import, notes, and recovery pieces currently fit together
 - Bootstrap inputs: `initialImportMeta`, `initialPersistedTrackCount`, `screen`, `lastImportUrl`
 
 **Returns**:
-- Import state: `importUrl`, `importError`, provider chip, `importMeta`, derived busy/spinner flags, `backgroundSync`
+- Import state: `importUrl`, `importError` (object `{ message, type }` or `null`), provider chip, `importMeta`, derived busy/spinner flags, `backgroundSync`
 - Handlers: `handleImport`, `handleSelectRecent`, `handleReimport`, `handleLoadMore`, `cancelBackgroundPagination`, `resetImportFlow`
 
 Hook consumers (currently `AppInner`) simply destructure the API and wire it into forms/components, keeping the component surface lean.
@@ -174,7 +174,7 @@ This strategy avoids duplicate notes without maintaining per-note timestamps. Fu
 
 | Event | Outcome |
 |-------|---------|
-| Invalid URL or unsupported provider | `useImportPlaylist` throws a coded adapter error; App surfaces `importError`, announces the message, and re-focuses the URL input. |
+| Invalid URL or unsupported provider | `useImportPlaylist` throws a coded adapter error; App surfaces `importError.message` (styled via `importError.type`), announces the message, and re-focuses the URL input. |
 | Successful import | `applyImportResult` normalizes tracks, persists state (`saveAppState`), updates recents, and routes to the playlist screen. |
 | Re-import | Tracks are replaced with the latest payload, `importMeta` updates, and any new recovery code reopens `RecoveryModal`. |
 | Load more | Uses `importMeta.cursor` and `loadMoreTracks`; deduped tracks append to the list, focus moves to the first new card. |

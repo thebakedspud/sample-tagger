@@ -10,6 +10,14 @@
   font-size: 0.9em;
 }
 
+.error-message[data-type="cancel"] {
+  color: var(--muted);
+}
+
+.error-message[data-type="rateLimit"] {
+  color: var(--warning-fg, #ffb020);
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

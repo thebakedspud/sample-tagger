@@ -112,7 +112,9 @@ export default function RecentPlaylists({
         {sorted.map((item) => {
           const state = cardState[item.id] ?? {}
           const isLoading = Boolean(state.loading)
-          const error = typeof state.error === 'string' ? state.error : null
+          const rawError = state.error
+          const errorMessage = rawError && typeof rawError === 'object' ? rawError.message : typeof rawError === 'string' ? rawError : null
+          const errorType = rawError && typeof rawError === 'object' ? rawError.type : 'error'
           const isRefreshingCard = Boolean(
             isRefreshing && refreshingId && refreshingId === item.id,
           )
@@ -127,7 +129,7 @@ export default function RecentPlaylists({
             typeof item.total === 'number' && item.total >= 0
               ? `${item.total} track${item.total === 1 ? '' : 's'}`
               : null
-          const ariaDescribedBy = error ? `recent-error-${item.id}` : undefined
+          const ariaDescribedBy = errorMessage ? `recent-error-${item.id}` : undefined
 
           return (
             <li key={item.id} className="recent-card">
@@ -190,8 +192,8 @@ export default function RecentPlaylists({
                   ) : null}
                 </div>
               </button>
-              <ErrorMessage id={`recent-error-${item.id}`} className="recent-card__error">
-                {error}
+              <ErrorMessage id={`recent-error-${item.id}`} className="recent-card__error" data-type={errorType}>
+                {errorMessage}
               </ErrorMessage>
             </li>
           )

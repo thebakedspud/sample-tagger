@@ -35,6 +35,15 @@ function computePayloadTotal(payload) {
   return tracks.length;
 }
 
+function formatRateLimitMessage(retryAt) {
+  const now = Date.now();
+  if (!retryAt || retryAt <= now) {
+    return 'Too many requests. Try again shortly.';
+  }
+  const seconds = Math.ceil((retryAt - now) / 1000);
+  return `Too many requests. Try again in ${seconds} seconds.`;
+}
+
 /**
  * @typedef {import('./adapters/types.js').ImportMeta} ImportMeta
  * @typedef {import('./adapters/types.js').ImportResult} ImportResult
@@ -73,8 +82,8 @@ function computePayloadTotal(payload) {
  * @typedef {Object} PlaylistImportControllerApi
  * @property {string} importUrl
  * @property {(next: string) => void} setImportUrl
- * @property {string | null} importError
- * @property {(error: string | null) => void} setImportError
+ * @property {{ message: string, type: 'cancel' | 'rateLimit' | 'error' } | null} importError
+ * @property {(error: { message: string, type: 'cancel' | 'rateLimit' | 'error' } | null) => void} setImportError
  * @property {string | null} providerChip
  * @property {ImportMeta} importMeta
  * @property {(next: ImportMeta | ((prev: ImportMeta) => ImportMeta)) => void} setImportMeta
@@ -632,7 +641,7 @@ export default function usePlaylistImportController({
 
       if (!trimmedUrl) {
         const msg = 'Paste a playlist URL to import.';
-        setImportError(msg);
+        setImportError({ message: msg, type: 'error' });
         announce('Import failed. URL missing.');
         focusImportInput();
         console.log('[import error]', { code: 'URL_MISSING', raw: null });
@@ -641,7 +650,7 @@ export default function usePlaylistImportController({
 
       if (!providerChip) {
         const msg = msgFromCode(CODES.ERR_UNSUPPORTED_URL);
-        setImportError(msg);
+        setImportError({ message: msg, type: 'error' });
         announce('Import failed. Unsupported URL.');
         focusImportInput();
         console.log('[import error]', { code: CODES.ERR_UNSUPPORTED_URL, raw: null });
@@ -664,9 +673,14 @@ export default function usePlaylistImportController({
 
         if (!result.ok) {
           const code = result.code ?? CODES.ERR_UNKNOWN;
-          const msg = msgFromCode(code);
+          let msg = msgFromCode(code);
           console.log('[import error]', { code, raw: result.error });
-          setImportError(msg);
+          
+          const type = code === CODES.ERR_RATE_LIMITED ? 'rateLimit' : 'error';
+          if (type === 'rateLimit') {
+            msg = formatRateLimitMessage(result.retryAt);
+          }
+          setImportError({ message: msg, type });
           announce('Import failed. ' + msg);
           focusImportInput();
           return;
@@ -688,11 +702,20 @@ export default function usePlaylistImportController({
         });
         setCachedViewInfo(null);
       } catch (err) {
-        if (err?.name === 'AbortError') return;
+        if (err?.name === 'AbortError') {
+          setImportError({ message: 'Import canceled.', type: 'cancel' });
+          announce('Import canceled.');
+          return;
+        }
         const code = extractErrorCode(err);
-        const msg = msgFromCode(code);
+        let msg = msgFromCode(code);
         console.log('[import error]', { code, raw: err });
-        setImportError(msg);
+        
+        const type = code === CODES.ERR_RATE_LIMITED ? 'rateLimit' : 'error';
+        if (type === 'rateLimit') {
+          msg = formatRateLimitMessage(err?.retryAt);
+        }
+        setImportError({ message: msg, type });
         announce('Import failed. ' + msg);
         focusImportInput();
       } finally {
@@ -733,7 +756,8 @@ export default function usePlaylistImportController({
       const isAnyBusy = importStatus !== ImportFlowStatus.IDLE;
       if (isAnyBusy) {
         const msg = 'Finish the current import before loading another playlist.';
-        updateRecentCardState(recent.id, { error: msg, loading: false });
+        const errObj = { message: msg, type: 'error' };
+        updateRecentCardState(recent.id, { error: errObj, loading: false });
         announce(msg);
         return { ok: false, error: msg };
       }
@@ -741,7 +765,8 @@ export default function usePlaylistImportController({
       const trimmedUrl = typeof recent.sourceUrl === 'string' ? recent.sourceUrl.trim() : '';
       if (!trimmedUrl) {
         const msg = "Can't load - link changed.";
-        updateRecentCardState(recent.id, { error: msg, loading: false });
+        const errObj = { message: msg, type: 'error' };
+        updateRecentCardState(recent.id, { error: errObj, loading: false });
         announce(msg);
         return { ok: false, error: msg };
       }
@@ -794,10 +819,16 @@ export default function usePlaylistImportController({
 
         if (!result.ok) {
           const code = result.code ?? CODES.ERR_UNKNOWN;
-          const msg = msgFromCode(code);
+          let msg = msgFromCode(code);
           console.log('[recent import error]', { code, raw: result.error });
-          updateRecentCardState(recent.id, { loading: false, error: msg });
-          setImportError(msg);
+          
+          const type = code === CODES.ERR_RATE_LIMITED ? 'rateLimit' : 'error';
+          if (type === 'rateLimit') {
+            msg = formatRateLimitMessage(result.retryAt);
+          }
+          const errObj = { message: msg, type };
+          updateRecentCardState(recent.id, { loading: false, error: errObj });
+          setImportError(errObj);
           announce(msg);
           return { ok: false, error: msg };
         }
@@ -823,14 +854,25 @@ export default function usePlaylistImportController({
         return { ok: true };
       } catch (err) {
         if (err?.name === 'AbortError') {
-          updateRecentCardState(recent.id, {});
+          const msg = 'Import canceled.';
+          const errObj = { message: msg, type: 'cancel' };
+          updateRecentCardState(recent.id, { loading: false, error: errObj });
+          // Optional: announce(msg) if we want to be chatty, but let's stick to visual state for now
+          // or announce it for consistency:
+          announce(msg);
           throw err;
         }
         const code = extractErrorCode(err);
-        const msg = msgFromCode(code);
+        let msg = msgFromCode(code);
         console.log('[recent import error]', { code, raw: err });
-        updateRecentCardState(recent.id, { loading: false, error: msg });
-        setImportError(msg);
+        
+        const type = code === CODES.ERR_RATE_LIMITED ? 'rateLimit' : 'error';
+        if (type === 'rateLimit') {
+          msg = formatRateLimitMessage(err?.retryAt);
+        }
+        const errObj = { message: msg, type };
+        updateRecentCardState(recent.id, { loading: false, error: errObj });
+        setImportError(errObj);
         announce(msg);
         return { ok: false, error: msg };
       } finally {
@@ -877,11 +919,16 @@ export default function usePlaylistImportController({
 
       if (result?.stale) return;
 
-      if (!result.ok) {
-        const code = result.code ?? CODES.ERR_UNKNOWN;
-        const msg = msgFromCode(code);
-        console.log('[reimport error]', { code, raw: result.error });
-        setImportError(msg);
+        if (!result.ok) {
+          const code = result.code ?? CODES.ERR_UNKNOWN;
+          let msg = msgFromCode(code);
+          console.log('[reimport error]', { code, raw: result.error });
+          
+          const type = code === CODES.ERR_RATE_LIMITED ? 'rateLimit' : 'error';
+          if (type === 'rateLimit') {
+            msg = formatRateLimitMessage(result.retryAt);
+          }
+        setImportError({ message: msg, type });
         announce(msg);
         if (wasActive) focusElement(reimportBtnRef.current);
         return;
@@ -911,12 +958,19 @@ export default function usePlaylistImportController({
       if (wasActive) focusElement(reimportBtnRef.current);
     } catch (err) {
       if (err?.name === 'AbortError') {
+        setImportError({ message: 'Import canceled.', type: 'cancel' });
+        announce('Import canceled.');
         return;
       }
       const code = extractErrorCode(err);
-      const msg = msgFromCode(code);
+      let msg = msgFromCode(code);
       console.log('[reimport error]', { code, raw: err });
-      setImportError(msg);
+      
+      const type = code === CODES.ERR_RATE_LIMITED ? 'rateLimit' : 'error';
+      if (type === 'rateLimit') {
+        msg = formatRateLimitMessage(err?.retryAt);
+      }
+      setImportError({ message: msg, type });
       announce(msg);
       if (wasActive) focusElement(reimportBtnRef.current);
     } finally {
@@ -988,22 +1042,17 @@ export default function usePlaylistImportController({
             announce('No additional tracks available.');
           }
           setImportError(null);
-        } else if (result.code === CODES.ERR_RATE_LIMITED && result.retryAt) {
-          const base = msgFromCode(CODES.ERR_RATE_LIMITED);
-          const resumeLabel =
-            typeof result.retryAt === 'number'
-              ? new Date(result.retryAt).toLocaleTimeString()
-              : null;
-          const message = resumeLabel ? `${base} Resume after ${resumeLabel}.` : base;
-          setImportError(message);
+        } else if (result.code === CODES.ERR_RATE_LIMITED) {
+          const message = formatRateLimitMessage(result.retryAt);
+          setImportError({ message, type: 'rateLimit' });
           announce(message);
         } else if (result.code) {
           const message = msgFromCode(result.code);
-          setImportError(message);
+          setImportError({ message, type: 'error' });
           announce(message);
         } else {
           const fallback = msgFromCode(CODES.ERR_UNKNOWN);
-          setImportError(fallback);
+          setImportError({ message: fallback, type: 'error' });
           announce(fallback);
         }
         return result;
@@ -1035,15 +1084,14 @@ export default function usePlaylistImportController({
       const now = Date.now();
       const cooldownUntil = pagerCooldownRef.current.until ?? 0;
       if (cooldownUntil > now) {
-        const resumeTime = new Date(cooldownUntil).toLocaleTimeString();
-        const cooldownMessage = `${msgFromCode(CODES.ERR_RATE_LIMITED)} Resume after ${resumeTime}.`;
+        const cooldownMessage = formatRateLimitMessage(cooldownUntil);
         setBackgroundSync((prev) => ({
           ...prev,
           status: 'cooldown',
           lastError: cooldownMessage,
         }));
         if (!isBackground) {
-          setImportError(cooldownMessage);
+          setImportError({ message: cooldownMessage, type: 'rateLimit' });
           announce(cooldownMessage);
         }
         return { ok: false, code: CODES.ERR_RATE_LIMITED, retryAt: cooldownUntil };
@@ -1103,8 +1151,7 @@ export default function usePlaylistImportController({
               if (retryMs) {
                 const resumeAt = Date.now() + retryMs;
                 scheduleResume(resumeAt);
-                const resumeTime = new Date(resumeAt).toLocaleTimeString();
-                const cooldownMessage = `${msg} Resume after ${resumeTime}.`;
+                const cooldownMessage = formatRateLimitMessage(resumeAt);
                 setBackgroundSync((prev) => ({
                   ...prev,
                   status: 'cooldown',
@@ -1119,7 +1166,7 @@ export default function usePlaylistImportController({
                   lastError: msg,
                 }));
               } else {
-                setImportError(msg);
+                setImportError({ message: msg, type: 'rateLimit' });
                 announce(msg);
               }
               return { ok: false, code };
@@ -1133,7 +1180,7 @@ export default function usePlaylistImportController({
                 lastError: errorMessage,
               }));
             } else {
-              setImportError(errorMessage);
+              setImportError({ message: errorMessage, type: 'error' });
               announce(errorMessage);
             }
             return { ok: false, code };

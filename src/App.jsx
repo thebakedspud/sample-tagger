@@ -1022,7 +1022,7 @@ function AppInner({
                   onSubmit={(event) => {
                     void handleImport(event)
                   }}
-                  aria-describedby={importError ? 'import-error' : undefined}
+                  aria-describedby={importError?.message ? 'import-error' : undefined}
                 >
                   <div style={{ display: 'grid', gap: 8, alignItems: 'start', gridTemplateColumns: '1fr auto' }}>
                     <div style={{ gridColumn: '1 / -1' }}>
@@ -1041,10 +1041,11 @@ function AppInner({
                         value={importUrl}
                         onChange={handleImportUrlChange}
                         style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
-                        aria-invalid={!!importError}
+                        aria-invalid={!!importError?.message}
+                        aria-describedby={importError?.message ? 'import-error' : undefined}
                       />
-                      <ErrorMessage id="import-error">
-                        {importError}
+                      <ErrorMessage id="import-error" data-type={importError?.type}>
+                        {importError?.message}
                       </ErrorMessage>
                     </div>
 

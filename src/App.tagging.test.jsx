@@ -1,5 +1,6 @@
 import { describe, expect, it, afterEach, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { useCallback, useState } from 'react'
 
 vi.setConfig({ testTimeout: 15000 })
@@ -152,5 +153,23 @@ describe('App tagging announcements', () => {
       .join(' ')
     expect(removedAnnouncements).toMatch(/Removed tag "drums" from "Test Track"/i)
     expect(screen.queryByRole('button', { name: /remove tag drums/i })).not.toBeInTheDocument()
+  })
+
+  it('shows typed import errors on submit with empty URL', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const importTab = screen.getByRole('button', { name: /^import$/i })
+    await user.click(importTab)
+
+    const input = await screen.findByLabelText(/playlist url/i)
+    const submit = screen.getByRole('button', { name: /import playlist/i })
+
+    await user.click(submit)
+
+    const errorNode = await screen.findByText(/paste a playlist url to import/i)
+    expect(errorNode).toHaveAttribute('data-type', 'error')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(input).toHaveAttribute('aria-describedby', 'import-error')
   })
 })

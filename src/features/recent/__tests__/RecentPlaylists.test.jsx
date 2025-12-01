@@ -121,4 +121,48 @@ describe('RecentPlaylists', () => {
     })
     expect(button).toHaveAttribute('aria-busy', 'true')
   })
+
+  it('renders typed errors with data-type for styling', () => {
+    const items = [
+      {
+        id: 'spotify:err',
+        provider: 'spotify',
+        playlistId: 'err',
+        title: 'Error Mix',
+        sourceUrl: 'https://example.com/err',
+        importedAt: Date.now(),
+        lastUsedAt: Date.now(),
+        total: 2,
+      },
+    ]
+    const cardState = {
+      'spotify:err': { error: { message: 'Rate limited', type: 'rateLimit' } },
+    }
+
+    render(<RecentPlaylists items={items} onSelect={vi.fn()} cardState={cardState} />)
+
+    const error = screen.getByText('Rate limited')
+    expect(error).toHaveAttribute('data-type', 'rateLimit')
+  })
+
+  it('falls back to error type for legacy string errors', () => {
+    const items = [
+      {
+        id: 'spotify:legacy',
+        provider: 'spotify',
+        playlistId: 'legacy',
+        title: 'Legacy Mix',
+        sourceUrl: 'https://example.com/legacy',
+        importedAt: Date.now(),
+        lastUsedAt: Date.now(),
+        total: 1,
+      },
+    ]
+    const cardState = { 'spotify:legacy': { error: 'Something went wrong' } }
+
+    render(<RecentPlaylists items={items} onSelect={vi.fn()} cardState={cardState} />)
+
+    const error = screen.getByText('Something went wrong')
+    expect(error).toHaveAttribute('data-type', 'error')
+  })
 })
