@@ -290,11 +290,8 @@ export default function PlaylistView({
       ? [...selectedTags].sort().join('|')
       : ''
     const normalizedQuery = typeof query === 'string' ? query.trim() : ''
-    const sortSignature = `${sort?.key ?? SORT_KEY.DATE}:${sort?.direction ?? 'desc'}`
-    return [normalizedQuery, scope, normalizedTags, hasNotesOnly ? '1' : '0', sortSignature].join(
-      '::',
-    )
-  }, [query, scope, selectedTags, hasNotesOnly, sort])
+    return [normalizedQuery, scope, normalizedTags, hasNotesOnly ? '1' : '0'].join('::')
+  }, [query, scope, selectedTags, hasNotesOnly])
 
   const lastFilterSignatureRef = useRef(filterSignature)
   useEffect(() => {
