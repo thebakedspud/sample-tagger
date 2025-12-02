@@ -189,7 +189,7 @@ This strategy avoids duplicate notes without maintaining per-note timestamps. Fu
 - Stable: pagination mocks and recent playlist UX.
 - Stable: playlist state management via `PlaylistStateProvider` with reducer pattern (refactored Nov 2025).
 - Stable: remote sync and tag scheduling centralized in provider.
-- WIP: virtualized list and richer analytics.
+- WIP: richer analytics and reporting.
 - WIP: recovery API contract; expect adjustments.
 
 ---
@@ -200,7 +200,7 @@ This strategy avoids duplicate notes without maintaining per-note timestamps. Fu
 
 ## TypeScript & Testing Notes
 
-- Run `npm run check:types` (tsc `--noEmit`) alongside tests; CI should fail fast if type drift is introduced.
+- Run `npm run check:tsc` (tsc `--noEmit`) alongside tests; CI should fail fast if type drift is introduced.
 - Keep `jsconfig.json` types aligned: browser code relies on `vite/client` while server utilities lean on Node types. Add new frameworks explicitly so globals stay discoverable.
 - When a test needs to feed invalid data deliberately, annotate it with `// @ts-expect-error` or a targeted `/** @type {any} */` cast to make the intent obvious.
 - Wrap mocked imports with `vi.mocked(...)` before calling helpers like `mockResolvedValue` so TS sees the Vitest `Mock` shape the same way the runtime does.

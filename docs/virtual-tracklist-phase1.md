@@ -1,4 +1,6 @@
-# Playlist Virtualization Phase 1 – Design & Implementation Sketch
+# Playlist Virtualization Phase 1 — Design & Implementation Sketch
+
+> **Status:** Implemented (Nov 2025). PlaylistView now uses `@tanstack/react-virtual` by default (see `src/features/playlist/PlaylistView.jsx`). Keep this document as a historical design reference.
 
 ## Goals
 - Replace the unbounded `<TrackCard />` map with a virtualized list that keeps DOM/React work roughly constant (≈20 rows) even for 10k tracks.
@@ -21,6 +23,7 @@
 9. **Memoization strategy** – `useTrackFilter` already debounces query (250ms) and memoizes filtered/sorted arrays. We will:
    - Switch to `useDeferredValue` for query debounce (React 18) or keep timer (if `useDeferredValue` not desired). Document dependency array: `[tracks, indexMap, deferredQuery, scope, selectedTags, hasNotesOnly, sort]`.
    - Memoize derived props (`pendingByTrack`, available tags) as inputs to virtual rows.
+10. **Scroll container isolation** - Always attach the virtualizer to a dedicated playlist scroll wrapper (use `getScrollElement: () => parentRef.current`). Mobile Safari shrinks the visual viewport when the soft keyboard appears; `useWindowVirtualizer` interprets that resize as a scroll jump and momentarily reorders TrackCards.
 
 ## Performance Budgets
 ```js
@@ -43,7 +46,7 @@ export const PERFORMANCE_TARGETS = {
   const parentRef = useRef(null);
   const virtualizer = useVirtualizer({
     count: filteredTracks.length,
-    getScrollElement: () => parentRef.current,
+    getScrollElement: () => parentRef.current, // isolates playlist scroll from window/soft-keyboard resize
     estimateSize: () => 140, // heuristic
     overscan: 6,
     measureElement: (el) => el.getBoundingClientRect().height,

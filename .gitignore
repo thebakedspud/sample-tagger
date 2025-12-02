@@ -51,3 +51,5 @@ yarn-error.log*
 
 # local docs
 docs/timestamp-affordance-plan.md
+docs/daylist-snapshot-plan.md
+current_issues.md

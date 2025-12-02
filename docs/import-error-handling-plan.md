@@ -1,5 +1,7 @@
 # Import Error Handling — Refined Plan
 
+> **Status:** Implemented. Typed `importError` objects now drive UI state via `usePlaylistImportController` and `ErrorMessage`; this document captures the original plan.
+
 Compact plan to surface cancel/rate-limit states during imports without a full error-system refactor.
 
 ## Scope
