@@ -254,6 +254,46 @@ export default function PlaylistView({
   })
   const virtualItems = virtualizationEnabled ? virtualizer.getVirtualItems() : []
   const totalVirtualSize = virtualizationEnabled ? virtualizer.getTotalSize() : 0
+
+  // Phase 0: VisualViewport-based lock to prevent iOS Safari from "jumping"
+  // the virtualized list when the soft keyboard appears and shrinks the
+  // viewport. This keeps TanStack Virtual's scroll offset stable across
+  // transient viewport changes.
+  useEffect(() => {
+    if (!virtualizationEnabled || !virtualizer) return
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null
+    if (!vv) return
+
+    /** @type {number | null} */
+    let frozenOffset = null
+
+    const handleResize = () => {
+      if (frozenOffset == null) {
+        frozenOffset = virtualizer.scrollOffset
+      }
+    }
+
+    const handleScroll = () => {
+      if (frozenOffset == null) return
+      const target = frozenOffset
+      frozenOffset = null
+      requestAnimationFrame(() => {
+        try {
+          virtualizer.scrollToOffset(target, { align: 'start' })
+        } catch {
+          // ignore failures; better to keep the list usable than throw
+        }
+      })
+    }
+
+    vv.addEventListener('resize', handleResize)
+    vv.addEventListener('scroll', handleScroll)
+
+    return () => {
+      vv.removeEventListener('resize', handleResize)
+      vv.removeEventListener('scroll', handleScroll)
+    }
+  }, [virtualizationEnabled, virtualizer])
   const liveWindowSummary = useMemo(() => {
     if (filteredCount === 0) {
       return 'No tracks to display.'

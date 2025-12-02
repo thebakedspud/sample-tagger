@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import PlaylistView from '../PlaylistView.jsx'
 
 vi.setConfig({ testTimeout: 15_000 })
@@ -411,5 +411,102 @@ describe('PlaylistView', () => {
 
     expect(focusByIdMock).not.toHaveBeenCalled()
     expect(secondAddBtn).toHaveFocus()
+  })
+})
+
+describe('PlaylistView VisualViewport integration', () => {
+  /** @type {any} */
+  let visualViewportMock
+  /** @type {Function[]} */
+  let resizeHandlers = []
+  /** @type {Function[]} */
+  let scrollHandlers = []
+
+  beforeEach(() => {
+    resizeHandlers = []
+    scrollHandlers = []
+
+    visualViewportMock = {
+      addEventListener: vi.fn((event, handler) => {
+        if (event === 'resize') resizeHandlers.push(handler)
+        if (event === 'scroll') scrollHandlers.push(handler)
+      }),
+      removeEventListener: vi.fn((event, handler) => {
+        if (event === 'resize') {
+          resizeHandlers = resizeHandlers.filter((h) => h !== handler)
+        }
+        if (event === 'scroll') {
+          scrollHandlers = scrollHandlers.filter((h) => h !== handler)
+        }
+      }),
+    }
+
+    Object.defineProperty(window, 'visualViewport', {
+      value: visualViewportMock,
+      writable: true,
+      configurable: true,
+    })
+  })
+
+  afterEach(() => {
+    // @ts-expect-error - cleanup test-only property
+    delete window.visualViewport
+  })
+
+  it('subscribes to VisualViewport events when virtualization is enabled', () => {
+    const manyTracks = Array.from({ length: 150 }, (_, i) => ({
+      id: `track-${i}`,
+      title: `Track ${i}`,
+      artist: 'Artist',
+      notes: [],
+      tags: [],
+    }))
+
+    const props = createProps({ tracks: manyTracks })
+    render(<PlaylistView {...props} />)
+
+    expect(visualViewportMock.addEventListener).toHaveBeenCalledWith(
+      'resize',
+      expect.any(Function),
+    )
+    expect(visualViewportMock.addEventListener).toHaveBeenCalledWith(
+      'scroll',
+      expect.any(Function),
+    )
+  })
+
+  it('does not subscribe to VisualViewport when virtualization is disabled', () => {
+    const fewTracks = [
+      { id: 'track-1', title: 'Track 1', artist: 'Artist', notes: [] },
+    ]
+    const props = createProps({ tracks: fewTracks })
+
+    render(<PlaylistView {...props} />)
+
+    expect(visualViewportMock.addEventListener).not.toHaveBeenCalled()
+  })
+
+  it('cleans up VisualViewport listeners on unmount', () => {
+    const manyTracks = Array.from({ length: 150 }, (_, i) => ({
+      id: `track-${i}`,
+      title: `Track ${i}`,
+      artist: 'Artist',
+      notes: [],
+      tags: [],
+    }))
+
+    const props = createProps({ tracks: manyTracks })
+    const { unmount } = render(<PlaylistView {...props} />)
+
+    unmount()
+
+    expect(visualViewportMock.removeEventListener).toHaveBeenCalledWith(
+      'resize',
+      expect.any(Function),
+    )
+    expect(visualViewportMock.removeEventListener).toHaveBeenCalledWith(
+      'scroll',
+      expect.any(Function),
+    )
   })
 })
