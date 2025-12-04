@@ -1,6 +1,39 @@
 import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+const { virtualizerConfigs, buildVirtualizerStub } = vi.hoisted(() => {
+  const configs = []
+
+  const buildVirtualizerStub = (config = {}) => {
+    const count = typeof config.count === 'number' ? config.count : 0
+    const shouldVirtualize = Boolean(config.enabled) && count > 0
+    const virtualItems = shouldVirtualize
+      ? Array.from({ length: count }, (_, index) => ({
+          key: typeof config.getItemKey === 'function' ? config.getItemKey(index) : index,
+          index,
+          start: index * 172,
+        }))
+      : []
+
+    return {
+      getVirtualItems: () => virtualItems,
+      getTotalSize: () => (shouldVirtualize ? count * 172 : 0),
+      measureElement: vi.fn(),
+      scrollToIndex: vi.fn(),
+      scrollToOffset: vi.fn(),
+    }
+  }
+
+  return { virtualizerConfigs: configs, buildVirtualizerStub }
+})
+
+vi.mock('@tanstack/react-virtual', () => ({
+  useVirtualizer: (config) => {
+    virtualizerConfigs.push(config)
+    return buildVirtualizerStub(config)
+  },
+}))
+
 import PlaylistView from '../PlaylistView.jsx'
 
 vi.setConfig({ testTimeout: 15_000 })
@@ -73,6 +106,7 @@ vi.mock('../../../components/UndoPlaceholder.jsx', () => ({
 
 beforeEach(() => {
   focusByIdMock?.mockReset()
+  virtualizerConfigs.length = 0
 })
 
 /**
@@ -508,5 +542,100 @@ describe('PlaylistView VisualViewport integration', () => {
       'scroll',
       expect.any(Function),
     )
+  })
+})
+
+describe('PlaylistView Phase 1 scroll container', () => {
+  it('renders a ScrollArea component as the scroll container', () => {
+    const manyTracks = Array.from({ length: 150 }, (_, i) => ({
+      id: `track-${i}`,
+      title: `Track ${i}`,
+      artist: 'Artist',
+      notes: [],
+      tags: [],
+    }))
+
+    const props = createProps({ tracks: manyTracks })
+    const { container } = render(<PlaylistView {...props} />)
+
+    // The scroll-area class is applied by ScrollArea component
+    const scrollArea = container.querySelector('.scroll-area')
+    expect(scrollArea).toBeInTheDocument()
+    expect(scrollArea).toHaveClass('scroll-area--playlist')
+  })
+
+  it('wraps playlist content inside scroll container', () => {
+    const tracks = [
+      { id: 'track-1', title: 'Track 1', artist: 'Artist', notes: [] },
+      { id: 'track-2', title: 'Track 2', artist: 'Artist', notes: [] },
+    ]
+
+    const props = createProps({ tracks })
+    const { container } = render(<PlaylistView {...props} />)
+
+    const scrollArea = container.querySelector('.scroll-area')
+    expect(scrollArea).toBeInTheDocument()
+
+    // Track cards should be inside the scroll area
+    const trackCards = scrollArea?.querySelectorAll('[data-track-id]')
+    expect(trackCards?.length).toBe(2)
+  })
+
+  it('keeps SearchFilterBar outside the scroll container', () => {
+    const tracks = [
+      { id: 'track-1', title: 'Track 1', artist: 'Artist', notes: [] },
+    ]
+
+    const props = createProps({ tracks })
+    const { container } = render(<PlaylistView {...props} />)
+
+    const scrollArea = container.querySelector('.scroll-area')
+    const filterBar = container.querySelector('[data-filter-bar="true"]')
+
+    expect(filterBar).toBeInTheDocument()
+    expect(scrollArea).toBeInTheDocument()
+
+    // FilterBar should NOT be inside ScrollArea
+    expect(scrollArea?.contains(filterBar)).toBe(false)
+  })
+})
+
+describe('PlaylistView virtualizer integration', () => {
+  it('passes enabled flag and scroll container element to useVirtualizer', () => {
+    const tracks = Array.from({ length: 150 }, (_, i) => ({
+      id: `track-${i}`,
+      title: `Track ${i}`,
+      artist: 'Artist',
+      notes: [],
+      tags: [],
+    }))
+
+    const props = createProps({ tracks })
+    const { container } = render(<PlaylistView {...props} />)
+    expect(virtualizerConfigs.length).toBeGreaterThan(0)
+    const config = virtualizerConfigs.at(-1)
+    expect(config?.enabled).toBe(true)
+    const scrollArea = container.querySelector('.scroll-area')
+    expect(scrollArea).toBeInTheDocument()
+    expect(config?.getScrollElement()).toBe(scrollArea)
+  })
+
+  it('renders track rows consistently between virtualized and non-virtualized modes', () => {
+    const tracks = Array.from({ length: 120 }, (_, i) => ({
+      id: `track-${i}`,
+      title: `Track ${i}`,
+      artist: 'Artist',
+      notes: [],
+      tags: [],
+    }))
+
+    const { rerender, container } = render(<PlaylistView {...createProps({ tracks })} />)
+    const virtualizedRows = container.querySelectorAll('[data-track-id]')
+    expect(virtualizedRows.length).toBe(tracks.length)
+
+    const shortList = tracks.slice(0, 2)
+    rerender(<PlaylistView {...createProps({ tracks: shortList })} />)
+    const nonVirtualRows = container.querySelectorAll('[data-track-id]')
+    expect(nonVirtualRows.length).toBe(shortList.length)
   })
 })

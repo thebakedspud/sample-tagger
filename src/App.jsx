@@ -989,61 +989,73 @@ function AppInner({
         </div>
       </header>
 
-      <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px', paddingBottom: 128 }}>
-        {screen === 'account' ? (
-          <AccountView
-            recoveryCode={recoveryCode}
-            recoveryAcknowledgedAt={recoveryAcknowledgedAt}
-            recoveryCopyButtonRef={recoveryCopyButtonRef}
-            onCopyRecoveryCode={copyRecoveryCode}
-            onConfirmRegenerate={regenerateRecoveryCode}
-            regeneratingRecoveryCode={regeneratingRecovery}
-            regenerationError={recoveryRotationError}
-            onOpenRestoreDialog={openRestoreDialog}
-            onOpenSpotifyLink={handleOpenSpotifyLink}
-            spotifyLinked={false}
-            spotifyAccountLabel=""
-            emailLinkingEnabled={false}
-            onRequestRecoveryModal={openRecoveryModal}
-            showBackupPrompt={showBackupReminder}
-          />
-        ) : (
-          <>
-            {screen === 'landing' && (
-              <section aria-labelledby="landing-title">
-                <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
-                <p style={{ color: 'var(--muted)' }}>
-                  {PODCASTS_ENABLED
-                    ? 'Paste a Spotify / YouTube / SoundCloud playlist URL or a Spotify podcast show/episode URL to import a snapshot and start adding notes.'
-                    : 'Paste a Spotify / YouTube / SoundCloud playlist URL to import a snapshot and start adding notes.'}
-                </p>
+      <div className="app-shell">
+        <main
+          style={{
+            flex: '1 1 auto',
+            display: 'flex',
+            flexDirection: 'column',
+            maxWidth: 880,
+            width: '100%',
+            margin: '24px auto 60px',
+            padding: '0 16px',
+            paddingBottom: 128,
+          }}
+        >
+          {screen === 'account' ? (
+            <AccountView
+              recoveryCode={recoveryCode}
+              recoveryAcknowledgedAt={recoveryAcknowledgedAt}
+              recoveryCopyButtonRef={recoveryCopyButtonRef}
+              onCopyRecoveryCode={copyRecoveryCode}
+              onConfirmRegenerate={regenerateRecoveryCode}
+              regeneratingRecoveryCode={regeneratingRecovery}
+              regenerationError={recoveryRotationError}
+              onOpenRestoreDialog={openRestoreDialog}
+              onOpenSpotifyLink={handleOpenSpotifyLink}
+              spotifyLinked={false}
+              spotifyAccountLabel=""
+              emailLinkingEnabled={false}
+              onRequestRecoveryModal={openRecoveryModal}
+              showBackupPrompt={showBackupReminder}
+            />
+          ) : (
+            <>
+              {screen === 'landing' && (
+                <section aria-labelledby="landing-title">
+                  <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
+                  <p style={{ color: 'var(--muted)' }}>
+                    {PODCASTS_ENABLED
+                      ? 'Paste a Spotify / YouTube / SoundCloud playlist URL or a Spotify podcast show/episode URL to import a snapshot and start adding notes.'
+                      : 'Paste a Spotify / YouTube / SoundCloud playlist URL to import a snapshot and start adding notes.'}
+                  </p>
 
-                <form
-                  onSubmit={(event) => {
-                    void handleImport(event)
-                  }}
-                  aria-describedby={importError?.message ? 'import-error' : undefined}
-                >
-                  <div style={{ display: 'grid', gap: 8, alignItems: 'start', gridTemplateColumns: '1fr auto' }}>
-                    <div style={{ gridColumn: '1 / -1' }}>
-                      <label htmlFor="playlist-url" style={{ display: 'block', marginBottom: 6 }}>Playlist URL</label>
-                      <input
-                        id="playlist-url"
-                        ref={importInputRef}
-                        type="url"
-                        inputMode="url"
-                        placeholder={
-                          PODCASTS_ENABLED
-                            ? 'https://open.spotify.com/playlist/... (or show/episode link)'
-                            : 'https://open.spotify.com/playlist/...'
-                        }
-                        autoComplete="off"
-                        value={importUrl}
-                        onChange={handleImportUrlChange}
-                        style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
-                        aria-invalid={!!importError?.message}
-                        aria-describedby={importError?.message ? 'import-error' : undefined}
-                      />
+                  <form
+                    onSubmit={(event) => {
+                      void handleImport(event)
+                    }}
+                    aria-describedby={importError?.message ? 'import-error' : undefined}
+                  >
+                    <div style={{ display: 'grid', gap: 8, alignItems: 'start', gridTemplateColumns: '1fr auto' }}>
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <label htmlFor="playlist-url" style={{ display: 'block', marginBottom: 6 }}>Playlist URL</label>
+                        <input
+                          id="playlist-url"
+                          ref={importInputRef}
+                          type="url"
+                          inputMode="url"
+                          placeholder={
+                            PODCASTS_ENABLED
+                              ? 'https://open.spotify.com/playlist/... (or show/episode link)'
+                              : 'https://open.spotify.com/playlist/...'
+                          }
+                          autoComplete="off"
+                          value={importUrl}
+                          onChange={handleImportUrlChange}
+                          style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
+                          aria-invalid={!!importError?.message}
+                          aria-describedby={importError?.message ? 'import-error' : undefined}
+                        />
                       <ErrorMessage id="import-error" data-type={importError?.type}>
                         {importError?.message}
                       </ErrorMessage>
@@ -1086,35 +1098,37 @@ function AppInner({
         )}
       </main>
 
-      <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)', paddingBottom: 96 }}>
-        <small>Prototype - Keyboard-first, accessible-by-default</small>
-      </footer>
-      <div
-        role="region"
-        aria-label="Note backup controls"
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          width: '100%',
-          background: 'var(--surface, #0f1115)',
-          borderTop: '1px solid var(--border, rgba(255,255,255,0.1))',
-          padding: '12px 16px',
-          display: 'flex',
-          justifyContent: 'center',
-          gap: 16,
-          zIndex: 10,
-        }}
-      >
-        <div style={{ display: 'flex', gap: 12 }}>
-          <button type="button" className="btn" onClick={handleBackupNotes}>
-            Backup Notes
-          </button>
-          <button type="button" className="btn" onClick={handleRestoreNotesRequest}>
-            Restore Notes
-          </button>
+        <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)', paddingBottom: 96 }}>
+          <small>Prototype - Keyboard-first, accessible-by-default</small>
+        </footer>
+        <div
+          role="region"
+          aria-label="Note backup controls"
+          style={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            width: '100%',
+            background: 'var(--surface, #0f1115)',
+            borderTop: '1px solid var(--border, rgba(255,255,255,0.1))',
+            padding: '12px 16px',
+            display: 'flex',
+            justifyContent: 'center',
+            gap: 16,
+            zIndex: 10,
+          }}
+        >
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button type="button" className="btn" onClick={handleBackupNotes}>
+              Backup Notes
+            </button>
+            <button type="button" className="btn" onClick={handleRestoreNotesRequest}>
+              Restore Notes
+            </button>
+          </div>
         </div>
       </div>
+
       <RecoveryModal
         open={showRecoveryModal}
         code={recoveryCode}

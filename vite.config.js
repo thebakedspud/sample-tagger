@@ -12,7 +12,7 @@ export default defineConfig({
     setupFiles: './vitest.setup.js',
     globals: true,
     css: false,
-    pool: 'threads',
+    pool: 'forks',
     maxWorkers: 1,
     coverage: {
       provider: 'v8',

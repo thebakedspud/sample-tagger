@@ -1,3 +1,35 @@
+/* Phase 1: App shell layout for dedicated scroll containers */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+@supports (min-height: 100dvh) {
+  .app-shell {
+    min-height: 100dvh;
+  }
+}
+
+/* Playlist screen wrapper - isolates scroll from window */
+.playlist-screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ScrollArea base styles */
+.scroll-area {
+  position: relative;
+}
+
+/* Ensure proper padding at bottom of scroll area for fixed footers */
+.scroll-area--playlist {
+  padding-bottom: 128px;
+}
+
 .error-text {
   color: #d9534f;
   font-size: 0.9em;

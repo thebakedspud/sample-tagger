@@ -1,11 +1,12 @@
 ﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { useWindowVirtualizer } from '@tanstack/react-virtual'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import focusById, { focusElement } from '../../utils/focusById.js'
 import SearchFilterBar from '../filter/SearchFilterBar.jsx'
 import useTrackFilter from '../filter/useTrackFilter.js'
 import { SORT_KEY } from '../filter/filterTracks.js'
 import { DEBUG_FOCUS, debugFocus } from '../../utils/debug.js'
 import TrackCard from './TrackCard.jsx'
+import ScrollArea from '../../components/ScrollArea.jsx'
 
 /** @typedef {import('../import/usePlaylistImportController.js').BackgroundSyncState} BackgroundSyncState */
 
@@ -147,6 +148,7 @@ export default function PlaylistView({
 
   const searchInputRef = useRef(null)
   const listContainerRef = useRef(null)
+  const scrollAreaRef = useRef(null)
   const trackCount = Array.isArray(tracks) ? tracks.length : 0
   const virtualizationPreference = useMemo(
     () => resolveVirtualizationPreference(trackCount),
@@ -245,9 +247,13 @@ export default function PlaylistView({
     [filteredTracks],
   )
 
-  const virtualizer = useWindowVirtualizer({
+  // Phase 1: Use useVirtualizer with a dedicated scroll container instead of
+  // useWindowVirtualizer. This isolates the playlist scroll from window viewport
+  // changes caused by the iOS soft keyboard.
+  const virtualizer = useVirtualizer({
     enabled: virtualizationEnabled,
     count: virtualizationEnabled ? filteredTracks.length : 0,
+    getScrollElement: () => scrollAreaRef.current,
     estimateSize: estimateTrackSize,
     overscan: 10,
     getItemKey: getVirtualItemKey,
@@ -337,17 +343,16 @@ export default function PlaylistView({
   useEffect(() => {
     if (lastFilterSignatureRef.current === filterSignature) return
     lastFilterSignatureRef.current = filterSignature
+    // Phase 1: Scroll the dedicated scroll container instead of window
     if (virtualizationEnabled && virtualizer) {
       virtualizer.scrollToIndex(0, { align: 'start' })
       return
     }
-    const container = listContainerRef.current
-    if (container && typeof container.scrollIntoView === 'function') {
-      container.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    // Fallback for non-virtualized mode: scroll the ScrollArea container
+    const scrollEl = scrollAreaRef.current
+    if (scrollEl) {
+      scrollEl.scrollTo({ top: 0, behavior: 'smooth' })
       return
-    }
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }, [filterSignature, virtualizationEnabled, virtualizer])
 
@@ -550,8 +555,13 @@ export default function PlaylistView({
       : ''
   const cooldownMessageId = cooldownMessage ? 'load-more-cooldown' : undefined
 
+  // Build scroll persistence key from playlist identity
+  const scrollSaveKey = importMeta?.playlistId
+    ? `playlist-scroll:${importMeta.playlistId}`
+    : undefined
+
   return (
-    <section aria-labelledby={headingId}>
+    <section aria-labelledby={headingId} className="playlist-screen">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <h1 id={headingId} aria-label={cleanTitle} style={{ marginTop: 0, marginBottom: 0 }}>
@@ -612,6 +622,12 @@ export default function PlaylistView({
         {liveWindowSummary}
       </div>
 
+      {/* Phase 1: Wrap scrollable content in ScrollArea to isolate from window */}
+      <ScrollArea
+        ref={scrollAreaRef}
+        saveKey={scrollSaveKey}
+        className="scroll-area--playlist"
+      >
       {showInitialSyncBanner && (
         <div
           role="status"
@@ -836,6 +852,7 @@ export default function PlaylistView({
           )}
         </div>
       )}
+      </ScrollArea>
     </section>
   )
 }
