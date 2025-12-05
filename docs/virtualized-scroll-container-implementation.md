@@ -1,6 +1,6 @@
 # Playlist Virtualizer Scroll-Container Implementation Plan
 
-_Last updated: 3 Dec 2025_
+_Last updated: 4 Dec 2025_
 
 ## Background
 
@@ -17,7 +17,20 @@ _Last updated: 3 Dec 2025_
   - Styling adjustments to use dynamic viewport units (`dvh`) when creating full-height containers.
 - **Out of scope (for this change)**
   - Major refactors of Landing/Account UI; we only ensure they continue to scroll by wrapping their content.
-  - Additional virtualization optimizations (perf telemetry, caching) already tracked in `virtual-tracklist-phase2.md`.
+- Additional virtualization optimizations (perf telemetry, caching) already tracked in `virtual-tracklist-phase2.md`.
+
+## Current Status (Phase 1 snapshot)
+
+- PlaylistView now renders inside a dedicated `ScrollArea`, passes its ref to `useVirtualizer`, and persists scroll position per playlist. Header/filter UI stays outside the scroll container.
+- App shell layout changes are scoped so only the playlist section participates in the 100dvh flex column, avoiding regressions on other screens.
+- Focus helpers and filter scroll resets have been updated to target the container instead of `window`.
+- Manual iOS Safari runs show the behavior is improved but a small amount of jitter remains when the keyboard animates.
+
+### Remaining follow-ups
+
+- Remove the Phase 0 VisualViewport lock once we confirm container scrolling is stable on iOS. Until then it stays as a guard rail.
+- Capture additional telemetry (e.g., log ScrollArea offsets during keyboard open/close) if we need to chase the residual jitter later.
+- If jitter persists, consider the Phase 2 fallback of disabling virtualization on affected iOS versions or expanding ScrollArea usage across more screens.
 
 ## Implementation Steps (Phased)
 

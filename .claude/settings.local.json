@@ -7,7 +7,10 @@
       "Bash(npm run dev:*)",
       "Bash(npm run lint)",
       "Bash(git log:*)",
-      "Bash(gh pr list:*)"
+      "Bash(gh pr list:*)",
+      "Bash(rg *)",
+      "Bash(ripgrep *)",
+      "Bash(powershell.exe *)"
     ],
     "deny": [],
     "ask": []

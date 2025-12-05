@@ -262,6 +262,8 @@ export default function PlaylistView({
   const totalVirtualSize = virtualizationEnabled ? virtualizer.getTotalSize() : 0
 
   // Phase 0: VisualViewport-based lock to prevent iOS Safari from "jumping"
+  // TODO(Phase 1 follow-up): remove this once container scrolling is confirmed
+  // stable on iOS (see docs/virtualized-scroll-container-implementation.md).
   // the virtualized list when the soft keyboard appears and shrinks the
   // viewport. This keeps TanStack Virtual's scroll offset stable across
   // transient viewport changes.

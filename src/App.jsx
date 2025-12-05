@@ -1012,6 +1012,8 @@ function AppInner({
               regeneratingRecoveryCode={regeneratingRecovery}
               regenerationError={recoveryRotationError}
               onOpenRestoreDialog={openRestoreDialog}
+              onBackupNotes={handleBackupNotes}
+              onRestoreFromBackup={handleRestoreNotesRequest}
               onOpenSpotifyLink={handleOpenSpotifyLink}
               spotifyLinked={false}
               spotifyAccountLabel=""
@@ -1025,9 +1027,7 @@ function AppInner({
                 <section aria-labelledby="landing-title">
                   <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
                   <p style={{ color: 'var(--muted)' }}>
-                    {PODCASTS_ENABLED
-                      ? 'Paste a Spotify / YouTube / SoundCloud playlist URL or a Spotify podcast show/episode URL to import a snapshot and start adding notes.'
-                      : 'Paste a Spotify / YouTube / SoundCloud playlist URL to import a snapshot and start adding notes.'}
+                    Paste a Spotify playlist or podcast episode URL to import and start adding notes.
                   </p>
 
                   <form
@@ -1101,32 +1101,6 @@ function AppInner({
         <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)', paddingBottom: 96 }}>
           <small>Prototype - Keyboard-first, accessible-by-default</small>
         </footer>
-        <div
-          role="region"
-          aria-label="Note backup controls"
-          style={{
-            position: 'fixed',
-            bottom: 0,
-            left: 0,
-            width: '100%',
-            background: 'var(--surface, #0f1115)',
-            borderTop: '1px solid var(--border, rgba(255,255,255,0.1))',
-            padding: '12px 16px',
-            display: 'flex',
-            justifyContent: 'center',
-            gap: 16,
-            zIndex: 10,
-          }}
-        >
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button type="button" className="btn" onClick={handleBackupNotes}>
-              Backup Notes
-            </button>
-            <button type="button" className="btn" onClick={handleRestoreNotesRequest}>
-              Restore Notes
-            </button>
-          </div>
-        </div>
       </div>
 
       <RecoveryModal
