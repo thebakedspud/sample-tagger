@@ -1025,61 +1025,61 @@ function AppInner({
             <>
               {screen === 'landing' && (
                 <section aria-labelledby="landing-title">
-                  <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
+                  <h2 id="landing-title" className="section-title" style={{ marginTop: 0 }}>Turn your Spotify library into<br />a searchable notebook</h2>
                   <p style={{ color: 'var(--muted)' }}>
-                    Paste a Spotify playlist or podcast episode URL to import and start adding notes.
+                    Add timestamped notes so you can jump back to any moment.
                   </p>
 
-                  <form
-                    onSubmit={(event) => {
-                      void handleImport(event)
-                    }}
-                    aria-describedby={importError?.message ? 'import-error' : undefined}
-                  >
-                    <div style={{ display: 'grid', gap: 8, alignItems: 'start', gridTemplateColumns: '1fr auto' }}>
-                      <div style={{ gridColumn: '1 / -1' }}>
-                        <label htmlFor="playlist-url" style={{ display: 'block', marginBottom: 6 }}>Playlist URL</label>
-                        <input
-                          id="playlist-url"
-                          ref={importInputRef}
-                          type="url"
-                          inputMode="url"
-                          placeholder={
-                            PODCASTS_ENABLED
-                              ? 'https://open.spotify.com/playlist/... (or show/episode link)'
-                              : 'https://open.spotify.com/playlist/...'
-                          }
-                          autoComplete="off"
-                          value={importUrl}
-                          onChange={handleImportUrlChange}
-                          style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
-                          aria-invalid={!!importError?.message}
-                          aria-describedby={importError?.message ? 'import-error' : undefined}
-                        />
-                      <ErrorMessage id="import-error" data-type={importError?.type}>
-                        {importError?.message}
-                      </ErrorMessage>
-                    </div>
+                  <div className="import-form-card">
+                    <form
+                      onSubmit={(event) => {
+                        void handleImport(event)
+                      }}
+                      aria-describedby={importError?.message ? 'import-error' : undefined}
+                    >
+                      <div style={{ display: 'grid', gap: 8, alignItems: 'start', gridTemplateColumns: '1fr auto', minWidth: 0 }}>
+                        <div style={{ gridColumn: '1 / -1', minWidth: 0 }}>
+                          <label htmlFor="playlist-url" className="sr-only">Playlist URL</label>
+                          <input
+                            id="playlist-url"
+                            ref={importInputRef}
+                            type="url"
+                            inputMode="url"
+                            placeholder="Paste a Spotify playlist or episode link"
+                            autoComplete="off"
+                            value={importUrl}
+                            onChange={handleImportUrlChange}
+                            style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)', boxSizing: 'border-box' }}
+                            aria-invalid={!!importError?.message}
+                            aria-describedby={importError?.message ? 'import-error' : undefined}
+                          />
+                        <ErrorMessage id="import-error" data-type={importError?.type}>
+                          {importError?.message}
+                        </ErrorMessage>
+                      </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span className="chip">
-                        <span className="chip-dot" style={{ background: providerChip ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
-                        {providerChip ? providerChip : 'no match'}
-                      </span>
-                    </div>
+                      {importUrl.trim() && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span className="chip">
+                            <span className="chip-dot" style={{ background: providerChip ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
+                            {providerChip ? providerChip : 'no match'}
+                          </span>
+                        </div>
+                      )}
 
-                    <div style={{ justifySelf: 'end' }}>
-                      <button
-                        type="submit"
-                        className="btn primary"
-                        disabled={isAnyImportBusy}
-                        aria-busy={showInitialSpinner ? 'true' : 'false'}
-                      >
-                        {showInitialSpinner ? 'Importing...' : 'Import playlist'}
-                      </button>
+                      <div style={{ justifySelf: 'end' }}>
+                        <button
+                          type="submit"
+                          className="btn primary"
+                          disabled={isAnyImportBusy}
+                          aria-busy={showInitialSpinner ? 'true' : 'false'}
+                        >
+                          {showInitialSpinner ? 'Importing...' : 'Import playlist'}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </form>
+                  </form>
+                </div>
 
                 <RecentPlaylists
                   items={recentPlaylists}
@@ -1098,9 +1098,6 @@ function AppInner({
         )}
       </main>
 
-        <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)', paddingBottom: 96 }}>
-          <small>Prototype - Keyboard-first, accessible-by-default</small>
-        </footer>
       </div>
 
       <RecoveryModal

@@ -3,6 +3,18 @@
   --space-1: 8px;
   --space-2: 12px;
   --space-3: 16px;
+
+  /* Accent colour variants */
+  --accent: #5ab4ff;
+  --accent-hover: #4a9ee6;
+  --accent-soft-bg: rgba(90, 180, 255, 0.24);
+  --accent-soft-border: rgba(90, 180, 255, 0.5);
+  --accent-soft-shadow: rgba(90, 180, 255, 0.2);
+
+  /* Surface variants */
+  --surface-subtle: rgba(255, 255, 255, 0.03);
+  --surface-subtle-hover: rgba(255, 255, 255, 0.06);
+
   /* Typography stacks */
   --font-default: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji';
@@ -10,6 +22,15 @@
   --font-dyslexic: 'Lexend Deca', var(--font-system);
   --font-body: var(--font-default);
   /* Reuse existing theme vars like --bg, --fg, --card, --border */
+}
+
+/* Theme-specific surface overrides */
+[data-theme='dark'] {
+  --surface-subtle: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme='light'] {
+  --surface-subtle: rgba(0, 0, 0, 0.02);
 }
 
 html[data-font='default'] {
