@@ -16,7 +16,7 @@ const overlayStyle = {
 /** @type {import('react').CSSProperties} */
 const modalStyle = {
   width: 'min(560px, 100%)',
-  backgroundColor: 'var(--surface, #0f1115)',
+  backgroundColor: 'var(--surface-4, var(--surface, #0f1115))',
   borderRadius: 12,
   border: '1px solid var(--border, rgba(255,255,255,0.1))',
   padding: '28px',

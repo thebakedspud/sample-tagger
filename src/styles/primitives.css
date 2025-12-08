@@ -54,7 +54,7 @@
 
 
 .app .card {
-  background: var(--card);
+  background: var(--surface-1, var(--card));
   border: 1px solid var(--border);
   border-radius: var(--radius, 10px);
   padding: var(--space-3);

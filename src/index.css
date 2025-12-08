@@ -24,16 +24,16 @@ body {
 
 /* Dark theme override */
 html.theme-dark {
-  --bg: #1f1f1f;
+  --bg: #121212;           /* Elevation Level 0 - base surface */
   --fg: #e6e6e6;
-  --muted: #b7b7b7;
-  --accent: #3b82f6;   /* softer blue for dark mode */
-  --card: #2a2a2a;
-  --surface: #2a2a2a;      /* Input backgrounds (matches --card) */
+  --muted: rgba(255, 255, 255, 0.60);  /* Medium emphasis - 60% opacity */
+  --accent: #3b82f6;       /* softer blue for dark mode */
+  --card: #1E1E1E;         /* Elevation Level 1 - cards */
+  --surface: #1E1E1E;      /* Input backgrounds (matches Level 1) */
   --accent-muted: #1e3a5f; /* Muted dark blue for active states */
   --btn-bg: #3b82f6;
   --btn-fg: #fff;
-  --border: #3a3a3a;
+  --border: rgba(255, 255, 255, 0.12);  /* Material Design standard for dark borders */
   --shadow: 0 2px 10px rgba(0,0,0,.35);
   color-scheme: dark;      /* Tells browser to use dark system UI */
 }

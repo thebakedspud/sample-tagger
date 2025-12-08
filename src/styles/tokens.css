@@ -15,6 +15,20 @@
   --surface-subtle: rgba(255, 255, 255, 0.03);
   --surface-subtle-hover: rgba(255, 255, 255, 0.06);
 
+  /*
+   * Elevation Overlay System
+   * -------------------------
+   * Creates visual depth through semi-transparent overlays.
+   * As elements rise in elevation (closer to user), they become lighter.
+   * Light theme uses subtle dark overlays for depth.
+   */
+  --elevation-base: var(--bg, #f7f7fb);
+  --surface-0: var(--bg);                   /* Level 0 - App background */
+  --surface-1: rgba(0, 0, 0, 0.02);         /* Level 1 - Cards, track rows */
+  --surface-2: rgba(0, 0, 0, 0.04);         /* Level 2 - Hover, sticky headers */
+  --surface-3: rgba(0, 0, 0, 0.06);         /* Level 3 - Dropdowns, menus */
+  --surface-4: rgba(0, 0, 0, 0.08);         /* Level 4 - Modals, dialogs */
+
   /* Typography stacks */
   --font-default: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji';
@@ -31,6 +45,20 @@
 
 [data-theme='light'] {
   --surface-subtle: rgba(0, 0, 0, 0.02);
+}
+
+/*
+ * Dark theme elevation surfaces
+ * Pre-computed values for #121212 base (Spotify-style dark)
+ * Overlay opacities: L1=5%, L2=8%, L3=11%, L4=16%
+ */
+html.theme-dark {
+  --elevation-base: #121212;
+  --surface-0: #121212;  /* 0% overlay - main background */
+  --surface-1: #1E1E1E;  /* 5% overlay - cards, track rows */
+  --surface-2: #232323;  /* 8% overlay - hover, sticky headers, toasts */
+  --surface-3: #272727;  /* 11% overlay - dropdowns, context menus */
+  --surface-4: #2C2C2C;  /* 16% overlay - modals, dialogs, annotation editor */
 }
 
 html[data-font='default'] {
