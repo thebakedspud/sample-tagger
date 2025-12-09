@@ -535,6 +535,89 @@
   margin-bottom: var(--space-3);
 }
 
+.import-url-input {
+  width: 100%;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--fg);
+  box-sizing: border-box;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.import-url-input:hover,
+.import-url-input:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--accent-soft-border);
+}
+
+.scope-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* Inactive scope pill hover + focus-visible */
+.scope-pill:hover:not(.is-active),
+.scope-pill:focus-visible:not(.is-active) {
+  background: var(--surface-2);
+}
+
+/* Active scope pill */
+.scope-pill.is-active {
+  background: var(--accent-soft-bg);
+  border-color: var(--accent);
+}
+
+/* Active scope pill hover + focus-visible */
+.scope-pill.is-active:hover,
+.scope-pill.is-active:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-soft-shadow);
+}
+
+/* Filter input (search bar in filter section) */
+.filter-input {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--fg);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.filter-input:hover,
+.filter-input:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--accent-soft-border);
+}
+
+/* Filter select (sort dropdown) */
+.filter-select {
+  min-width: 200px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.filter-select:hover,
+.filter-select:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--accent-soft-border);
+}
+
 .app .btn.destructive {
   border-color: rgba(220, 75, 86, 0.6);
   color: rgba(255, 180, 184, 0.95);
@@ -682,7 +765,7 @@
 .app-nav__btn {
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: transparent;
+  background: var(--surface-1);
   color: var(--muted);
   padding: 8px 14px;
   font: inherit;
@@ -717,4 +800,17 @@
 .app-nav__btn[aria-disabled='true'] {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* Inactive pill hover + focus-visible */
+.app-nav__btn:hover:not(.is-active):not(:disabled):not([aria-disabled='true']),
+.app-nav__btn:focus-visible:not(.is-active):not(:disabled):not([aria-disabled='true']) {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+/* Active pill hover + focus-visible — subtle shadow enhancement */
+.app-nav__btn.is-active:hover,
+.app-nav__btn.is-active:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-soft-shadow);
 }

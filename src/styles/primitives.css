@@ -2,7 +2,7 @@
   /* keep visuals the same */
   border: 1px solid var(--border);
   border-radius: 8px;          /* a bit rounder like before */
-  background: var(--card);
+  background: var(--surface-1, var(--card));
   color: var(--fg);
   box-shadow: var(--shadow, 0 1px 2px rgba(0,0,0,.25));
   cursor: pointer;
@@ -15,6 +15,13 @@
   align-items: center;
   gap: 6px;
   padding: 10px 14px;          /* slightly larger than 8x12 */
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.app .btn:hover:not(:disabled),
+.app .btn:focus-visible:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--accent-soft-border);
 }
 
 .app .btn.primary {

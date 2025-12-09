@@ -57,6 +57,7 @@ export default function LandingScreen({
                             <label htmlFor="playlist-url" className="sr-only">Playlist URL</label>
                             <input
                                 id="playlist-url"
+                                className="import-url-input"
                                 ref={importInputRef}
                                 type="url"
                                 inputMode="url"
@@ -64,7 +65,6 @@ export default function LandingScreen({
                                 autoComplete="off"
                                 value={importUrl}
                                 onChange={onImportUrlChange}
-                                style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)', boxSizing: 'border-box' }}
                                 aria-invalid={!!importError?.message}
                                 aria-describedby={importError?.message ? 'import-error' : undefined}
                             />
