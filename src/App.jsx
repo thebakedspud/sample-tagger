@@ -76,7 +76,7 @@ const PODCASTS_ENABLED = isPodcastImportEnabled()
  *  pendingMigrationSnapshot: any,
  *  initialRecents: any,
  *  persistedTracks: any,
- *  initialScreen: string,
+ *  initialScreen: 'landing' | 'playlist' | 'podcast' | 'account',
  *  onAnonContextChange: Function,
  *  initialSyncStatus: BackgroundSyncState
  * }} props
@@ -1079,7 +1079,7 @@ function AppInner({
 
 /**
  * Middle layer - provides device context to playlist provider
- * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: string, initialPlaylistStateWithData: any }} props
+ * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: 'landing' | 'playlist' | 'podcast' | 'account', initialPlaylistStateWithData: any }} props
  */
 function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRecents, persistedTracks, initialScreen, initialPlaylistStateWithData }) {
   // Get initial device context from device state module
