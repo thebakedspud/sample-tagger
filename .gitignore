@@ -53,3 +53,11 @@ yarn-error.log*
 docs/timestamp-affordance-plan.md
 docs/daylist-snapshot-plan.md
 current_issues.md
+
+
+.env*.local
+
+# Windows special device file that can appear as untracked
+nul
+
+.env*.local

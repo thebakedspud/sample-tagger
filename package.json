@@ -10,7 +10,7 @@
     "check:tsc": "tsc --project tsconfig.json --noEmit --pretty false",
     "check:types:overlap": "node scripts/check-types-overlap.mjs",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run --reporter=default --maxWorkers=50%",
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
     "test:ci": "cross-env CI=1 vitest run --reporter=default --maxWorkers=50%"
