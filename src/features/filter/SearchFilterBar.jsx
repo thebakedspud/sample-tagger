@@ -18,12 +18,12 @@ const SCOPE_OPTIONS = [
 
 const SORT_OPTIONS = [
   {
-    value: `${SORT_KEY.DATE}:${SORT_DIRECTION.DESC}`,
-    label: 'Date added - newest first',
-  },
-  {
     value: `${SORT_KEY.DATE}:${SORT_DIRECTION.ASC}`,
     label: 'Date added - oldest first',
+  },
+  {
+    value: `${SORT_KEY.DATE}:${SORT_DIRECTION.DESC}`,
+    label: 'Date added - newest first',
   },
   {
     value: `${SORT_KEY.TITLE}:${SORT_DIRECTION.ASC}`,

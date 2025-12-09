@@ -19,6 +19,7 @@ vi.mock('../../utils/storage.js', () => ({
 const cacheState = vi.hoisted(() => ({
   cachedPlaylists: new Map(),
   isHydrating: false,
+  getCachedResult: vi.fn(),
 }))
 
 const usePersistentPlaylistCacheMock = vi.hoisted(() => vi.fn(() => cacheState))
@@ -34,6 +35,13 @@ describe('useRecentPlaylists', () => {
     upsertRecentMock.mockClear()
     cacheState.cachedPlaylists = new Map()
     cacheState.isHydrating = false
+    cacheState.getCachedResult.mockImplementation((key) => {
+      if (!key) return null
+      const entry = cacheState.cachedPlaylists.get(key)
+      if (!entry) return null
+      if (entry?.data) return entry.data
+      return entry
+    })
   })
 
   it('enriches recents with cached metadata once hydrated', async () => {

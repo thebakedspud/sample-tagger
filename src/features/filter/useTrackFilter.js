@@ -15,6 +15,7 @@ import {
 } from './filterTracks.js';
 
 const STORAGE_PREFIX = 'sta:v5:filters';
+const STORAGE_VERSION = 2;
 
 const DEFAULT_FILTER_STATE = {
   query: '',
@@ -51,6 +52,18 @@ function normalizeSort(sort) {
   return { key, direction };
 }
 
+function migrateStoredSort(sort, version) {
+  const normalized = normalizeSort(sort);
+  const schemaVersion = Number.isFinite(version) ? version : 1;
+  if (schemaVersion >= STORAGE_VERSION) {
+    return normalized;
+  }
+  if (normalized.key === SORT_KEY.DATE && normalized.direction === SORT_DIRECTION.DESC) {
+    return normalizeSort(DEFAULT_SORT);
+  }
+  return normalized;
+}
+
 function normalizeTags(tags) {
   if (!Array.isArray(tags)) return [];
   const seen = new Set();
@@ -73,10 +86,11 @@ function loadStoredState(key) {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
+    const version = typeof parsed.version === 'number' ? parsed.version : 1;
     return {
       query: typeof parsed.query === 'string' ? parsed.query : '',
       scope: normalizeScope(parsed.scope),
-      sort: normalizeSort(parsed.sort),
+      sort: migrateStoredSort(parsed.sort, version),
       selectedTags: normalizeTags(parsed.selectedTags),
       hasNotesOnly: Boolean(parsed.hasNotesOnly),
     };
@@ -92,6 +106,7 @@ function persistState(key, state) {
     storage.setItem(
       key,
       JSON.stringify({
+        version: STORAGE_VERSION,
         ...state,
         lastUsedAt: new Date().toISOString(),
       }),

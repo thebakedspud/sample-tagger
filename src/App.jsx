@@ -38,10 +38,12 @@ import './styles/primitives.css';
 import './styles/app.css';
 import useAnnounce from './features/a11y/useAnnounce.js'
 import { DEBUG_FOCUS, debugFocus } from './utils/debug.js'
+import { isPodcastImportEnabled } from './utils/podcastFlags.js'
 
 // NEW: inline undo
 import useInlineUndo from './features/undo/useInlineUndo.js'
 import PlaylistView from './features/playlist/PlaylistView.jsx'
+import PodcastView from './features/podcast/PodcastView.jsx'
 import AccountView from './features/account/AccountView.jsx'
 import useDeviceRecovery from './features/account/useDeviceRecovery.js'
 import { useGlobalKeybindings } from './hooks/useGlobalKeybindings.js'
@@ -65,6 +67,8 @@ import {
 } from './features/playlist/usePlaylistContext.js'
 import { useNoteHandlers } from './features/notes/useNoteHandlers.js'
 import buildInitialPlaylistState from './features/playlist/buildInitialPlaylistState.js'
+
+const PODCASTS_ENABLED = isPodcastImportEnabled()
 
 /**
  * Inner component that consumes playlist state from context
@@ -91,7 +95,7 @@ function AppInner({
   
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState(
-    /** @type {'landing' | 'playlist' | 'account'} */ (initialScreen)
+    /** @type {'landing' | 'playlist' | 'podcast' | 'account'} */ (initialScreen)
   )
   const goToLanding = useCallback(() => { setScreen('landing') }, [setScreen])
 
@@ -191,6 +195,7 @@ function AppInner({
     backgroundSync,
     resetImportFlow,
     isRefreshingCachedData,
+    cachedViewInfo,
   } = usePlaylistImportController({
     dispatch,
     announce,
@@ -805,7 +810,109 @@ function AppInner({
     [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks, dispatch],
   )
 
-  const hasPlaylist = Array.isArray(tracks) && tracks.length > 0
+  const isPodcastTrack = useCallback((track) => {
+    if (!track) return false
+    if (track?.kind === 'podcast') return true
+    // Legacy data (before `kind` existed) can be inferred by show metadata.
+    return Boolean(track?.showId || track?.showName || track?.publisher)
+  }, [])
+  const musicTracks = useMemo(
+    () => (Array.isArray(tracks) ? tracks.filter((track) => !isPodcastTrack(track)) : []),
+    [tracks, isPodcastTrack],
+  )
+  const podcastTracks = useMemo(
+    () => (Array.isArray(tracks) ? tracks.filter((track) => isPodcastTrack(track)) : []),
+    [tracks, isPodcastTrack],
+  )
+  const hasMusicTracks = musicTracks.length > 0
+  const hasPodcastTracks = podcastTracks.length > 0
+  const hasAnyTracks = Array.isArray(tracks) && tracks.length > 0
+
+  useEffect(() => {
+    /** @type {'landing' | 'playlist' | 'podcast' | null} */
+    let nextScreen = null
+    /** @type {'landing' | 'playlist' | 'podcast' | null} */
+    let announcementType = null
+
+    if (screen === 'podcast' && !hasPodcastTracks) {
+      if (hasMusicTracks) {
+        nextScreen = 'playlist'
+        announcementType = 'playlist'
+      } else if (!hasAnyTracks) {
+        nextScreen = 'landing'
+        announcementType = 'landing'
+      }
+    } else if (screen === 'playlist' && !hasMusicTracks && hasPodcastTracks) {
+      nextScreen = 'podcast'
+      announcementType = 'podcast'
+    } else if ((screen === 'playlist' || screen === 'podcast') && !hasAnyTracks) {
+      nextScreen = 'landing'
+      announcementType = 'landing'
+    }
+
+    if (nextScreen && nextScreen !== screen) {
+      setScreen(nextScreen)
+      if (announcementType === 'podcast') {
+        announce('Podcast view ready. Showing imported episodes.')
+      } else if (announcementType === 'playlist') {
+        announce('Playlist view ready. Showing imported tracks.')
+      } else if (announcementType === 'landing') {
+        announce('No tracks available. Returning to import screen.')
+      }
+    }
+  }, [screen, hasMusicTracks, hasPodcastTracks, hasAnyTracks, setScreen, announce])
+
+  const renderCollectionView = (viewMode) => {
+    const ViewComponent = viewMode === 'podcast' ? PodcastView : PlaylistView
+    const viewTracks = viewMode === 'podcast' ? podcastTracks : musicTracks
+
+    return (
+      <ViewComponent
+        key={viewMode}
+        playlistTitle={playlistTitle}
+        importedAt={importedAt}
+        importMeta={importMeta}
+        tracks={viewTracks}
+        isAnyImportBusy={isAnyImportBusy}
+        showReimportSpinner={showReimportSpinner}
+        showLoadMoreSpinner={showLoadMoreSpinner}
+        pending={pending}
+        isPending={isPending}
+        editingState={{ editingId, draft, error: editingError }}
+        onDraftChange={onDraftChange}
+        onAddNote={onAddNote}
+        onSaveNote={onSaveNote}
+        onCancelNote={onCancelNote}
+        onDeleteNote={onDeleteNote}
+        onAddTag={handleAddTag}
+        onRemoveTag={handleRemoveTag}
+        stockTags={STOCK_TAGS}
+        customTags={allCustomTags}
+        onUndo={undoInline}
+        onDismissUndo={expireInline}
+        onReimport={() => {
+          void handleReimport()
+        }}
+        onClear={handleClearAll}
+        onBack={goToLanding}
+        canReimport={Boolean(lastImportUrl)}
+        reimportBtnRef={reimportBtnRef}
+        loadMoreBtnRef={loadMoreBtnRef}
+        onLoadMore={() => {
+          void handleLoadMore()
+        }}
+        announce={announce}
+        hasDiscoveredTimestamp={hasDiscoveredTimestamp}
+        backgroundSync={backgroundSync}
+        initialSyncStatus={initialSyncStatus}
+        cachedViewInfo={cachedViewInfo}
+        skipFocusManagement={skipPlaylistFocusManagement}
+        focusContext={trackFocusContext}
+        onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
+        viewMode={viewMode === 'podcast' ? 'podcast' : 'playlist'}
+      />
+    )
+  }
 
   // Helper to hide the mock prefix from SRs but keep it visible
   return (
@@ -842,7 +949,7 @@ function AppInner({
               <button
                 type="button"
                 className={`app-nav__btn${screen === 'landing' ? ' is-active' : ''}`}
-                onClick={goToLanding}
+                onClick={() => setScreen('landing')}
                 aria-current={screen === 'landing' ? 'page' : undefined}
               >
                 Import
@@ -851,15 +958,30 @@ function AppInner({
                 type="button"
                 className={`app-nav__btn${screen === 'playlist' ? ' is-active' : ''}`}
                 onClick={() => {
-                  if (!hasPlaylist) return
+                  if (!hasMusicTracks) return
                   setScreen('playlist')
                 }}
                 aria-current={screen === 'playlist' ? 'page' : undefined}
-                disabled={!hasPlaylist}
-                aria-disabled={!hasPlaylist ? 'true' : undefined}
+                disabled={!hasMusicTracks}
+                aria-disabled={!hasMusicTracks ? 'true' : undefined}
               >
                 Playlist
               </button>
+              {PODCASTS_ENABLED && (
+                <button
+                  type="button"
+                  className={`app-nav__btn${screen === 'podcast' ? ' is-active' : ''}`}
+                  onClick={() => {
+                    if (!hasPodcastTracks) return
+                    setScreen('podcast')
+                  }}
+                  aria-current={screen === 'podcast' ? 'page' : undefined}
+                  disabled={!hasPodcastTracks}
+                  aria-disabled={!hasPodcastTracks ? 'true' : undefined}
+                >
+                  Podcast
+                </button>
+              )}
               <button
                 type="button"
                 className={`app-nav__btn${screen === 'account' ? ' is-active' : ''}`}
@@ -897,7 +1019,9 @@ function AppInner({
               <section aria-labelledby="landing-title">
                 <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
                 <p style={{ color: 'var(--muted)' }}>
-                  Paste a Spotify / YouTube / SoundCloud <strong>playlist</strong> URL to import a snapshot and start adding notes.
+                  {PODCASTS_ENABLED
+                    ? 'Paste a Spotify / YouTube / SoundCloud playlist URL or a Spotify podcast show/episode URL to import a snapshot and start adding notes.'
+                    : 'Paste a Spotify / YouTube / SoundCloud playlist URL to import a snapshot and start adding notes.'}
                 </p>
 
                 <form
@@ -914,7 +1038,11 @@ function AppInner({
                         ref={importInputRef}
                         type="url"
                         inputMode="url"
-                        placeholder="https://open.spotify.com/playlist/..."
+                        placeholder={
+                          PODCASTS_ENABLED
+                            ? 'https://open.spotify.com/playlist/... (or show/episode link)'
+                            : 'https://open.spotify.com/playlist/...'
+                        }
                         autoComplete="off"
                         value={importUrl}
                         onChange={handleImportUrlChange}
@@ -957,49 +1085,8 @@ function AppInner({
               </section>
             )}
 
-            {screen === 'playlist' && (
-              <PlaylistView
-                playlistTitle={playlistTitle}
-                importedAt={importedAt}
-                importMeta={importMeta}
-                tracks={tracks}
-                isAnyImportBusy={isAnyImportBusy}
-                showReimportSpinner={showReimportSpinner}
-                showLoadMoreSpinner={showLoadMoreSpinner}
-                pending={pending}
-                isPending={isPending}
-                editingState={{ editingId, draft, error: editingError }}
-                onDraftChange={onDraftChange}
-                onAddNote={onAddNote}
-                onSaveNote={onSaveNote}
-                onCancelNote={onCancelNote}
-                onDeleteNote={onDeleteNote}
-                onAddTag={handleAddTag}
-                onRemoveTag={handleRemoveTag}
-                stockTags={STOCK_TAGS}
-                customTags={allCustomTags}
-                onUndo={undoInline}
-                onDismissUndo={expireInline}
-                onReimport={() => {
-                  void handleReimport()
-                }}
-                onClear={handleClearAll}
-                onBack={goToLanding}
-                canReimport={Boolean(lastImportUrl)}
-                reimportBtnRef={reimportBtnRef}
-                loadMoreBtnRef={loadMoreBtnRef}
-                onLoadMore={() => {
-                  void handleLoadMore()
-                }}
-                announce={announce}
-              backgroundSync={backgroundSync}
-              initialSyncStatus={initialSyncStatus}
-              skipFocusManagement={skipPlaylistFocusManagement}
-              focusContext={trackFocusContext}
-              onFirstVisibleTrackChange={handleFirstVisibleTrackChange}
-              hasDiscoveredTimestamp={hasDiscoveredTimestamp}
-            />
-            )}
+            {screen === 'playlist' && renderCollectionView('playlist')}
+            {screen === 'podcast' && renderCollectionView('podcast')}
           </>
         )}
       </main>

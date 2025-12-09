@@ -21,6 +21,7 @@ export const EMPTY_IMPORT_META = {
   sourceUrl: '',
   debug: null,
   total: null,
+  contentKind: null,
 }
 
 /**
