@@ -35,6 +35,17 @@ function computePayloadTotal(payload) {
   return tracks.length;
 }
 
+/**
+ * Formats a user-friendly rate limit message.
+ *
+ * `retryAt` is optionally populated when the import flow returns `{ ok: false, code: ERR_RATE_LIMITED, retryAt }`.
+ * If `retryAt` is undefined (e.g., adapter didn't extract Retry-After header, or error was thrown rather than
+ * returned), we fall back to a generic message. This defensive approach ensures we never crash on missing data
+ * while still providing specific timing when available.
+ *
+ * @param {number=} retryAt - Unix timestamp (ms) when the rate limit resets, if known.
+ * @returns {string}
+ */
 function formatRateLimitMessage(retryAt) {
   const now = Date.now();
   if (!retryAt || retryAt <= now) {
@@ -857,10 +868,8 @@ export default function usePlaylistImportController({
           const msg = 'Import canceled.';
           const errObj = { message: msg, type: 'cancel' };
           updateRecentCardState(recent.id, { loading: false, error: errObj });
-          // Optional: announce(msg) if we want to be chatty, but let's stick to visual state for now
-          // or announce it for consistency:
           announce(msg);
-          throw err;
+          return { ok: false, error: msg };
         }
         const code = extractErrorCode(err);
         let msg = msgFromCode(code);

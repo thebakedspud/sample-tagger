@@ -9,8 +9,7 @@
       "Bash(git log:*)",
       "Bash(gh pr list:*)",
       "Bash(rg *)",
-      "Bash(ripgrep *)",
-      "Bash(powershell.exe *)"
+      "Bash(ripgrep *)"
     ],
     "deny": [],
     "ask": []

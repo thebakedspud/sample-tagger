@@ -754,12 +754,12 @@ describe('usePlaylistImportController', () => {
     importInitialMock.mockRejectedValueOnce(Object.assign(new Error('aborted'), { name: 'AbortError' }));
 
     const { result } = renderHook(() => usePlaylistImportController(deps));
-    await expect(
-      act(async () => {
-        await result.current.handleSelectRecent(recent);
-      }),
-    ).rejects.toBeTruthy();
+    let outcome;
+    await act(async () => {
+      outcome = await result.current.handleSelectRecent(recent);
+    });
 
+    expect(outcome).toEqual({ ok: false, error: 'Import canceled.' });
     expect(deps.updateRecentCardState).toHaveBeenCalledWith(
       'recent-1',
       expect.objectContaining({ loading: false, error: { message: 'Import canceled.', type: 'cancel' } }),
