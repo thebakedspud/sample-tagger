@@ -1,8 +1,22 @@
 // src/utils/focusById.js
-export function focusById(id) {
+
+/**
+ * Focus an element by id on the next animation frame, asking the browser
+ * not to scroll it into view. This helps avoid unexpected scroll jumps,
+ * especially on mobile when the soft keyboard appears.
+ *
+ * @param {string} id
+ * @param {FocusOptions} [options]
+ */
+export function focusById(id, options = {}) {
   requestAnimationFrame(() => {
     const el = document.getElementById(id);
-    if (el && typeof el.focus === 'function') {
+    if (!el || typeof el.focus !== 'function') return;
+    try {
+      // Newer browsers support preventScroll in the options bag.
+      el.focus({ preventScroll: true, ...options });
+    } catch {
+      // Fallback for older browsers that don't support an options object.
       el.focus();
     }
   });
@@ -15,11 +29,14 @@ export function focusById(id) {
  * @param {HTMLElement | null} element
  * @param {FocusOptions} [options]
  */
-export function focusElement(element, options) {
+export function focusElement(element, options = {}) {
   if (!element || typeof element.focus !== 'function') return;
   requestAnimationFrame(() => {
-    if (typeof element.focus === 'function') {
-      element.focus(options);
+    if (typeof element.focus !== 'function') return;
+    try {
+      element.focus({ preventScroll: true, ...options });
+    } catch {
+      element.focus();
     }
   });
 }

@@ -42,6 +42,17 @@ export function computeAllCustomTags(tagsByTrack) {
 }
 
 /**
+ * Determine whether a track should be treated as a podcast entry.
+ * @param {any} track
+ * @returns {boolean}
+ */
+export function isPodcastTrack(track) {
+  if (!track) return false
+  if (track?.kind === 'podcast') return true
+  return Boolean(track?.showId || track?.showName || track?.publisher)
+}
+
+/**
  * Validate tag against constraints
  * @param {string} tag - Raw tag input
  * @param {string[]} existingTags - Current tags for the track

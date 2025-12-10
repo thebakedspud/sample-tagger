@@ -48,3 +48,18 @@ yarn-debug.log*
 yarn-error.log*
 
 .vercel
+
+# local docs
+docs/timestamp-affordance-plan.md
+docs/daylist-snapshot-plan.md
+docs/landing-hover-treatments-plan.md
+docs/button-hover-treatments-plan.md
+current_issues.md
+
+
+.env*.local
+
+# Windows special device file that can appear as untracked
+nul
+
+.env*.local

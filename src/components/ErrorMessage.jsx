@@ -1,6 +1,6 @@
 import PropTypes from 'prop-types'
 
-export default function ErrorMessage({ children, id, className = '' }) {
+export default function ErrorMessage({ children, id, className = '', ...rest }) {
   if (!children) return null
 
   return (
@@ -8,6 +8,7 @@ export default function ErrorMessage({ children, id, className = '' }) {
       id={id}
       role="alert"
       className={`error-message ${className}`.trim()}
+      {...rest}
     >
       {children}
     </div>

@@ -193,6 +193,7 @@ function SearchFilterBar({
         border: '1px solid var(--border)',
         borderRadius: 8,
         padding: 16,
+        marginTop: 12,
         marginBottom: 16,
         boxShadow: 'var(--shadow)',
         display: 'flex',
@@ -223,14 +224,8 @@ function SearchFilterBar({
             aria-label="Search tracks, artists, notes"
             onChange={(event) => onQueryChange(event.target.value)}
             onKeyDown={handleSearchKeyDown}
-            style={{
-              flex: '1 1 auto',
-              padding: '8px 10px',
-              borderRadius: 6,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--fg)',
-            }}
+            className="filter-input"
+            style={{ flex: '1 1 auto' }}
           />
           {query ? (
             <button
@@ -267,22 +262,13 @@ function SearchFilterBar({
                 onClick={handleScopeChange}
                 onKeyDown={handleScopeKeyDown}
                 data-scope={value}
+                className={`scope-pill${isActive ? ' is-active' : ''}`}
                 ref={(node) => {
                   if (node) {
                     scopeRefs.current.set(value, node);
                   } else {
                     scopeRefs.current.delete(value);
                   }
-                }}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '4px 14px',
-                  borderRadius: 999,
-                  border: isActive ? '1px solid var(--accent)' : '1px solid var(--border)',
-                  background: isActive ? 'var(--accent-muted)' : 'transparent',
-                  color: 'var(--fg)',
                 }}
               >
                 {label}
@@ -306,14 +292,7 @@ function SearchFilterBar({
             value={sortValue}
             onChange={handleSortChange}
             aria-label={`Sort tracks (${sortLabel})`}
-            style={{
-              minWidth: 200,
-              padding: '6px 8px',
-              borderRadius: 6,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--fg)',
-            }}
+            className="filter-select"
           >
             {SORT_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>

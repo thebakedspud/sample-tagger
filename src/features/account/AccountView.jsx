@@ -46,6 +46,8 @@ function formatTimestamp(timestamp) {
  * @property {string|null} [regenerationError]
  * @property {() => void} [onOpenRestoreDialog]
  * @property {() => void} [onRequestRecoveryModal]
+ * @property {() => void} [onBackupNotes]
+ * @property {() => void} [onRestoreFromBackup]
  * @property {boolean} [showBackupPrompt]
  * @property {() => void} [onOpenSpotifyLink]
  * @property {boolean} [spotifyLinked]
@@ -66,6 +68,8 @@ export default function AccountView({
   regenerationError = null,
   onOpenRestoreDialog,
   onRequestRecoveryModal,
+  onBackupNotes,
+  onRestoreFromBackup,
   onOpenSpotifyLink: _onOpenSpotifyLink,
   spotifyLinked: _spotifyLinked = false,
   spotifyAccountLabel: _spotifyAccountLabel = '',
@@ -206,7 +210,8 @@ export default function AccountView({
           <div>
             <h2>Recover Notes</h2>
             <p className="account-card__description">
-              Restore notes from another device with your recovery code.
+              Download your notes from our servers using your recovery code. For manual file exports,
+              use local backups below.
             </p>
           </div>
         </header>
@@ -219,6 +224,29 @@ export default function AccountView({
             Recover Notes
           </button>
         </div>
+      </section>
+
+      <section className="card account-card">
+        <header className="account-card__header">
+          <div>
+            <h2>Local backups</h2>
+            <p className="account-card__description">
+              Download a JSON snapshot to store anywhere, or import one to merge notes into this
+              device.
+            </p>
+          </div>
+        </header>
+        <div className="row account-card__actions">
+          <button type="button" className="btn" onClick={onBackupNotes}>
+            Download backup
+          </button>
+          <button type="button" className="btn" onClick={onRestoreFromBackup}>
+            Import backup
+          </button>
+        </div>
+        <p style={{ color: 'var(--muted)', marginTop: 4 }}>
+          Local backups stay offline and don&apos;t replace your recovery code syncing flow.
+        </p>
       </section>
 
       {/* Spotify Account and Link Email cards intentionally hidden for now */}

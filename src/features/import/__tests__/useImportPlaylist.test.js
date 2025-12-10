@@ -485,7 +485,7 @@ describe('useImportPlaylist', () => {
       expect(result.current.importBusyKind).toBe(null);
     });
   });
-});
+
   it('primes adapters exposing a prime() method', async () => {
     const primeSpy = vi.spyOn(spotifyAdapter, 'prime').mockResolvedValue();
 
@@ -498,3 +498,4 @@ describe('useImportPlaylist', () => {
     expect(primeSpy).toHaveBeenCalledTimes(1);
     primeSpy.mockRestore();
   });
+});

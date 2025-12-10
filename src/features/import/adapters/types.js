@@ -222,5 +222,6 @@ export function isKnownAdapterErrorObject(e) {
  * @property {{tracks: NormalizedTrack[], meta: ImportMeta, title?: string, importedAt?: string, coverUrl?: string|null, total?: number}=} [data]
  * @property {AdapterErrorCode=} code
  * @property {any=} error
+ * @property {number=} retryAt
  * @property {true=} [stale]
  */

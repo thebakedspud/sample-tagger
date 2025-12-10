@@ -18,6 +18,8 @@ const baseProps = {
   onCopyRecoveryCode: vi.fn(),
   onOpenRestoreDialog: vi.fn(),
   onRequestRecoveryModal: vi.fn(),
+  onBackupNotes: vi.fn(),
+  onRestoreFromBackup: vi.fn(),
   showBackupPrompt: false,
 }
 
@@ -70,5 +72,23 @@ describe('AccountView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /back up now/i }))
     expect(onRequestRecoveryModal).toHaveBeenCalledTimes(2)
+  })
+
+  it('wires local backup actions', () => {
+    const onBackupNotes = vi.fn()
+    const onRestoreFromBackup = vi.fn()
+    render(
+      <AccountView
+        {...baseProps}
+        onBackupNotes={onBackupNotes}
+        onRestoreFromBackup={onRestoreFromBackup}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /download backup/i }))
+    expect(onBackupNotes).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /import backup/i }))
+    expect(onRestoreFromBackup).toHaveBeenCalledTimes(1)
   })
 })

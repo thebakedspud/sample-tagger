@@ -29,7 +29,7 @@ export const RECOVERY_PROMPT_NOTE_THRESHOLD = 3
  * @typedef {Object} AppResetPayload
  * @property {'restore' | 'logout' | 'clear'} reason - Why reset was triggered
  * @property {string} [announcement] - Optional accessibility announcement
- * @property {'landing' | 'playlist' | 'account'} [screenTarget] - Optional target screen
+ * @property {'landing' | 'playlist' | 'podcast' | 'account'} [screenTarget] - Optional target screen
  * @property {Object} [extraState] - Optional additional reset metadata
  */
 

@@ -1,4 +1,6 @@
-# Playlist Virtualization Phase 2 – Accessibility, Perf, and Validation
+# Playlist Virtualization Phase 2 — Accessibility, Perf, and Validation
+
+> **Status:** Partially implemented. Live-region messaging and virtualization rollout are complete; use this document to track the remaining UX/perf follow-ups (skip links, caching, instrumentation).
 
 Phase 1 shipped the virtualized list skeleton (feature flag, focus helper, memoized filtering). Phase 2 finishes the job: accessibility polish, UX affordances, and guardrails that keep performance steady as the dataset grows.
 
@@ -20,7 +22,12 @@ Phase 1 shipped the virtualized list skeleton (feature flag, focus helper, memoi
 4. **Regression tests**
    - Large dataset fixtures (1k/5k/10k) verifying DOM node counts, virtualization window size, focus restoration, undo placeholders, background pagination stability.
    - Accessibility tests: live-region content, skip links working, tag autocomplete portal still accessible.
-   - User flows: delete + undo after scrolling away, filter resets scroll to top, background load doesn’t jerk scroll position.
+
+
+### Visual viewport guardrail
+- Keep the playlist virtualizer scoped to its own scroll container instead of `window`. When iOS Safari shows the soft keyboard it shrinks the visual viewport and fires `resize`/`scroll` events; if the virtualizer listens to `window` it treats that as user scroll, causing cards to jump.
+- Codify this expectation in code comments/tests (e.g., assert `getScrollElement` returns the playlist wrapper) so refactors do not regress to `useWindowVirtualizer`.
+- When adding skip links or jump controls, call `virtualizer.scrollToIndex` on the playlist container, not `window.scrollTo`, to keep keyboard/mouse behavior aligned across devices.
 
 ## Implementation Sketch
 
@@ -59,3 +66,4 @@ Phase 1 shipped the virtualized list skeleton (feature flag, focus helper, memoi
 2. Add debounced filtering indicator + caching.
 3. Layer in tests/benchmarks (fixtures, virtualization suite, performance assertions).
 4. Document rollout/flag strategy in README or Ops runbook.
+

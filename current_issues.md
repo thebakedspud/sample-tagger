@@ -23,13 +23,6 @@
 - **Impact**: Improved maintainability, testability, and developer onboarding. Playlist state is now centralized, well-tested, and easier to reason about.
 - **Files**: `src/features/playlist/{PlaylistProvider.jsx,playlistReducer.js,actions.js,helpers.js,usePlaylistContext.js,contexts.js}` + test suite
 
-### Non-virtualized Playlist Rendering
-
-- **Location**: `src/features/playlist/PlaylistView.jsx`
-- **Issue**: `filteredTracks.map` renders every `TrackCard`, each with heavy focus-handling logic. Large playlists cause layout thrash and slow updates.
-- **Impact**: Significant performance degradation with large imports; potential accessibility regressions during re-render spikes.
-- **Recommendation**: Introduce list virtualization (e.g., `@tanstack/react-virtual`) and move focus/accessibility rules into the virtualization boundary.
-
 ### Missing Error Boundaries
 
 - **Location**: `src/App.jsx` (and major feature components)
@@ -59,13 +52,6 @@
 - **Issue**: Complex refs/timers for `pagerFlights`, cooldowns, and background sync lack automated tests.
 - **Impact**: Concurrency regressions could slip through CI; difficult to refactor safely.
 - **Recommendation**: Extract pagination state management into a testable module and add Vitest coverage for cooldown/resume/error flows.
-
-### Unmemoized TrackCard Components
-
-- **Location**: `src/features/playlist/TrackCard.jsx`
-- **Issue**: TrackCard re-renders on any App state change despite no prop changes. With 500+ tracks, this causes significant unnecessary work.
-- **Impact**: Sluggish UI during tag edits, note operations, or filter changes.
-- **Recommendation**: Wrap TrackCard in React.memo() with custom comparison function. Quick win before virtualization work.
 
 ### Inconsistent TypeScript Adoption
 
@@ -104,6 +90,7 @@
 - Feature-oriented folder structure with detailed orientation docs (`src/docs/ORIENTATION.md`) accelerates new contributor ramp-up.
 - Accessibility receives first-class treatment (live region via `useAnnounce`, ARIA patterns in `SearchFilterBar` and `TrackCard`).
 - Adapters/import flow enjoy thorough unit tests (`usePlaylistImportFlow.test.js`), giving confidence in concurrency handling.
+- PlaylistView now uses `@tanstack/react-virtual` to keep large lists responsive, and `TrackCard` is memoized to minimize re-renders.
 
 ---
 
@@ -113,4 +100,3 @@
 2. Prototype virtualized playlist rendering against large mock data sets and monitor focus behavior.
 3. Rework persistence layer to batch writes and update storage key documentation.
 4. Add targeted Vitest suites for background pagination/cooldown logic.
-

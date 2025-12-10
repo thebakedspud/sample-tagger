@@ -133,7 +133,7 @@ describe('App global keybindings', () => {
       dispatchKey({ key: 'Home' })
     })
 
-    expect(await screen.findByRole('heading', { name: 'Get started' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Turn your Spotify library into/i })).toBeInTheDocument()
 
     await waitFor(() => {
       expect(titleButton).toHaveFocus()

@@ -3,8 +3,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import LiveRegion from './components/LiveRegion.jsx'
 import RecoveryModal from './components/RecoveryModal.jsx'
 import RestoreDialog from './components/RestoreDialog.jsx'
-import RecentPlaylists from './features/recent/RecentPlaylists.jsx'
-import ErrorMessage from './components/ErrorMessage.jsx'
+import LandingScreen from './features/landing/LandingScreen.jsx'
 import {
   saveAppState,
   clearAppState,
@@ -55,7 +54,7 @@ import { getDeviceId, getAnonId } from './lib/deviceState.js'
 
 // NEW: Playlist state reducer + context provider
 import { playlistActions } from './features/playlist/actions.js'
-import { validateTag } from './features/playlist/helpers.js'
+import { validateTag, isPodcastTrack } from './features/playlist/helpers.js'
 import { PlaylistStateProvider } from './features/playlist/PlaylistProvider.jsx'
 import {
   usePlaylistDispatch,
@@ -77,7 +76,7 @@ const PODCASTS_ENABLED = isPodcastImportEnabled()
  *  pendingMigrationSnapshot: any,
  *  initialRecents: any,
  *  persistedTracks: any,
- *  initialScreen: string,
+ *  initialScreen: 'landing' | 'playlist' | 'podcast' | 'account',
  *  onAnonContextChange: Function,
  *  initialSyncStatus: BackgroundSyncState
  * }} props
@@ -92,10 +91,10 @@ function AppInner({
   initialSyncStatus,
 }) {
   const migrationSnapshotRef = useRef(pendingMigrationSnapshot)
-  
+
   // SIMPLE "ROUTING"
   const [screen, setScreen] = useState(
-    /** @type {'landing' | 'playlist' | 'podcast' | 'account'} */ (initialScreen)
+    /** @type {'landing' | 'playlist' | 'podcast' | 'account'} */(initialScreen)
   )
   const goToLanding = useCallback(() => { setScreen('landing') }, [setScreen])
 
@@ -115,7 +114,7 @@ function AppInner({
       hasMore: Boolean(initialMeta.cursor || initialMeta.hasMore),
     })
   }, [persisted])
-  
+
   const [playlistTitle, setPlaylistTitle] = useState(persisted?.playlistTitle ?? 'My Playlist')
   const [importedAt, setImportedAt] = useState(persisted?.importedAt ?? null)
   const [lastImportUrl, setLastImportUrl] = useState(
@@ -286,11 +285,11 @@ function AppInner({
       if (!meta) return
       const { trackId, note, index, restoreFocusId, fallbackFocusId } = meta
       if (!note) return
-      
+
       // Restore note using reducer
       dispatch(playlistActions.restoreNote(trackId, note, index))
       announce('Note restored')
-      
+
       requestAnimationFrame(() => {
         if (restoreFocusId && document.getElementById(restoreFocusId)) {
           focusById(restoreFocusId)
@@ -336,10 +335,10 @@ function AppInner({
       async ({ announcement, screenTarget }) => {
         // Clear all app state
         clearAppState()
-        
+
         // Reset playlist state via reducer
         dispatch(playlistActions.resetState())
-        
+
         setImportMeta({ ...EMPTY_IMPORT_META })
         setPlaylistTitle('My Playlist')
         setImportedAt(null)
@@ -442,8 +441,8 @@ function AppInner({
           const bodySet = new Set(
             Array.isArray(noteList)
               ? noteList
-                  .map((note) => getNoteBody(note))
-                  .filter(Boolean)
+                .map((note) => getNoteBody(note))
+                .filter(Boolean)
               : []
           )
           remoteNoteSets.set(trackId, bodySet)
@@ -635,7 +634,7 @@ function AppInner({
             suggestedName,
             types: [
               {
-              description: 'Playlist Notes backup',
+                description: 'Playlist Notes backup',
                 accept: { 'application/json': ['.json'] },
               },
             ],
@@ -647,11 +646,11 @@ function AppInner({
           return
         } catch (err) {
           if (err?.name === 'AbortError') {
-          announce('Backup cancelled.')
-          return
+            announce('Backup cancelled.')
+            return
+          }
+          throw err
         }
-        throw err
-      }
       }
 
       const url = URL.createObjectURL(blob)
@@ -702,7 +701,7 @@ function AppInner({
       })
       const nextMap = ensureNotesEntries(merged, tracks)
       const nextTagsMap = ensureTagsEntries(mergedTags, tracks)
-      
+
       // Update via reducer
       dispatch(playlistActions.setTracksWithNotes(
         tracks,
@@ -730,7 +729,7 @@ function AppInner({
 
     // Reset playlist state via reducer
     dispatch(playlistActions.resetState())
-    
+
     // Reset other app state
     setImportMeta({ ...EMPTY_IMPORT_META })
     setPlaylistTitle('My Playlist')
@@ -753,25 +752,25 @@ function AppInner({
     (trackId, tag) => {
       // Get existing tags for validation
       const existingTags = tagsByTrack[trackId] || []
-      
+
       // Validate before dispatching (no try/catch control flow)
       const validation = validateTag(tag, existingTags, MAX_TAGS_PER_TRACK, MAX_TAG_LENGTH)
-      
+
       if (!validation.valid) {
         const errorMessage = validation.error || 'Invalid tag.'
         announce(errorMessage)
         return { success: false, error: errorMessage }
       }
-      
+
       const normalized = validation.normalized
-      
+
       // Dispatch action (validation passed)
       dispatch(playlistActions.addTag(trackId, normalized, existingTags))
-      
+
       // Success feedback
       const title = tracks.find((t) => t.id === trackId)?.title ?? 'this track'
       announce(`Added tag "${normalized}" to "${title}".`)
-      
+
       // Sync to remote
       if (anonContext?.deviceId) {
         const updatedTags = [...existingTags, normalized]
@@ -788,17 +787,17 @@ function AppInner({
     (trackId, tag) => {
       const normalized = normalizeTag(tag)
       if (!trackId || !normalized) return
-      
+
       const existing = tagsByTrack[trackId] || []
       if (existing.length === 0) return
-      
+
       // Remove tag
       dispatch(playlistActions.removeTag(trackId, normalized))
-      
+
       // Feedback
       const title = tracks.find((t) => t.id === trackId)?.title ?? 'this track'
       announce(`Removed tag "${normalized}" from "${title}".`)
-      
+
       // Sync to remote
       if (anonContext?.deviceId) {
         const filtered = existing.filter((value) => value !== normalized)
@@ -810,19 +809,13 @@ function AppInner({
     [announce, anonContext?.deviceId, syncTrackTags, tagsByTrack, tracks, dispatch],
   )
 
-  const isPodcastTrack = useCallback((track) => {
-    if (!track) return false
-    if (track?.kind === 'podcast') return true
-    // Legacy data (before `kind` existed) can be inferred by show metadata.
-    return Boolean(track?.showId || track?.showName || track?.publisher)
-  }, [])
   const musicTracks = useMemo(
     () => (Array.isArray(tracks) ? tracks.filter((track) => !isPodcastTrack(track)) : []),
-    [tracks, isPodcastTrack],
+    [tracks],
   )
   const podcastTracks = useMemo(
     () => (Array.isArray(tracks) ? tracks.filter((track) => isPodcastTrack(track)) : []),
-    [tracks, isPodcastTrack],
+    [tracks],
   )
   const hasMusicTracks = musicTracks.length > 0
   const hasPodcastTracks = podcastTracks.length > 0
@@ -995,131 +988,66 @@ function AppInner({
         </div>
       </header>
 
-      <main style={{ maxWidth: 880, margin: '24px auto 60px', padding: '0 16px', paddingBottom: 128 }}>
-        {screen === 'account' ? (
-          <AccountView
-            recoveryCode={recoveryCode}
-            recoveryAcknowledgedAt={recoveryAcknowledgedAt}
-            recoveryCopyButtonRef={recoveryCopyButtonRef}
-            onCopyRecoveryCode={copyRecoveryCode}
-            onConfirmRegenerate={regenerateRecoveryCode}
-            regeneratingRecoveryCode={regeneratingRecovery}
-            regenerationError={recoveryRotationError}
-            onOpenRestoreDialog={openRestoreDialog}
-            onOpenSpotifyLink={handleOpenSpotifyLink}
-            spotifyLinked={false}
-            spotifyAccountLabel=""
-            emailLinkingEnabled={false}
-            onRequestRecoveryModal={openRecoveryModal}
-            showBackupPrompt={showBackupReminder}
-          />
-        ) : (
-          <>
-            {screen === 'landing' && (
-              <section aria-labelledby="landing-title">
-                <h2 id="landing-title" style={{ marginTop: 0 }}>Get started</h2>
-                <p style={{ color: 'var(--muted)' }}>
-                  {PODCASTS_ENABLED
-                    ? 'Paste a Spotify / YouTube / SoundCloud playlist URL or a Spotify podcast show/episode URL to import a snapshot and start adding notes.'
-                    : 'Paste a Spotify / YouTube / SoundCloud playlist URL to import a snapshot and start adding notes.'}
-                </p>
-
-                <form
-                  onSubmit={(event) => {
-                    void handleImport(event)
-                  }}
-                  aria-describedby={importError ? 'import-error' : undefined}
-                >
-                  <div style={{ display: 'grid', gap: 8, alignItems: 'start', gridTemplateColumns: '1fr auto' }}>
-                    <div style={{ gridColumn: '1 / -1' }}>
-                      <label htmlFor="playlist-url" style={{ display: 'block', marginBottom: 6 }}>Playlist URL</label>
-                      <input
-                        id="playlist-url"
-                        ref={importInputRef}
-                        type="url"
-                        inputMode="url"
-                        placeholder={
-                          PODCASTS_ENABLED
-                            ? 'https://open.spotify.com/playlist/... (or show/episode link)'
-                            : 'https://open.spotify.com/playlist/...'
-                        }
-                        autoComplete="off"
-                        value={importUrl}
-                        onChange={handleImportUrlChange}
-                        style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--fg)' }}
-                        aria-invalid={!!importError}
-                      />
-                      <ErrorMessage id="import-error">
-                        {importError}
-                      </ErrorMessage>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span className="chip">
-                        <span className="chip-dot" style={{ background: providerChip ? 'var(--accent, #4caf50)' : 'var(--border)' }} />
-                        {providerChip ? providerChip : 'no match'}
-                      </span>
-                    </div>
-
-                    <div style={{ justifySelf: 'end' }}>
-                      <button
-                        type="submit"
-                        className="btn primary"
-                        disabled={isAnyImportBusy}
-                        aria-busy={showInitialSpinner ? 'true' : 'false'}
-                      >
-                        {showInitialSpinner ? 'Importing...' : 'Import playlist'}
-                      </button>
-                    </div>
-                  </div>
-                </form>
-
-                <RecentPlaylists
-                  items={recentPlaylists}
-                  onSelect={handleSelectRecent}
-                  cardState={recentCardState}
-                  disabled={isAnyImportBusy}
-                  refreshingId={refreshingRecentId}
-                  isRefreshing={isRefreshingCachedData}
+      <div className="app-shell">
+        <main
+          style={{
+            flex: '1 1 auto',
+            display: 'flex',
+            flexDirection: 'column',
+            maxWidth: 880,
+            width: '100%',
+            margin: '24px auto 60px',
+            padding: '0 16px',
+            paddingBottom: 128,
+          }}
+        >
+          {screen === 'account' ? (
+            <AccountView
+              recoveryCode={recoveryCode}
+              recoveryAcknowledgedAt={recoveryAcknowledgedAt}
+              recoveryCopyButtonRef={recoveryCopyButtonRef}
+              onCopyRecoveryCode={copyRecoveryCode}
+              onConfirmRegenerate={regenerateRecoveryCode}
+              regeneratingRecoveryCode={regeneratingRecovery}
+              regenerationError={recoveryRotationError}
+              onOpenRestoreDialog={openRestoreDialog}
+              onBackupNotes={handleBackupNotes}
+              onRestoreFromBackup={handleRestoreNotesRequest}
+              onOpenSpotifyLink={handleOpenSpotifyLink}
+              spotifyLinked={false}
+              spotifyAccountLabel=""
+              emailLinkingEnabled={false}
+              onRequestRecoveryModal={openRecoveryModal}
+              showBackupPrompt={showBackupReminder}
+            />
+          ) : (
+            <>
+              {screen === 'landing' && (
+                <LandingScreen
+                  importUrl={importUrl}
+                  onImportUrlChange={handleImportUrlChange}
+                  importError={importError}
+                  providerChip={providerChip}
+                  isAnyImportBusy={isAnyImportBusy}
+                  showInitialSpinner={showInitialSpinner}
+                  importInputRef={importInputRef}
+                  onImport={handleImport}
+                  recentPlaylists={recentPlaylists}
+                  recentCardState={recentCardState}
+                  onSelectRecent={handleSelectRecent}
+                  refreshingRecentId={refreshingRecentId}
+                  isRefreshingCachedData={isRefreshingCachedData}
                 />
-              </section>
-            )}
+              )}
 
-            {screen === 'playlist' && renderCollectionView('playlist')}
-            {screen === 'podcast' && renderCollectionView('podcast')}
-          </>
-        )}
-      </main>
+              {screen === 'playlist' && renderCollectionView('playlist')}
+              {screen === 'podcast' && renderCollectionView('podcast')}
+            </>
+          )}
+        </main>
 
-      <footer style={{ maxWidth: 880, margin: '0 auto 24px', padding: '0 16px', color: 'var(--muted)', paddingBottom: 96 }}>
-        <small>Prototype - Keyboard-first, accessible-by-default</small>
-      </footer>
-      <div
-        role="region"
-        aria-label="Note backup controls"
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          width: '100%',
-          background: 'var(--surface, #0f1115)',
-          borderTop: '1px solid var(--border, rgba(255,255,255,0.1))',
-          padding: '12px 16px',
-          display: 'flex',
-          justifyContent: 'center',
-          gap: 16,
-          zIndex: 10,
-        }}
-      >
-        <div style={{ display: 'flex', gap: 12 }}>
-          <button type="button" className="btn" onClick={handleBackupNotes}>
-            Backup Notes
-          </button>
-          <button type="button" className="btn" onClick={handleRestoreNotesRequest}>
-            Restore Notes
-          </button>
-        </div>
       </div>
+
       <RecoveryModal
         open={showRecoveryModal}
         code={recoveryCode}
@@ -1151,7 +1079,7 @@ function AppInner({
 
 /**
  * Middle layer - provides device context to playlist provider
- * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: string, initialPlaylistStateWithData: any }} props
+ * @param {{ persisted: any, pendingMigrationSnapshot: any, initialRecents: any, persistedTracks: any, initialScreen: 'landing' | 'playlist' | 'podcast' | 'account', initialPlaylistStateWithData: any }} props
  */
 function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRecents, persistedTracks, initialScreen, initialPlaylistStateWithData }) {
   // Get initial device context from device state module
@@ -1162,7 +1090,7 @@ function AppWithDeviceContext({ persisted, pendingMigrationSnapshot, initialRece
   }))
 
   const [initialSyncStatus, setInitialSyncStatus] = useState(
-    /** @type {BackgroundSyncState} */ ({
+    /** @type {BackgroundSyncState} */({
       status: 'idle',
       lastError: null,
       loaded: 0,

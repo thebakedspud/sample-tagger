@@ -1,11 +1,12 @@
 ﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { useWindowVirtualizer } from '@tanstack/react-virtual'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import focusById, { focusElement } from '../../utils/focusById.js'
 import SearchFilterBar from '../filter/SearchFilterBar.jsx'
 import useTrackFilter from '../filter/useTrackFilter.js'
 import { SORT_KEY } from '../filter/filterTracks.js'
 import { DEBUG_FOCUS, debugFocus } from '../../utils/debug.js'
 import TrackCard from './TrackCard.jsx'
+import ScrollArea from '../../components/ScrollArea.jsx'
 
 /** @typedef {import('../import/usePlaylistImportController.js').BackgroundSyncState} BackgroundSyncState */
 
@@ -147,6 +148,7 @@ export default function PlaylistView({
 
   const searchInputRef = useRef(null)
   const listContainerRef = useRef(null)
+  const scrollAreaRef = useRef(null)
   const trackCount = Array.isArray(tracks) ? tracks.length : 0
   const virtualizationPreference = useMemo(
     () => resolveVirtualizationPreference(trackCount),
@@ -245,15 +247,61 @@ export default function PlaylistView({
     [filteredTracks],
   )
 
-  const virtualizer = useWindowVirtualizer({
+  // Phase 1: Use useVirtualizer with a dedicated scroll container instead of
+  // useWindowVirtualizer. This isolates the playlist scroll from window viewport
+  // changes caused by the iOS soft keyboard.
+  const virtualizer = useVirtualizer({
     enabled: virtualizationEnabled,
     count: virtualizationEnabled ? filteredTracks.length : 0,
+    getScrollElement: () => scrollAreaRef.current,
     estimateSize: estimateTrackSize,
     overscan: 10,
     getItemKey: getVirtualItemKey,
   })
   const virtualItems = virtualizationEnabled ? virtualizer.getVirtualItems() : []
   const totalVirtualSize = virtualizationEnabled ? virtualizer.getTotalSize() : 0
+
+  // Phase 0: VisualViewport-based lock to prevent iOS Safari from "jumping"
+  // TODO(Phase 1 follow-up): remove this once container scrolling is confirmed
+  // stable on iOS (see docs/virtualized-scroll-container-implementation.md).
+  // the virtualized list when the soft keyboard appears and shrinks the
+  // viewport. This keeps TanStack Virtual's scroll offset stable across
+  // transient viewport changes.
+  useEffect(() => {
+    if (!virtualizationEnabled || !virtualizer) return
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null
+    if (!vv) return
+
+    /** @type {number | null} */
+    let frozenOffset = null
+
+    const handleResize = () => {
+      if (frozenOffset == null) {
+        frozenOffset = virtualizer.scrollOffset
+      }
+    }
+
+    const handleScroll = () => {
+      if (frozenOffset == null) return
+      const target = frozenOffset
+      frozenOffset = null
+      requestAnimationFrame(() => {
+        try {
+          virtualizer.scrollToOffset(target, { align: 'start' })
+        } catch {
+          // ignore failures; better to keep the list usable than throw
+        }
+      })
+    }
+
+    vv.addEventListener('resize', handleResize)
+    vv.addEventListener('scroll', handleScroll)
+
+    return () => {
+      vv.removeEventListener('resize', handleResize)
+      vv.removeEventListener('scroll', handleScroll)
+    }
+  }, [virtualizationEnabled, virtualizer])
   const liveWindowSummary = useMemo(() => {
     if (filteredCount === 0) {
       return 'No tracks to display.'
@@ -290,27 +338,23 @@ export default function PlaylistView({
       ? [...selectedTags].sort().join('|')
       : ''
     const normalizedQuery = typeof query === 'string' ? query.trim() : ''
-    const sortSignature = `${sort?.key ?? SORT_KEY.DATE}:${sort?.direction ?? 'desc'}`
-    return [normalizedQuery, scope, normalizedTags, hasNotesOnly ? '1' : '0', sortSignature].join(
-      '::',
-    )
-  }, [query, scope, selectedTags, hasNotesOnly, sort])
+    return [normalizedQuery, scope, normalizedTags, hasNotesOnly ? '1' : '0'].join('::')
+  }, [query, scope, selectedTags, hasNotesOnly])
 
   const lastFilterSignatureRef = useRef(filterSignature)
   useEffect(() => {
     if (lastFilterSignatureRef.current === filterSignature) return
     lastFilterSignatureRef.current = filterSignature
+    // Phase 1: Scroll the dedicated scroll container instead of window
     if (virtualizationEnabled && virtualizer) {
       virtualizer.scrollToIndex(0, { align: 'start' })
       return
     }
-    const container = listContainerRef.current
-    if (container && typeof container.scrollIntoView === 'function') {
-      container.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    // Fallback for non-virtualized mode: scroll the ScrollArea container
+    const scrollEl = scrollAreaRef.current
+    if (scrollEl) {
+      scrollEl.scrollTo({ top: 0, behavior: 'smooth' })
       return
-    }
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }, [filterSignature, virtualizationEnabled, virtualizer])
 
@@ -513,8 +557,13 @@ export default function PlaylistView({
       : ''
   const cooldownMessageId = cooldownMessage ? 'load-more-cooldown' : undefined
 
+  // Build scroll persistence key from playlist identity
+  const scrollSaveKey = importMeta?.playlistId
+    ? `playlist-scroll:${importMeta.playlistId}`
+    : undefined
+
   return (
-    <section aria-labelledby={headingId}>
+    <section aria-labelledby={headingId} className="playlist-screen">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <h1 id={headingId} aria-label={cleanTitle} style={{ marginTop: 0, marginBottom: 0 }}>
@@ -575,6 +624,12 @@ export default function PlaylistView({
         {liveWindowSummary}
       </div>
 
+      {/* Phase 1: Wrap scrollable content in ScrollArea to isolate from window */}
+      <ScrollArea
+        ref={scrollAreaRef}
+        saveKey={scrollSaveKey}
+        className="scroll-area--playlist"
+      >
       {showInitialSyncBanner && (
         <div
           role="status"
@@ -799,6 +854,7 @@ export default function PlaylistView({
           )}
         </div>
       )}
+      </ScrollArea>
     </section>
   )
 }
