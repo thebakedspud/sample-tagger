@@ -347,24 +347,12 @@ describe('api/db/notes handler', () => {
     });
   });
 
-  it('updates timestamp when payload includes timestampMs', async () => {
+  it('creates a new note row when payload includes timestampMs', async () => {
     getAnonContextMock.mockResolvedValueOnce({ anonId: 'anon-1' });
     notesSelectQueue.push({
       data: { id: 'note-1', body: 'hi', tags: [], timestamp_ms: null },
       error: null,
     });
-    notesUpdateResponse = {
-      data: {
-        id: 'note-1',
-        track_id: 'track-9',
-        body: 'updated',
-        tags: [],
-        timestamp_ms: 55555,
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:05Z',
-      },
-      error: null,
-    };
 
     const req = createMockReq({
       method: 'POST',
@@ -375,19 +363,12 @@ describe('api/db/notes handler', () => {
 
     await handler(req, res);
 
-    expect(notesUpdatePayload).toMatchObject({ timestamp_ms: 55555 });
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.body).toEqual({
-      note: {
-        id: 'note-1',
-        trackId: 'track-9',
-        body: 'updated',
-        tags: [],
-        timestampMs: 55555,
-        createdAt: '2024-01-01T00:00:00Z',
-        updatedAt: '2024-01-01T00:00:05Z',
-      },
-    });
+    // Phase 1 semantics: note bodies are append-only, so this
+    // should create a new row with a normalized timestamp.
+    expect(notesInsertMock).toHaveBeenCalledTimes(1);
+    expect(notesInsertPayload).toMatchObject({ timestamp_ms: 55555 });
+    expect(notesUpdateQueries).toHaveLength(0);
+    expect(res.status).toHaveBeenCalledWith(201);
   });
 
   it('rejects invalid tags that exceed length limits', async () => {
@@ -405,6 +386,35 @@ describe('api/db/notes handler', () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.body?.error).toMatch(/Tags must be/);
+  });
+
+  it('creates multiple notes for the same track without updating', async () => {
+    getAnonContextMock.mockResolvedValue({ anonId: 'anon-1' });
+
+    const req1 = createMockReq({
+      method: 'POST',
+      headers: { 'x-device-id': 'device-1' },
+      body: { trackId: 'track-9', body: 'first note' },
+    });
+    const res1 = createMockRes();
+
+    await handler(req1, res1);
+
+    const req2 = createMockReq({
+      method: 'POST',
+      headers: { 'x-device-id': 'device-1' },
+      body: { trackId: 'track-9', body: 'second note' },
+    });
+    const res2 = createMockRes();
+
+    await handler(req2, res2);
+
+    // Phase 1: note bodies are append-only; we never update
+    // an existing note row when a body is provided.
+    expect(notesInsertMock).toHaveBeenCalledTimes(2);
+    expect(notesUpdateQueries).toHaveLength(0);
+    expect(res1.status).toHaveBeenCalledWith(201);
+    expect(res2.status).toHaveBeenCalledWith(201);
   });
 
 

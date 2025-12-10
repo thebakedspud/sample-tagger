@@ -214,42 +214,21 @@ export default async function handler(req, res) {
       }
 
       const nowIso = new Date().toISOString();
-      const {
-        data: existingRow,
-        error: existingError,
-      } = await supabaseAdmin
-        .from('notes')
-        .select('id, body, tags')
-        .eq('anon_id', anonContext.anonId)
-        .eq('device_id', deviceId)
-        .eq('track_id', trackId)
-        .maybeSingle();
 
-      if (existingError) {
-        console.error('[notes:post] lookup error', existingError);
-        return res.status(500).json({
-          error: 'Failed to look up existing note',
-          details: existingError.message,
-        });
+      if (!noteBody && !tagsProvided) {
+        return res
+          .status(400)
+          .json({ error: 'Missing note body or tags payload' });
       }
 
-      if (!existingRow) {
-        if (!noteBody && !tagsProvided) {
-          return res
-            .status(400)
-            .json({ error: 'Missing note body or tags payload' });
-        }
-        if (hasBodyField && !noteBody && !tagsProvided) {
-          return res
-            .status(400)
-            .json({ error: 'Note body cannot be empty' });
-        }
-
+      // Phase 1: append-only notes. If a non-empty body is provided, always
+      // create a new note row instead of overwriting any existing note.
+      if (noteBody) {
         const insertPayload = {
           anon_id: anonContext.anonId,
           device_id: deviceId,
           track_id: trackId,
-          body: noteBody || '',
+          body: noteBody,
           tags: normalizedTags ?? [],
           last_active: nowIso,
         };
@@ -261,11 +240,13 @@ export default async function handler(req, res) {
         const { data, error } = await supabaseAdmin
           .from('notes')
           .insert(insertPayload)
-          .select('id, track_id, body, tags, timestamp_ms, created_at, updated_at')
+          .select(
+            'id, track_id, body, tags, timestamp_ms, created_at, updated_at',
+          )
           .single();
 
         if (error) {
-          console.error('[notes:post] supabase error', error);
+          console.error('[notes:post] supabase insert error', error);
           return res.status(500).json({
             error: 'Failed to create note',
             details: error.message,
@@ -288,26 +269,77 @@ export default async function handler(req, res) {
         });
       }
 
-      if (!hasBodyField && !tagsProvided) {
-        return res
-          .status(400)
-          .json({ error: 'No updates provided' });
+      // Tags-only path (no note body). We still keep a single representative
+      // row per (anonId, deviceId, trackId) for tags, creating it if needed.
+      const {
+        data: existingRow,
+        error: existingError,
+      } = await supabaseAdmin
+        .from('notes')
+        .select('id, body, tags')
+        .eq('anon_id', anonContext.anonId)
+        .eq('device_id', deviceId)
+        .eq('track_id', trackId)
+        .maybeSingle();
+
+      if (existingError) {
+        console.error('[notes:post] lookup error', existingError);
+        return res.status(500).json({
+          error: 'Failed to look up existing note',
+          details: existingError.message,
+        });
       }
-      if (hasBodyField && !noteBody) {
-        return res
-          .status(400)
-          .json({ error: 'Note body cannot be empty' });
+
+      if (!existingRow) {
+        const insertPayload = {
+          anon_id: anonContext.anonId,
+          device_id: deviceId,
+          track_id: trackId,
+          body: '',
+          tags: normalizedTags ?? [],
+          last_active: nowIso,
+        };
+        if (timestampProvided) {
+          insertPayload.timestamp_ms =
+            normalizedTimestamp == null ? null : normalizedTimestamp;
+        }
+
+        const { data, error } = await supabaseAdmin
+          .from('notes')
+          .insert(insertPayload)
+          .select(
+            'id, track_id, body, tags, timestamp_ms, created_at, updated_at',
+          )
+          .single();
+
+        if (error) {
+          console.error('[notes:post] supabase insert error', error);
+          return res.status(500).json({
+            error: 'Failed to create note',
+            details: error.message,
+          });
+        }
+
+        await touchLastActive(supabaseAdmin, anonContext.anonId, deviceId);
+
+        return res.status(201).json({
+          note: {
+            id: data.id,
+            trackId: data.track_id,
+            body: data.body,
+            tags: Array.isArray(data.tags) ? data.tags : [],
+            timestampMs:
+              typeof data.timestamp_ms === 'number' ? data.timestamp_ms : null,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at,
+          },
+        });
       }
 
       const updatePayload = {
         last_active: nowIso,
+        tags: normalizedTags ?? [],
       };
-      if (hasBodyField) {
-        updatePayload.body = noteBody;
-      }
-      if (tagsProvided) {
-        updatePayload.tags = normalizedTags ?? [];
-      }
       if (timestampProvided) {
         updatePayload.timestamp_ms =
           normalizedTimestamp == null ? null : normalizedTimestamp;
@@ -317,7 +349,9 @@ export default async function handler(req, res) {
         .from('notes')
         .update(updatePayload)
         .eq('id', existingRow.id)
-        .select('id, track_id, body, tags, timestamp_ms, created_at, updated_at')
+        .select(
+          'id, track_id, body, tags, timestamp_ms, created_at, updated_at',
+        )
         .single();
 
       if (error) {
