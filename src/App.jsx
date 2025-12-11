@@ -41,6 +41,7 @@ import { isPodcastImportEnabled } from './utils/podcastFlags.js'
 
 // NEW: inline undo
 import useInlineUndo from './features/undo/useInlineUndo.js'
+import { cancelNoteDeletion } from './features/notes/noteDeleteQueue.js'
 import PlaylistView from './features/playlist/PlaylistView.jsx'
 import PodcastView from './features/podcast/PodcastView.jsx'
 import AccountView from './features/account/AccountView.jsx'
@@ -286,6 +287,11 @@ function AppInner({
       const { trackId, note, index, restoreFocusId, fallbackFocusId } = meta
       if (!note) return
 
+      // Cancel pending deletion from queue before restoring
+      if (note.id) {
+        cancelNoteDeletion(note.id)
+      }
+
       // Restore note using reducer
       dispatch(playlistActions.restoreNote(trackId, note, index))
       announce('Note restored')
@@ -366,12 +372,15 @@ function AppInner({
   )
 
   const syncNote = useCallback(
-    async (trackId, body, timestampMs) => {
+    async (trackId, body, timestampMs, noteId) => {
       if (!anonContext?.deviceId) {
         console.warn('[note save] missing device id, skipping sync')
         return
       }
       const payload = { trackId, body }
+      if (noteId) {
+        payload.noteId = noteId
+      }
       if (typeof timestampMs === 'number' && Number.isFinite(timestampMs)) {
         payload.timestampMs = timestampMs
       }

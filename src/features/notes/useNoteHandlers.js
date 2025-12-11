@@ -11,6 +11,7 @@ import {
   usePlaylistTracks,
 } from '../playlist/usePlaylistContext.js'
 import { extractTimestamp } from '../playlist/noteTimestamps.js'
+import { queueNoteDeletion } from './noteDeleteQueue.js'
 /** @typedef {import('../../utils/notesTagsData.js').NoteEntry} NoteEntry */
 
 /**
@@ -26,7 +27,7 @@ import { extractTimestamp } from '../playlist/noteTimestamps.js'
  * @typedef {object} UseNoteHandlersOptions
  * @property {(message: string) => void} [announce]
  * @property {(pendingId: string, meta: PendingUndoMeta) => void} [scheduleInlineUndo]
- * @property {(trackId: string, body: string, timestampMs?: number | null) => Promise<void>} [syncNote]
+ * @property {(trackId: string, body: string, timestampMs?: number | null, noteId?: string) => Promise<void>} [syncNote]
  * @property {() => void} [onTimestampDiscovered]
  */
 
@@ -105,7 +106,9 @@ export function useNoteHandlers(options = {}) {
       }
 
       const snapshot = createNoteSnapshot(notesByTrack, trackId)
-      const extra = {}
+      // Pre-generate note ID for offline-first sync
+      const noteId = crypto.randomUUID()
+      const extra = { id: noteId }
       let timestampMsForSync
       if (timestamp) {
         extra.timestampMs = timestamp.startMs
@@ -126,7 +129,7 @@ export function useNoteHandlers(options = {}) {
       if (!syncNoteFn) return
 
       try {
-        await syncNoteFn(trackId, currentDraft, timestampMsForSync)
+        await syncNoteFn(trackId, currentDraft, timestampMsForSync, noteId)
       } catch (err) {
         console.error('[note save] error', err)
         dispatch(
@@ -155,6 +158,11 @@ export function useNoteHandlers(options = {}) {
       if (noteToDelete == null) return
 
       dispatch(playlistActions.deleteNote(trackId, noteIndex))
+
+      // Queue deletion for server sync (offline-friendly)
+      if (noteToDelete.id) {
+        queueNoteDeletion(noteToDelete.id, trackId)
+      }
 
       if (scheduleUndo) {
         const pendingId = `${trackId}::${noteIndex}::${Date.now()}`

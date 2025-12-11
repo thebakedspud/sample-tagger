@@ -103,7 +103,7 @@ export default async function handler(req, res) {
   withCors(res);
 
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
     return res.status(204).end();
   }
 
@@ -224,6 +224,14 @@ export default async function handler(req, res) {
       // Phase 1: append-only notes. If a non-empty body is provided, always
       // create a new note row instead of overwriting any existing note.
       if (noteBody) {
+        // Accept client-provided noteId for offline-first sync
+        const clientNoteId =
+          typeof parsed?.noteId === 'string' && parsed.noteId.trim()
+            ? parsed.noteId.trim()
+            : typeof parsed?.id === 'string' && parsed.id.trim()
+              ? parsed.id.trim()
+              : undefined;
+
         const insertPayload = {
           anon_id: anonContext.anonId,
           device_id: deviceId,
@@ -232,6 +240,9 @@ export default async function handler(req, res) {
           tags: normalizedTags ?? [],
           last_active: nowIso,
         };
+        if (clientNoteId) {
+          insertPayload.id = clientNoteId;
+        }
         if (timestampProvided) {
           insertPayload.timestamp_ms =
             normalizedTimestamp == null ? null : normalizedTimestamp;
@@ -378,7 +389,35 @@ export default async function handler(req, res) {
       });
     }
 
-    res.setHeader('Allow', ['GET', 'POST', 'OPTIONS']);
+    if (req.method === 'DELETE') {
+      const noteId = getTrackIdFromRequest(req)?.replace('noteId=', '') ||
+        (typeof req.query?.noteId === 'string' ? req.query.noteId : null);
+      
+      if (!noteId) {
+        return res.status(400).json({ error: 'Missing noteId parameter' });
+      }
+
+      // Security: only delete notes belonging to this user's anonId
+      const { error } = await supabaseAdmin
+        .from('notes')
+        .delete()
+        .eq('id', noteId)
+        .eq('anon_id', anonContext.anonId);
+
+      if (error) {
+        console.error('[notes:delete] supabase error', error);
+        return res.status(500).json({
+          error: 'Failed to delete note',
+          details: error.message,
+        });
+      }
+
+      await touchLastActive(supabaseAdmin, anonContext.anonId, deviceId);
+
+      return res.status(200).json({ ok: true });
+    }
+
+    res.setHeader('Allow', ['GET', 'POST', 'DELETE', 'OPTIONS']);
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (err) {
     console.error('[notes handler] unexpected error', err);

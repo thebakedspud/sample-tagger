@@ -199,12 +199,17 @@ describe('App Notes Handlers - Integration Tests', () => {
     ).toBeInTheDocument()
 
     // Verify API was called correctly
-    expect(apiFetch).toHaveBeenCalledWith('/api/db/notes', {
-      method: 'POST',
-      body: JSON.stringify({
-        trackId: 't1',
-        body: 'This is my test note'
-      }),
+    // Note: the call includes a noteId (random UUID) so we check the call more flexibly
+    await waitFor(() => {
+      const notesCalls = apiFetch.mock.calls.filter(
+        ([url, opts]) => url === '/api/db/notes' && opts?.method === 'POST'
+      )
+      expect(notesCalls.length).toBeGreaterThan(0)
+      const lastCall = notesCalls[notesCalls.length - 1]
+      const body = JSON.parse(lastCall[1].body)
+      expect(body.trackId).toBe('t1')
+      expect(body.body).toBe('This is my test note')
+      expect(body.noteId).toBeDefined()
     })
   })
 
@@ -225,18 +230,18 @@ describe('App Notes Handlers - Integration Tests', () => {
     const saveBtn = screen.getByRole('button', { name: /save note/i })
     await user.click(saveBtn)
 
+    // Note: the call includes a noteId (random UUID) so we check the call more flexibly
     await waitFor(() => {
-      expect(apiFetch).toHaveBeenCalledWith(
-        '/api/db/notes',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            trackId: 't1',
-            body: 'snare pops',
-            timestampMs: 45_000
-          }),
-        }),
+      const notesCalls = apiFetch.mock.calls.filter(
+        ([url, opts]) => url === '/api/db/notes' && opts?.method === 'POST'
       )
+      expect(notesCalls.length).toBeGreaterThan(0)
+      const lastCall = notesCalls[notesCalls.length - 1]
+      const body = JSON.parse(lastCall[1].body)
+      expect(body.trackId).toBe('t1')
+      expect(body.body).toBe('snare pops')
+      expect(body.timestampMs).toBe(45_000)
+      expect(body.noteId).toBeDefined()
     })
 
     expect(await screen.findByText(/\[0:45]/)).toBeInTheDocument()

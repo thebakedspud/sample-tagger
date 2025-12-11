@@ -64,6 +64,7 @@ function normalizeTimestampMs(value) {
 
 function createNoteEntry(body, payload = {}) {
   const entry = {
+    id: payload.id || crypto.randomUUID(),
     body,
     createdAt: Date.now()
   }

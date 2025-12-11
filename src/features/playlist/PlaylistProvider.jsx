@@ -9,6 +9,7 @@ import { groupRemoteNotes } from '../../utils/notesTagsData.js'
 import { createTagSyncScheduler } from '../tags/tagSyncQueue.js'
 import { PlaylistStateContext, PlaylistDispatchContext, PlaylistSyncContext } from './contexts.js'
 import { notifyDeviceContextStale } from '../../lib/deviceState.js'
+import { flushDeleteQueue } from '../notes/noteDeleteQueue.js'
 
 /** @typedef {import('../import/usePlaylistImportController.js').BackgroundSyncState} BackgroundSyncState */
 
@@ -348,6 +349,20 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
       window.removeEventListener('online', handleOnline)
     }
   }, [anonContext?.deviceId, flushPendingTagQueue, hydratePendingTagQueue])
+
+  // Flush pending note deletions on mount and when coming online
+  useEffect(() => {
+    if (!anonContext?.deviceId) return undefined
+    flushDeleteQueue(apiFetch)
+    if (typeof window === 'undefined') return undefined
+    const handleOnline = () => {
+      flushDeleteQueue(apiFetch)
+    }
+    window.addEventListener('online', handleOnline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+    }
+  }, [anonContext?.deviceId])
 
   // Expose sync method for components to use
   const syncTrackTags = useCallback(
