@@ -507,9 +507,18 @@ export function mergeRemoteTags(localMap, remoteMap) {
   Object.entries(remoteMap).forEach(([trackId, remoteTags]) => {
     const cleanedRemote = Array.isArray(remoteTags) ? remoteTags : [];
     if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
-      // No local tags - use remote directly, sorted alphabetically
-      const sorted = [...cleanedRemote].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-      merged[trackId] = sorted;
+      // No local tags - normalize, deduplicate, and sort remote tags
+      const seen = new Set();
+      const normalized = [];
+      cleanedRemote.forEach((tag) => {
+        const trimmed = tag.trim().toLowerCase();
+        if (trimmed && !seen.has(trimmed)) {
+          seen.add(trimmed);
+          normalized.push(trimmed);
+        }
+      });
+      normalized.sort((a, b) => a.localeCompare(b));
+      merged[trackId] = normalized;
     } else {
       // Union merge: combine local and remote, deduplicate
       const localTags = merged[trackId];
