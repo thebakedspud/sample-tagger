@@ -195,48 +195,61 @@ const { data, error } = await supabaseAdmin
    - Existing rows have one note per track
    - May need migration script or gradual rollout
 
-### Part 2: Fix `mergeRemoteNotes` Union Logic (SECONDARY)
+### Part 2: Fix `mergeRemoteNotes` Union Logic (IMPLEMENTED ✅)
 
 **File:** `src/utils/notesTagsData.js`
 
 Once the server returns multiple notes per track, the merge function needs to union them properly.
 
-**Before:**
-```javascript
-if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
-  merged[trackId] = cleaned;  // Only use remote if local empty
-}
-```
+**Changes made:**
 
-**After:**
+1. **Added `id` field to `NoteEntry` type** - Server-assigned UUID is now preserved
+2. **Updated `normalizeNoteEntry`** - Preserves `id` field from server responses
+3. **Updated `groupRemoteNotes`** - Passes `id` through when building note entries
+4. **Implemented `getNoteSignature`** - Content-based deduplication using `body + createdAt + timestampMs`
+5. **Rewrote `mergeRemoteNotes`** - Now performs union merge with deduplication
+
+**Key implementation detail:** We use content-based signatures instead of ID-based deduplication because local notes don't have IDs until synced. The signature `body\0createdAt\0timestampMs` uniquely identifies a note's content.
+
+**After (actual implementation):**
 ```javascript
-if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
-  merged[trackId] = cleanedRemote;
-} else {
-  // Union merge with deduplication
-  const localNotes = merged[trackId];
-  const combined = [...localNotes];
-  
-  cleanedRemote.forEach((remoteNote) => {
-    const isDuplicate = localNotes.some((localNote) => 
-      localNote.id === remoteNote.id  // Use note ID for deduplication
-    );
-    if (!isDuplicate) {
-      combined.push(remoteNote);
+function getNoteSignature(note) {
+  const body = note.body || ''
+  const createdAt = note.createdAt || 0
+  const timestampMs = note.timestampMs ?? ''
+  return `${body}\0${createdAt}\0${timestampMs}`
+}
+
+export function mergeRemoteNotes(localMap, remoteMap) {
+  const merged = cloneNotesMap(localMap);
+  Object.entries(remoteMap).forEach(([trackId, remoteNotes]) => {
+    const cleanedRemote = normalizeNotesList(remoteNotes);
+    if (cleanedRemote.length === 0) return;
+    
+    if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
+      merged[trackId] = cleanedRemote;
+    } else {
+      const localNotes = merged[trackId];
+      const seenSignatures = new Set(localNotes.map(getNoteSignature));
+      const combined = [...localNotes];
+      
+      cleanedRemote.forEach((remoteNote) => {
+        const sig = getNoteSignature(remoteNote);
+        if (!seenSignatures.has(sig)) {
+          seenSignatures.add(sig);
+          combined.push(remoteNote);
+        }
+      });
+      
+      combined.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      merged[trackId] = combined;
     }
   });
-  
-  combined.sort((a, b) => {
-    const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return aTime - bTime;
-  });
-  
-  merged[trackId] = combined;
+  return merged;
 }
 ```
 
-### Part 3: Fix Sync Effect Dependencies (SECONDARY)
+### Part 3: Fix Sync Effect Dependencies (IMPLEMENTED ✅)
 
 **File:** `src/features/playlist/PlaylistProvider.jsx`
 
@@ -295,11 +308,15 @@ useEffect(() => {
 | Phase | Change | Priority | Risk | Status |
 |-------|--------|----------|------|--------|
 | **Phase 1** | Server append-only notes (INSERT not UPDATE) | Critical | Low | ✅ Committed |
-| **Phase 2a** | Sync effect anonId dependencies | Medium | Low | ✅ Uncommitted |
-| **Phase 2b** | Remove hasAnyLocalData guard | Critical | Low | ✅ Uncommitted |
-| **Phase 3** | Update `mergeRemoteNotes` for union | High | Low | ⬜ Pending |
+| **Phase 2a** | Sync effect anonId dependencies | Medium | Low | ✅ Committed |
+| **Phase 2b** | Remove hasAnyLocalData guard | Critical | Low | ✅ Committed |
+| **Phase 3** | Update `mergeRemoteNotes` for union | High | Low | ✅ Uncommitted |
+| **Phase 3b** | Update `mergeRemoteTags` for union | Medium | Low | ✅ Uncommitted |
+| **Phase 3c** | Fix `groupRemoteNotes` to union tags from multiple rows | Medium | Low | ✅ Uncommitted |
 | **Phase 4** | Client-side note ID for updates/deletes | Medium | Medium | ⬜ Pending |
 | **Phase 5** | Migration for existing data | High | Medium | ⬜ Pending |
+
+**Note:** Phases 4-5 are note-specific. Tags sync is complete with Phase 3b+3c.
 
 **Note:** Phase 2b was a blocker discovered during testing - without it, the sync effect would skip sync entirely after restore.
 

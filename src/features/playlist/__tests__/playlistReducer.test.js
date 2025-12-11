@@ -529,41 +529,67 @@ describe('playlistReducer', () => {
   })
 
   describe('REMOTE_DATA_MERGE', () => {
-    it('merges remote notes only when local is empty', () => {
+    it('performs union merge of local and remote notes (deduplicates by content)', () => {
+      const localNote = { body: 'local note', createdAt: 1000 }
+      const remoteNote1 = { body: 'remote note', createdAt: 2000 }
+      const remoteNote2 = { body: 'remote note 2', createdAt: 3000 }
+      
       const state = {
         ...initialPlaylistState,
         tracks: [{ id: 't1' }, { id: 't2' }],
-        notesByTrack: { t1: ['local note'] }
+        notesByTrack: { t1: [localNote] }
       }
 
       const remoteNotes = {
-        t1: ['remote note'],
-        t2: ['remote note 2']
+        t1: [remoteNote1],  // Different from local - should be added
+        t2: [remoteNote2]   // No local - should be added
       }
 
       const action = playlistActions.mergeRemoteData(remoteNotes, {})
       const next = playlistReducer(state, action)
 
-      // Local note preserved
-      expectBodies(next.notesByTrack.t1, ['local note'])
+      // Local and remote notes merged (union)
+      expect(next.notesByTrack.t1).toHaveLength(2)
+      expectBodies(next.notesByTrack.t1, ['local note', 'remote note'])
       // Remote note added for t2 (no local)
       expectBodies(next.notesByTrack.t2, ['remote note 2'])
     })
 
-    it('remote tags always replace local tags', () => {
+    it('deduplicates notes with same content signature', () => {
+      const noteContent = { body: 'same note', createdAt: 1000, timestampMs: 5000 }
+      const localNote = { ...noteContent }
+      const remoteNote = { ...noteContent, id: 'server-uuid' }  // Same content, different object
+      
       const state = {
         ...initialPlaylistState,
         tracks: [{ id: 't1' }],
-        tagsByTrack: { t1: ['local-tag'] }
+        notesByTrack: { t1: [localNote] }
       }
 
-      const remoteTags = { t1: ['remote-tag'] }
+      const remoteNotes = { t1: [remoteNote] }
+
+      const action = playlistActions.mergeRemoteData(remoteNotes, {})
+      const next = playlistReducer(state, action)
+
+      // Should deduplicate - only 1 note
+      expect(next.notesByTrack.t1).toHaveLength(1)
+      expectBodies(next.notesByTrack.t1, ['same note'])
+    })
+
+    it('performs union merge of local and remote tags', () => {
+      const state = {
+        ...initialPlaylistState,
+        tracks: [{ id: 't1' }],
+        tagsByTrack: { t1: ['local-tag', 'shared-tag'] }
+      }
+
+      const remoteTags = { t1: ['remote-tag', 'shared-tag'] }
 
       const action = playlistActions.mergeRemoteData({}, remoteTags)
       const next = playlistReducer(state, action)
 
-      // Remote tags win (canonical source)
-      expect(next.tagsByTrack.t1).toEqual(['remote-tag'])
+      // Union merge: local + remote, deduplicated, sorted
+      expect(next.tagsByTrack.t1).toEqual(['local-tag', 'remote-tag', 'shared-tag'])
     })
 
     it('updates tracks with merged notes and tags', () => {

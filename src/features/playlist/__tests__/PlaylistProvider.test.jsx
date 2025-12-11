@@ -271,7 +271,15 @@ describe('PlaylistProvider', () => {
         clearTimeoutSpy.mockRestore()
       }
     })
-    it('skips fetch when there are no local tracks', async () => {
+
+    it('runs fetch even when there are no local tracks (needed for recovery restore)', async () => {
+      const mockResponse = /** @type {Response} */ (/** @type {unknown} */ ({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ notes: [] })
+      }))
+      mockedApiFetch.mockResolvedValue(mockResponse)
+      mockedGroupRemoteNotes.mockReturnValue({ notes: {}, tags: {} })
+
       function TestChild() {
         return <div>Test</div>
       }
@@ -285,10 +293,11 @@ describe('PlaylistProvider', () => {
         </PlaylistStateProvider>
       )
 
-      // Wait a bit to ensure no fetch happens
+      // Wait for the deferred sync to run
       await new Promise(resolve => setTimeout(resolve, 50))
       
-      expect(mockedApiFetch).not.toHaveBeenCalled()
+      // Sync should run even with no local tracks - needed for recovery restore
+      expect(mockedApiFetch).toHaveBeenCalledWith('/api/db/notes', expect.any(Object))
     })
 
     it('merges remote data into state', async () => {

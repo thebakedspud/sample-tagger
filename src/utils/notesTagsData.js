@@ -20,6 +20,7 @@ import { MAX_TAG_LENGTH, MAX_TAGS_PER_TRACK, TAG_ALLOWED_RE } from '../features/
  * @property {number} createdAt
  * @property {number | null | undefined} [timestampMs]
  * @property {number | null | undefined} [timestampEndMs]
+ * @property {string | undefined} [id] - Server-assigned UUID (present after sync)
  */
 
 /** @typedef {Record<string, NoteEntry[]>} NotesByTrack */
@@ -92,6 +93,10 @@ function normalizeNoteEntry(value, fallbackTs) {
       if (typeof timestampEndMs === 'number' && timestampEndMs >= timestampMs) {
         entry.timestampEndMs = timestampEndMs
       }
+    }
+    // Preserve server-assigned id if present
+    if (typeof candidate.id === 'string' && candidate.id) {
+      entry.id = candidate.id
     }
     return entry
   }
@@ -397,6 +402,7 @@ export function groupRemoteNotes(rows) {
     if (body) {
       const note = normalizeNoteEntry(
         {
+          id: row.id,
           body,
           createdAt: row.createdAt ?? row.created_at,
           timestampMs: row.timestampMs ?? row.timestamp_ms,
@@ -411,45 +417,114 @@ export function groupRemoteNotes(rows) {
     }
     if ('tags' in row) {
       const cleaned = normalizeTagList(row.tags);
-      tagMap[trackId] = cleaned;
+      if (!Array.isArray(tagMap[trackId])) {
+        tagMap[trackId] = cleaned;
+      } else {
+        // Union tags from multiple rows (e.g., from different devices)
+        const existing = new Set(tagMap[trackId].map(t => t.toLowerCase()));
+        cleaned.forEach((tag) => {
+          if (!existing.has(tag.toLowerCase())) {
+            existing.add(tag.toLowerCase());
+            tagMap[trackId].push(tag);
+          }
+        });
+      }
     }
+  });
+  // Sort tags alphabetically for consistency
+  Object.keys(tagMap).forEach((trackId) => {
+    tagMap[trackId].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
   });
   return { notes: noteMap, tags: tagMap };
 }
 
 /**
- * Merges remote notes with local notes map
- * Remote notes only replace local notes if local entry is empty or missing
- * Preserves existing local notes to avoid data loss
+ * Generates a content-based signature for note deduplication.
+ * Uses body + createdAt + timestampMs to identify equivalent notes.
+ * @param {NoteEntry} note
+ * @returns {string}
+ */
+function getNoteSignature(note) {
+  const body = note.body || ''
+  const createdAt = note.createdAt || 0
+  const timestampMs = note.timestampMs ?? ''
+  return `${body}\0${createdAt}\0${timestampMs}`
+}
+
+/**
+ * Merges remote notes with local notes map using union merge.
+ * Combines both local and remote notes, deduplicating by content signature.
+ * Notes are sorted by createdAt after merging.
  *
  * @param {Record<string, NoteEntry[] | string[]>} localMap - Local notes map
  * @param {Record<string, NoteEntry[] | string[]>} remoteMap - Remote notes map from API
- * @returns {NotesByTrack} Merged notes map (local takes precedence if non-empty)
+ * @returns {NotesByTrack} Merged notes map (union of local and remote)
  */
 export function mergeRemoteNotes(localMap, remoteMap) {
   const merged = cloneNotesMap(localMap);
   Object.entries(remoteMap).forEach(([trackId, remoteNotes]) => {
-    const cleaned = normalizeNotesList(remoteNotes);
-    if (cleaned.length === 0) return;
+    const cleanedRemote = normalizeNotesList(remoteNotes);
+    if (cleanedRemote.length === 0) return;
+    
     if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
-      merged[trackId] = cleaned;
+      // No local notes - use remote directly
+      merged[trackId] = cleanedRemote;
+    } else {
+      // Union merge: combine local and remote, deduplicate by content
+      const localNotes = merged[trackId];
+      const seenSignatures = new Set(localNotes.map(getNoteSignature));
+      const combined = [...localNotes];
+      
+      cleanedRemote.forEach((remoteNote) => {
+        const sig = getNoteSignature(remoteNote);
+        if (!seenSignatures.has(sig)) {
+          seenSignatures.add(sig);
+          combined.push(remoteNote);
+        }
+      });
+      
+      // Sort by createdAt (oldest first)
+      combined.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      merged[trackId] = combined;
     }
   });
   return merged;
 }
 
 /**
- * Merges remote tags with local tags map
- * Remote tags always replace local tags (remote is canonical source)
+ * Merges remote tags with local tags map using union merge.
+ * Combines both local and remote tags, deduplicating by normalized tag string.
+ * Tags are sorted alphabetically after merging.
  *
  * @param {Record<string, string[]>} localMap - Local tags map
  * @param {Record<string, string[]>} remoteMap - Remote tags map from API
- * @returns {Record<string, string[]>} Merged tags map (remote always wins)
+ * @returns {Record<string, string[]>} Merged tags map (union of local and remote)
  */
 export function mergeRemoteTags(localMap, remoteMap) {
   const merged = cloneTagsMap(localMap);
   Object.entries(remoteMap).forEach(([trackId, remoteTags]) => {
-    merged[trackId] = Array.isArray(remoteTags) ? [...remoteTags] : [];
+    const cleanedRemote = Array.isArray(remoteTags) ? remoteTags : [];
+    if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
+      // No local tags - use remote directly
+      merged[trackId] = [...cleanedRemote];
+    } else {
+      // Union merge: combine local and remote, deduplicate
+      const localTags = merged[trackId];
+      const seen = new Set(localTags.map(t => t.toLowerCase()));
+      const combined = [...localTags];
+      
+      cleanedRemote.forEach((tag) => {
+        const normalized = tag.toLowerCase();
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          combined.push(tag);
+        }
+      });
+      
+      // Sort alphabetically
+      combined.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+      merged[trackId] = combined;
+    }
   });
   return merged;
 }
