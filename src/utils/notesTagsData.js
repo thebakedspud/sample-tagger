@@ -183,9 +183,9 @@ export function normalizeNotesList(value) {
     const normalized = normalizeNoteEntry(note, Date.now());
     if (normalized) {
       out.push({
+        ...(normalized.id ? { id: normalized.id } : {}),
         body: normalized.body,
         createdAt: normalized.createdAt,
-        ...(normalized.id ? { id: normalized.id } : {}),
         ...(normalized.timestampMs != null ? { timestampMs: normalized.timestampMs } : {}),
         ...(normalized.timestampMs != null &&
         typeof normalized.timestampEndMs === 'number' &&
@@ -469,9 +469,7 @@ export function mergeRemoteNotes(localMap, remoteMap) {
     
     if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
       // No local notes - use remote directly, sorted by createdAt
-      const sorted = [...cleanedRemote].sort(
-        (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
-      );
+      const sorted = [...cleanedRemote].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
       merged[trackId] = sorted;
     } else {
       // Union merge: combine local and remote, deduplicate by content
@@ -507,10 +505,11 @@ export function mergeRemoteNotes(localMap, remoteMap) {
 export function mergeRemoteTags(localMap, remoteMap) {
   const merged = cloneTagsMap(localMap);
   Object.entries(remoteMap).forEach(([trackId, remoteTags]) => {
-    const cleanedRemote = normalizeTagList(remoteTags);
+    const cleanedRemote = Array.isArray(remoteTags) ? remoteTags : [];
     if (!hasOwn(merged, trackId) || merged[trackId].length === 0) {
-      // No local tags - use remote directly (already normalized & sorted)
-      merged[trackId] = [...cleanedRemote];
+      // No local tags - use remote directly, sorted alphabetically
+      const sorted = [...cleanedRemote].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+      merged[trackId] = sorted;
     } else {
       // Union merge: combine local and remote, deduplicate
       const localTags = merged[trackId];
