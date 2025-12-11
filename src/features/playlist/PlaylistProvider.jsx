@@ -64,7 +64,7 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
   useEffect(() => {
     initialSyncStatusRef.current = 'idle'
     syncAttemptedRef.current = false
-  }, [anonContext?.deviceId])
+  }, [anonContext?.deviceId, anonContext?.anonId])
 
   const markSyncError = useCallback(
     (payload) => {
@@ -152,7 +152,7 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
 
   // Remote sync: fetch notes/tags from server on mount when anonId is available
   useEffect(() => {
-    if (!anonContext?.deviceId) return
+    if (!anonContext?.deviceId || !anonContext?.anonId) return
     if (initialSyncStatusRef.current === 'complete') return
     if (syncAttemptedRef.current) return
     const hasAnyLocalData =
@@ -285,7 +285,7 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
         cancelIdleCallback(deferredHandle)
       }
     }
-  }, [anonContext?.deviceId, initialState?.tracks, markSyncError, updateInitialSyncStatus])
+  }, [anonContext?.deviceId, anonContext?.anonId, initialState?.tracks, markSyncError, updateInitialSyncStatus])
 
   // Helper to send tag update to server
   const sendTagUpdate = useCallback(
