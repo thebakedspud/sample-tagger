@@ -253,19 +253,55 @@ useEffect(() => {
 }, [anonContext?.deviceId, anonContext?.anonId, initialState?.tracks, ...])  // Add anonId
 ```
 
+### Part 2b: Remove `hasAnyLocalData` Guard (BLOCKER FIX)
+
+**File:** `src/features/playlist/PlaylistProvider.jsx`
+
+The sync effect had a guard that checked `initialState?.tracks` to skip sync when there were no local tracks. **Problem:** `initialState` is a prop frozen at mount time. After recovery restore, the user lands on a screen with no tracks, so this guard blocked sync entirely.
+
+**Before (broken):**
+```javascript
+useEffect(() => {
+  if (!anonContext?.deviceId || !anonContext?.anonId) return
+  if (initialSyncStatusRef.current === 'complete') return
+  if (syncAttemptedRef.current) return
+  const hasAnyLocalData =
+    Array.isArray(initialState?.tracks) && initialState.tracks.length > 0
+  if (!hasAnyLocalData) {
+    updateInitialSyncStatus({ status: 'complete', lastError: null })
+    return  // ← Blocks sync after restore!
+  }
+  syncAttemptedRef.current = true
+  // ...
+```
+
+**After (fixed):**
+```javascript
+useEffect(() => {
+  if (!anonContext?.deviceId || !anonContext?.anonId) return
+  if (initialSyncStatusRef.current === 'complete') return
+  if (syncAttemptedRef.current) return
+  // No hasAnyLocalData check - sync should run after restore even with no local tracks
+  syncAttemptedRef.current = true
+  // ...
+```
+
+**Rationale:** An extra API call when there's no data to merge is harmless. The `syncAnnotations` function in `usePlaylistImportController.js` handles syncing after import anyway, but removing this guard ensures the sync effect doesn't incorrectly mark itself "complete" before any data exists.
+
 ---
 
 ## Implementation Order
 
-| Phase | Change | Priority | Risk |
-|-------|--------|----------|------|
-| **Phase 1** | Server note model refactor | Critical | High (breaking change) |
-| **Phase 2** | Client-side note ID generation | Critical | Medium |
-| **Phase 3** | Update `mergeRemoteNotes` for union | High | Low |
-| **Phase 4** | Fix sync effect dependencies | Medium | Low |
-| **Phase 5** | Migration for existing data | High | Medium |
+| Phase | Change | Priority | Risk | Status |
+|-------|--------|----------|------|--------|
+| **Phase 1** | Server append-only notes (INSERT not UPDATE) | Critical | Low | ✅ Committed |
+| **Phase 2a** | Sync effect anonId dependencies | Medium | Low | ✅ Uncommitted |
+| **Phase 2b** | Remove hasAnyLocalData guard | Critical | Low | ✅ Uncommitted |
+| **Phase 3** | Update `mergeRemoteNotes` for union | High | Low | ⬜ Pending |
+| **Phase 4** | Client-side note ID for updates/deletes | Medium | Medium | ⬜ Pending |
+| **Phase 5** | Migration for existing data | High | Medium | ⬜ Pending |
 
-**Note:** Parts 2-4 are low-value until Part 1 is complete, since the server currently only stores 1 note per track anyway.
+**Note:** Phase 2b was a blocker discovered during testing - without it, the sync effect would skip sync entirely after restore.
 
 ---
 

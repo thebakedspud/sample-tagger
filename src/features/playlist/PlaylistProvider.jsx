@@ -151,16 +151,12 @@ export function PlaylistStateProvider({ initialState, anonContext, onInitialSync
   )
 
   // Remote sync: fetch notes/tags from server on mount when anonId is available
+  // Note: We intentionally don't check for local data - after recovery restore,
+  // the user may have no local tracks yet but needs to fetch remote notes
   useEffect(() => {
     if (!anonContext?.deviceId || !anonContext?.anonId) return
     if (initialSyncStatusRef.current === 'complete') return
     if (syncAttemptedRef.current) return
-    const hasAnyLocalData =
-      Array.isArray(initialState?.tracks) && initialState.tracks.length > 0
-    if (!hasAnyLocalData) {
-      updateInitialSyncStatus({ status: 'complete', lastError: null })
-      return
-    }
     syncAttemptedRef.current = true
 
     let cancelled = false
